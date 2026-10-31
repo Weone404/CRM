@@ -547,11 +547,15 @@ def set_role(employee_id: str, r: RoleIn, emp=Depends(require_admin)):
 # ---------------------------------------------------------------- schools (organisations)
 @router.get("/schools")
 def schools(country: Optional[str] = None, status: Optional[str] = None, q: Optional[str] = None,
-            limit: int = 200, emp=Depends(require_member)):
+            region: Optional[str] = None, limit: int = 200, emp=Depends(require_member)):
     limit = max(1, min(limit, 500))
     where, args = ["o.deleted_at IS NULL"], []
     if country:
         where.append("o.country = %s"); args.append(country.upper()[:2])
+    if region == "__none__":
+        where.append("o.region IS NULL")
+    elif region:
+        where.append("o.region = %s"); args.append(region)
     if status:
         where.append("o.status = %s"); args.append(status)
     if q:
@@ -559,7 +563,7 @@ def schools(country: Optional[str] = None, status: Optional[str] = None, q: Opti
     with _SchemaGuard(), get_db() as conn:
         cur = conn.cursor()
         cur.execute(f"""
-            SELECT o.id, o.name, o.country, o.city, o.website_domain, o.status, o.rejection_reason, o.updated_at,
+            SELECT o.id, o.name, o.country, o.region, o.city, o.website_domain, o.status, o.rejection_reason, o.updated_at,
                    ra.authority_code, ra.classification, ra.approval_ref, ra.status AS approval_status, ra.checked_at,
                    qr.score, qr.recommended_action,
                    (SELECT count(*) FROM flightbridge.contact c WHERE c.org_id = o.id) AS contacts
@@ -569,7 +573,7 @@ def schools(country: Optional[str] = None, status: Optional[str] = None, q: Opti
          LEFT JOIN LATERAL (SELECT score, recommended_action FROM flightbridge.qualification_result x WHERE x.org_id = o.id
                              ORDER BY computed_at DESC LIMIT 1) qr ON true
              WHERE {' AND '.join(where)}
-             ORDER BY o.country, o.name LIMIT %s""", (*args, limit))
+             ORDER BY o.country, o.region NULLS LAST, o.name LIMIT %s""", (*args, limit))
         return _rows(cur)
 
 
@@ -594,12 +598,16 @@ def school_detail(org_id: str, emp=Depends(require_member)):
             "qualification": """SELECT score, breakdown, missing, risks, recommended_action, confidence, computed_at
                                   FROM flightbridge.qualification_result WHERE org_id=%s ORDER BY computed_at DESC LIMIT 1""",
             "pages": "SELECT url, http_status, robots_allowed, fetched_at FROM flightbridge.website_page WHERE org_id=%s ORDER BY fetched_at DESC LIMIT 30",
+            "profile": "SELECT summary, signals, evidence, generator, updated_at FROM flightbridge.organisation_profile WHERE org_id=%s",
+            "jobs": """SELECT id, kind, status, requested_at, finished_at, result FROM flightbridge.job_request
+                        WHERE org_id=%s ORDER BY requested_at DESC LIMIT 5""",
             "history": """SELECT at, actor_type, action, payload FROM flightbridge.audit_log
                            WHERE entity='organisation' AND entity_id=%s ORDER BY at DESC LIMIT 30""",
         }.items():
             cur.execute(sql, (org_id,))
             out[key] = _rows(cur)
         out["qualification"] = (out["qualification"] or [None])[0]
+        out["profile"] = (out["profile"] or [None])[0]
         return out
 
 
@@ -637,3 +645,127 @@ def verify_regulatory(org_id: str, approval_id: int, emp=Depends(require_member)
             raise HTTPException(status_code=404, detail="Regulatory record not found")
         _audit(cur, emp["id"], "regulatory_verified_by_human", "organisation", org_id, {"approval_id": approval_id})
     return {"status": "verified_by_human"}
+
+
+
+# ---------------------------------------------------------------- navigation: country > region
+@router.get("/regions")
+def regions(emp=Depends(require_member)):
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""SELECT country, region, count(*) AS total,
+                              count(*) FILTER (WHERE status='needs_human_review') AS needs_look,
+                              count(*) FILTER (WHERE status IN ('qualified','ready_for_outreach')) AS good_fit,
+                              count(*) FILTER (WHERE status IN ('contacted','interested','negotiation','partner')) AS in_contact
+                         FROM flightbridge.organisation WHERE deleted_at IS NULL
+                        GROUP BY 1, 2 ORDER BY 1, 2 NULLS LAST""")
+        rows = _rows(cur)
+    out = {}
+    for r in rows:
+        c = out.setdefault(r["country"], {"country": r["country"], "total": 0, "needs_look": 0, "regions": []})
+        c["total"] += r["total"]; c["needs_look"] += r["needs_look"]
+        c["regions"].append({k: r[k] for k in ("region", "total", "needs_look", "good_fit", "in_contact")})
+    return sorted(out.values(), key=lambda c: -c["total"])
+
+
+# ---------------------------------------------------------------- automation (worker status, Run now)
+JOB_KINDS = {"cycle", "research_school", "find_websites", "research_batch"}
+AUTOPILOT_KEYS = {"find_websites", "research", "qualify", "draft"}
+
+
+def _dispatch_github():
+    """Optional: start the GitHub Actions worker immediately instead of waiting for the next 15-minute run.
+    Needs FB_GITHUB_DISPATCH_TOKEN (fine-grained token, Actions: write on the FlightBridge repo) on the server."""
+    import os
+    token = os.environ.get("FB_GITHUB_DISPATCH_TOKEN")
+    if not token:
+        return False
+    import requests
+    repo = os.environ.get("FB_GITHUB_REPO", "nikkk07/FlightBridge-AI")
+    try:
+        r = requests.post(f"https://api.github.com/repos/{repo}/actions/workflows/flightbridge-worker.yml/dispatches",
+                          headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+                          json={"ref": "main", "inputs": {"trigger": "queue"}}, timeout=10)
+        return r.status_code == 204
+    except Exception:
+        return False
+
+
+@router.get("/automation")
+def automation_status(emp=Depends(require_member)):
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""SELECT id, started_at, finished_at, runner, trigger, status, stats, error
+                         FROM flightbridge.worker_run ORDER BY started_at DESC LIMIT 20""")
+        runs = _rows(cur)
+        cur.execute("""SELECT j.id, j.kind, j.status, j.requested_at, j.started_at, j.finished_at, j.result,
+                              o.name AS org_name, e.name AS requested_by_name
+                         FROM flightbridge.job_request j
+                    LEFT JOIN flightbridge.organisation o ON o.id = j.org_id
+                    LEFT JOIN employee e ON e.id = j.requested_by
+                        ORDER BY j.requested_at DESC LIMIT 20""")
+        jobs = _rows(cur)
+        cur.execute("""SELECT runner, max(started_at) AS last_seen FROM flightbridge.worker_run
+                        WHERE started_at > now() - interval '7 days' GROUP BY 1 ORDER BY 2 DESC""")
+        runners = _rows(cur)
+        cur.execute("""SELECT a.at, a.actor_type, a.action, a.entity, a.entity_id, a.payload, o.name AS org_name
+                         FROM flightbridge.audit_log a
+                    LEFT JOIN flightbridge.organisation o ON a.entity='organisation' AND o.id::text = a.entity_id
+                        WHERE a.action IN ('website_search','research_stored','qualified','draft_created','draft_skipped',
+                                           'organisation_created','school_qualified','school_rejected','regulatory_verified_by_human',
+                                           'approval_approved','approval_edited_approved','template_approved','kill_switch_set')
+                        ORDER BY a.at DESC LIMIT 40""")
+        activity = _rows(cur)
+        cur.execute("SELECT value FROM flightbridge.system_setting WHERE key='autopilot'")
+        row = cur.fetchone()
+        cur.execute("""SELECT count(*) FILTER (WHERE website_domain IS NULL AND status IN ('discovered','research_pending')),
+                              count(*) FILTER (WHERE website_domain IS NOT NULL AND status IN ('discovered','research_pending')),
+                              count(*) FILTER (WHERE status='research_completed')
+                         FROM flightbridge.organisation WHERE deleted_at IS NULL""")
+        backlog = dict(zip(("need_website", "need_research", "need_scoring"), cur.fetchone()))
+    return {"runs": runs, "jobs": jobs, "runners": runners, "activity": activity,
+            "autopilot": row[0] if row else None, "backlog": backlog}
+
+
+class RunIn(BaseModel):
+    kind: str
+    org_id: Optional[str] = None
+
+
+@router.post("/automation/run")
+def automation_run(r: RunIn, emp=Depends(require_member)):
+    if r.kind not in JOB_KINDS:
+        raise HTTPException(status_code=400, detail=f"kind must be one of {sorted(JOB_KINDS)}")
+    if r.kind == "research_school" and not r.org_id:
+        raise HTTPException(status_code=400, detail="org_id is required to research one school")
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""INSERT INTO flightbridge.job_request (kind, org_id, requested_by) VALUES (%s,%s,%s)
+                       ON CONFLICT DO NOTHING RETURNING id""", (r.kind, r.org_id, emp["id"]))
+        row = cur.fetchone()
+        if row:
+            _audit(cur, emp["id"], "run_requested", "job_request", row[0], {"kind": r.kind, "org_id": r.org_id})
+    started = _dispatch_github() if row else False
+    return {"queued": bool(row), "already_queued": not row, "started_now": started,
+            "message": ("Started." if started else "Queued. It runs on the next worker cycle (every 15 minutes, "
+                        "or within a minute while the Mac runner is on).") if row else "Already queued."}
+
+
+class AutopilotIn(BaseModel):
+    find_websites: bool
+    research: bool
+    qualify: bool
+    draft: bool
+    batch_size: int = Field(ge=1, le=50)
+
+
+@router.post("/automation/settings")
+def automation_settings(a: AutopilotIn, emp=Depends(require_admin)):
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""INSERT INTO flightbridge.system_setting (key, value, updated_at, updated_by)
+                       VALUES ('autopilot', %s::jsonb, now(), %s)
+                       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now(), updated_by=EXCLUDED.updated_by""",
+                    (json.dumps(a.model_dump()), emp["id"]))
+        _audit(cur, emp["id"], "autopilot_set", "system_setting", "autopilot", a.model_dump())
+    return a.model_dump()

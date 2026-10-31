@@ -241,3 +241,38 @@ def test_cors_allows_flightbridge_origins_only(app_and_db):
                        ("https://evil.example", False)]:
         r = client.options("/api/flightbridge/me", headers={"Origin": origin, "Access-Control-Request-Method": "GET"})
         assert (r.headers.get("access-control-allow-origin") == origin) is ok, origin
+
+
+def test_regions_tree_and_region_filter(app_and_db):
+    client, conn, *_ = app_and_db
+    conn.execute("INSERT INTO flightbridge.organisation (name, country, region, status) VALUES "
+                 "('Wales Aero', 'GB', 'Wales', 'research_pending'), ('Scot Aero', 'GB', 'Scotland', 'needs_human_review')")
+    tree = client.get("/api/flightbridge/regions").json()
+    gb = next(c for c in tree if c["country"] == "GB")
+    regs = {r["region"]: r for r in gb["regions"]}
+    assert regs["Wales"]["total"] >= 1 and regs["Scotland"]["needs_look"] >= 1
+    names = [s["name"] for s in client.get("/api/flightbridge/schools", params={"country": "GB", "region": "Wales"}).json()]
+    assert "Wales Aero" in names and "Scot Aero" not in names
+
+
+def test_run_now_queue_dedupes_and_autopilot_is_admin_only(app_and_db):
+    client, conn, who, admin, sales = app_and_db
+    org = conn.execute("INSERT INTO flightbridge.organisation (name, country, status) VALUES ('Queue Aero','GB','research_pending') "
+                       "RETURNING id").fetchone()[0]
+    r1 = client.post("/api/flightbridge/automation/run", json={"kind": "research_school", "org_id": str(org)}).json()
+    r2 = client.post("/api/flightbridge/automation/run", json={"kind": "research_school", "org_id": str(org)}).json()
+    assert r1["queued"] and r2["already_queued"]
+    assert client.post("/api/flightbridge/automation/run", json={"kind": "research_school"}).status_code == 400
+    st = client.get("/api/flightbridge/automation").json()
+    assert any(j["org_name"] == "Queue Aero" and j["status"] == "queued" for j in st["jobs"])
+    assert {"need_website", "need_research", "need_scoring"} <= set(st["backlog"])
+    body = {"find_websites": True, "research": True, "qualify": True, "draft": False, "batch_size": 5}
+    assert client.post("/api/flightbridge/automation/settings", json=body).status_code == 200
+    client.post(f"/api/flightbridge/team/{sales}/role", json={"role": "researcher"})
+    who["emp"] = {"id": sales, "department": "Sales"}
+    try:
+        assert client.post("/api/flightbridge/automation/settings", json=body).status_code == 403
+        assert client.post("/api/flightbridge/automation/run", json={"kind": "find_websites"}).json()["queued"]
+    finally:
+        who["emp"] = {"id": admin, "department": "Admin"}
+        client.post(f"/api/flightbridge/team/{sales}/role", json={"role": None})
