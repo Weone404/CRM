@@ -162,6 +162,10 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
+# FlightBridge partnership module (Admin only). Records human decisions; never sends email.
+from flightbridge_routes import router as flightbridge_router
+app.include_router(flightbridge_router)
+
 @app.get("/health")
 async def health_check():
     """Health endpoint for uptime monitoring - no auth, no DB query"""
