@@ -1,4 +1,4 @@
--- 036: FlightBridge partnership module schema.
+-- 037: FlightBridge partnership module schema.
 -- COPY of nikkk07/FlightBridge-AI db/migrations/001_flightbridge_schema.sql (canonical). Do not edit here;
 -- edit upstream and re-copy. sha256 of canonical file: 377b72f048d4093df8f8e5f0441b2d196fe7e4acdc0cee0a28b19fb62e777557
 -- Apply in the Supabase SQL editor like earlier migrations. Creates schema 'flightbridge' only; public tables untouched.

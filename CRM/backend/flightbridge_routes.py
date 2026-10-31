@@ -3,7 +3,7 @@
 This router NEVER sends email. Human decisions are recorded here; the FlightBridge central
 sending service (nikkk07/FlightBridge-AI) picks up approved tasks, runs the jurisdiction and
 content gates, and is the only component that can transmit. Requires migration
-036_flightbridge_schema.sql; until it is applied every endpoint returns 503.
+037_flightbridge_schema.sql and 038_flightbridge_templates_inbound.sql; until they are applied every endpoint returns 503.
 """
 import json
 from datetime import datetime, timedelta, timezone
@@ -43,7 +43,7 @@ class _SchemaGuard:
 
     def __exit__(self, exc_type, exc, tb):
         if exc_type and issubclass(exc_type, psycopg.errors.UndefinedTable):
-            raise HTTPException(status_code=503, detail="FlightBridge schema not installed (apply migration 036)")
+            raise HTTPException(status_code=503, detail="FlightBridge schema not installed (apply migrations 037 and 038)")
         return False
 
 

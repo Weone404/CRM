@@ -1,10 +1,10 @@
--- 037: FlightBridge templates, inbound processing, AI classification, follow-ups.
+-- 038: FlightBridge templates, inbound processing, AI classification, follow-ups.
 -- COPY of nikkk07/FlightBridge-AI db/migrations/002_templates_inbound_followups.sql (canonical). Do not edit here;
--- edit upstream and re-copy. sha256 of canonical file: 02b59a75568c03b3c4fd696921e2e9cf24c9fecb83c96c3617ce3c59f81c2c97
--- Apply AFTER 036 in the Supabase SQL editor. Additive; touches only schema 'flightbridge'.
+-- edit upstream and re-copy. sha256 of canonical file: 99fb5a18a6f898e48e2b7d17b6a132ca9a01e29e76a8d4bc0a1f386c2f387985
+-- Apply AFTER 037 in the Supabase SQL editor. Additive; touches only schema 'flightbridge'.
 
 -- FlightBridge 002: owner-pasted outreach templates, inbound processing, AI classification, follow-up settings.
--- Canonical source: nikkk07/FlightBridge-AI db/migrations/002_templates_inbound_followups.sql (copied to CRM as 037).
+-- Canonical source: nikkk07/FlightBridge-AI db/migrations/002_templates_inbound_followups.sql (copied to CRM as 038).
 -- Additive and idempotent. Reversible: DROP TABLE flightbridge.outreach_template, flightbridge.ai_classification,
 --   flightbridge.webhook_event, flightbridge.mailbox_cursor CASCADE; ALTER TABLE ... DROP COLUMN (listed below).
 SET client_min_messages = warning;

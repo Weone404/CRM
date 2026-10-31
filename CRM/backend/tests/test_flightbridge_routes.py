@@ -1,4 +1,4 @@
-"""Tests for the FlightBridge CRM module. Needs a Postgres with migrations 001-036 applied:
+"""Tests for the FlightBridge CRM module. Needs a Postgres with migrations 001-038 applied:
     TEST_DATABASE_URL=postgresql://... python -m pytest CRM/backend/tests -q
 """
 import os
