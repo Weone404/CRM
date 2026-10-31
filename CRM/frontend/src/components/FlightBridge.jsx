@@ -168,6 +168,146 @@ function ApprovalDetail({ id, onDone, onBack }) {
   );
 }
 
+
+const KIND_LABEL = { initial: 'First email', followup_1: 'Follow-up 1', followup_2: 'Follow-up 2', followup_3: 'Follow-up 3' };
+
+function Templates() {
+  const [list, setList] = useState([]);
+  const [kind, setKind] = useState('initial');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => { try { setList(await call('/templates')); } catch (e) { showToast(e.message, 'error'); } }, []);
+  useEffect(() => { load(); }, [load]);
+  const current = list.filter((t) => t.kind === kind);
+  const approved = current.find((t) => t.status === 'approved');
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const r = await call('/templates', { method: 'POST', body: JSON.stringify({ kind, subject, body }) });
+      setResult(r); showToast(r.validation.ok ? `Saved version ${r.version}` : `Saved version ${r.version} with problems`, r.validation.ok ? 'success' : 'warning');
+      load();
+    } catch (e) { showToast(e.message, 'error'); } finally { setBusy(false); }
+  };
+  const approve = async (id) => {
+    try { await call(`/templates/${id}/approve`, { method: 'POST' }); showToast('Approved. New drafts will use this version.', 'success'); setResult(null); load(); }
+    catch (e) { showToast(e.message, 'error'); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="glass-card p-4 space-y-3">
+        <div className="flex flex-wrap gap-2 items-center justify-between">
+          <div className="font-semibold">Paste your outreach email</div>
+          <select id="fb-tpl-kind" className="glass-input px-2 py-1 text-sm" value={kind} onChange={(e) => { setKind(e.target.value); setResult(null); }}>
+            {Object.entries(KIND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </div>
+        <input id="fb-tpl-subject" className="glass-input w-full px-3 py-2" maxLength={150} placeholder="Subject, e.g. Student referral partnership with {{school_name}}" value={subject} onChange={(e) => setSubject(e.target.value)} />
+        <textarea id="fb-tpl-body" className="glass-input w-full px-3 py-2 font-mono text-sm" rows={12} placeholder={'Paste the email body here.\n\nYou may use {{school_name}}, {{city}} and {{country}}.\nDo not add an unsubscribe line or signature divider: the legal footer is added automatically.'} value={body} onChange={(e) => setBody(e.target.value)} />
+        <div className="flex flex-wrap gap-2 items-center">
+          <button disabled={busy || !subject.trim() || body.trim().length < 20} onClick={save} className="glass-btn px-4 py-2">Save and check</button>
+          <span className="text-xs text-glass-muted">Saving creates a new version. Only an approved version is used for drafts.</span>
+        </div>
+        {result && (
+          <div className={`p-3 rounded-lg text-sm ${result.validation.ok ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+            {result.validation.ok ? <div>Looks good. Version {result.version} is ready to approve.</div> : <div>Version {result.version} cannot be approved yet:</div>}
+            <Reasons list={result.validation.errors} />
+            {result.validation.warnings.length > 0 && <div className="mt-1 text-orange-700">{result.validation.warnings.join(' ')}</div>}
+            {result.validation.ok && <button onClick={() => approve(result.id)} className="glass-btn px-3 py-1 text-xs mt-2" style={{ background: '#22c55e' }}>Approve version {result.version}</button>}
+          </div>
+        )}
+      </div>
+      <div className="glass-card p-4">
+        <div className="font-semibold mb-2">{KIND_LABEL[kind]}: versions</div>
+        {!approved && <div className="text-sm text-orange-600 mb-2">No approved version. No {KIND_LABEL[kind].toLowerCase()} drafts will be created until one is approved.</div>}
+        {current.map((t) => (
+          <div key={t.id} className="border-t py-2 text-sm" style={{ borderColor: 'rgba(0,0,0,0.08)' }}>
+            <div className="flex justify-between gap-2"><b>v{t.version} · {t.subject}</b><Badge text={t.status} style={t.status === 'approved' ? 'bg-green-100 text-green-800' : undefined} /></div>
+            <div className="whitespace-pre-wrap text-glass-secondary mt-1">{t.body}</div>
+            {t.status === 'draft' && t.validation?.ok && <button onClick={() => approve(t.id)} className="glass-btn px-3 py-1 text-xs mt-1">Approve this version</button>}
+            {t.status === 'draft' && t.validation && !t.validation.ok && <Reasons list={t.validation.errors} />}
+          </div>
+        ))}
+        {current.length === 0 && <div className="text-sm text-glass-muted">Nothing saved yet.</div>}
+      </div>
+    </div>
+  );
+}
+
+function Inbox() {
+  const [rows, setRows] = useState([]);
+  const [risk, setRisk] = useState('');
+  const [unmatched, setUnmatched] = useState(false);
+  const load = useCallback(async () => {
+    try { setRows(await call(`/inbox?${risk ? `risk=${risk}&` : ''}${unmatched ? 'unmatched=true' : ''}`)); } catch (e) { showToast(e.message, 'error'); }
+  }, [risk, unmatched]);
+  useEffect(() => { load(); }, [load]);
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-2 items-center">
+        <select id="fb-inbox-risk" className="glass-input px-2 py-1 text-sm" value={risk} onChange={(e) => setRisk(e.target.value)}>
+          <option value="">All risk levels</option><option value="RED">RED</option><option value="AMBER">AMBER</option><option value="GREEN">GREEN</option>
+        </select>
+        <label className="text-sm flex items-center gap-1"><input id="fb-inbox-unmatched" type="checkbox" checked={unmatched} onChange={(e) => setUnmatched(e.target.checked)} /> Unmatched senders only</label>
+      </div>
+      {rows.map((m) => (
+        <div key={m.id} className="glass-card p-3">
+          <div className="flex justify-between gap-2 flex-wrap">
+            <div className="font-semibold">{m.org_name || 'Unknown sender'} · <span className="text-sm font-normal">{m.from_address}</span></div>
+            <div className="flex gap-1">{m.risk && <Badge text={m.risk} style={RISK_STYLE[m.risk]} />}{m.is_unsubscribe && <Badge text="unsubscribed" />}{m.is_bounce && <Badge text="bounce" />}{m.is_auto_reply && <Badge text="auto-reply" />}{m.injection && <Badge text="injection attempt" style="bg-red-100 text-red-800" />}</div>
+          </div>
+          <div className="text-sm">{m.subject}</div>
+          <div className="text-xs text-glass-muted">{new Date(m.occurred_at).toLocaleString()} · {m.intent || 'not classified'} · matched by {m.match_method}</div>
+          <div className="text-sm whitespace-pre-wrap mt-1 text-glass-secondary">{m.preview}</div>
+        </div>
+      ))}
+      {rows.length === 0 && <div className="text-center text-glass-muted py-10">No inbound email yet.</div>}
+    </div>
+  );
+}
+
+function Metrics() {
+  const [m, setM] = useState(null);
+  const [days, setDays] = useState('');
+  useEffect(() => {
+    (async () => {
+      try { setM(await call('/metrics')); const st = await call('/settings'); setDays((st.followup_schedule_days || []).join(', ')); }
+      catch (e) { showToast(e.message, 'error'); }
+    })();
+  }, []);
+  const saveDays = async () => {
+    try {
+      const arr = days.split(',').map((x) => parseInt(x.trim(), 10)).filter((x) => !Number.isNaN(x));
+      await call('/settings/followups', { method: 'POST', body: JSON.stringify({ days: arr }) }); showToast('Follow-up schedule saved', 'success');
+    } catch (e) { showToast(e.message, 'error'); }
+  };
+  if (!m) return <div className="text-glass-muted p-6">Loading…</div>;
+  const tile = (label, value, hint) => (<div className="glass-card p-3"><div className="text-xs text-glass-muted">{label}</div><div className="text-2xl font-bold" style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</div>{hint && <div className="text-xs text-glass-muted">{hint}</div>}</div>);
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {tile('Schools contacted', m.schools_contacted, 'first email actually sent')}
+        {tile('Schools replied', m.schools_replied, 'excludes auto-replies and bounces')}
+        {tile('Response rate', m.response_rate == null ? '—' : `${Math.round(m.response_rate * 100)}%`, 'replied ÷ contacted')}
+        {tile('Bounces', m.bounces)}
+        {tile('Waiting for you', m.approvals_open)}
+        {tile('Approved', m.approvals_approved, `${m.approvals_edited} edited by a person`)}
+        {tile('Rejected drafts', m.approvals_rejected)}
+        {tile('Replies by risk', `${m.inbound_by_risk.GREEN || 0} / ${m.inbound_by_risk.AMBER || 0} / ${m.inbound_by_risk.RED || 0}`, 'green / amber / red')}
+      </div>
+      <div className="text-xs text-glass-muted">Email opens are not tracked: a tracking pixel cannot prove an email was read.</div>
+      <div className="glass-card p-4 space-y-2">
+        <div className="font-semibold">Follow-up schedule</div>
+        <div className="text-sm text-glass-secondary">Days after the first email, e.g. 4, 9, 16. Follow-ups stop on any reply, opt-out or bounce, and each one still needs your approval.</div>
+        <div className="flex gap-2"><input id="fb-followup-days" className="glass-input px-3 py-1 text-sm" value={days} onChange={(e) => setDays(e.target.value)} /><button onClick={saveDays} className="glass-btn px-3 py-1 text-sm">Save</button></div>
+      </div>
+    </div>
+  );
+}
+
 export default function FlightBridge() {
   const [view, setView] = useState('queue');
   const [summary, setSummary] = useState(null);
@@ -229,13 +369,16 @@ export default function FlightBridge() {
         </div>
       )}
 
-      <div className="flex gap-2">
-        {['queue', 'outbound', 'suppression'].map((v) => (
-          <button key={v} onClick={() => setView(v)} className={`glass-tab-btn ${view === v ? 'active' : ''}`}>
-            {v === 'queue' ? 'Approval queue' : v === 'outbound' ? 'Outbound & checks' : 'Suppression'}
-          </button>
+      <div className="flex gap-2 overflow-x-auto whitespace-nowrap">
+        {[['queue', 'Approval queue'], ['templates', 'Email templates'], ['inbox', 'Inbox'], ['outbound', 'Outbound & checks'],
+          ['metrics', 'Metrics & settings'], ['suppression', 'Suppression']].map(([v, label]) => (
+          <button key={v} onClick={() => setView(v)} className={`glass-tab-btn ${view === v ? 'active' : ''}`}>{label}</button>
         ))}
       </div>
+
+      {view === 'templates' && <Templates />}
+      {view === 'inbox' && <Inbox />}
+      {view === 'metrics' && <Metrics />}
 
       {view === 'queue' && (
         <div className="space-y-2">

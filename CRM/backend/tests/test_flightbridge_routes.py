@@ -142,3 +142,46 @@ def test_missing_schema_returns_503(app_and_db):
         assert client.get("/health").status_code == 200        # rest of the CRM unaffected
     finally:
         conn.execute("ALTER SCHEMA flightbridge_hidden RENAME TO flightbridge")
+
+
+def test_template_paste_validate_and_approve(app_and_db):
+    client, conn, *_ = app_and_db
+    bad = client.post("/api/flightbridge/templates", json={"kind": "initial", "subject": "Hello",
+                                                            "body": "We are India's best academy with 3000+ pilots trained."}).json()
+    assert bad["validation"]["ok"] is False
+    assert client.post(f"/api/flightbridge/templates/{bad['id']}/approve").status_code == 400
+    good = client.post("/api/flightbridge/templates", json={"kind": "initial", "subject": "Partnership enquiry for {{school_name}}",
+                                                             "body": "Dear {{school_name}} team,\n\nWe teach DGCA ground subjects in Delhi."}).json()
+    assert good["validation"]["ok"] and good["version"] == bad["version"] + 1
+    assert client.post(f"/api/flightbridge/templates/{good['id']}/approve").json()["status"] == "approved"
+    assert client.post("/api/flightbridge/templates", json={"kind": "promo", "subject": "x", "body": "y" * 30}).status_code == 400
+    statuses = {t["id"]: t["status"] for t in client.get("/api/flightbridge/templates").json()}
+    assert statuses[good["id"]] == "approved"
+
+
+def test_webhook_requires_bearer_secret_and_dedupes(app_and_db, monkeypatch):
+    client, conn, *_ = app_and_db
+    monkeypatch.setenv("FB_HOSTINGER_WEBHOOK_SECRET", "s3cret")
+    body = '{"event":"message.received","uid":42}'
+    assert client.post("/api/flightbridge/webhooks/hostinger", content=body).status_code == 401
+    assert client.post("/api/flightbridge/webhooks/hostinger", content=body, headers={"Authorization": "Bearer wrong"}).status_code == 401
+    for _ in range(2):
+        assert client.post("/api/flightbridge/webhooks/hostinger", content=body,
+                           headers={"Authorization": "Bearer s3cret", "Content-Type": "application/json"}).status_code == 200
+    assert conn.execute("SELECT count(*) FROM flightbridge.webhook_event WHERE payload->>'uid'='42'").fetchone()[0] == 1
+
+
+def test_webhook_refused_when_secret_not_configured(app_and_db, monkeypatch):
+    client, *_ = app_and_db
+    monkeypatch.delenv("FB_HOSTINGER_WEBHOOK_SECRET", raising=False)
+    assert client.post("/api/flightbridge/webhooks/hostinger", content="{}", headers={"Authorization": "Bearer "}).status_code == 401
+
+
+def test_inbox_metrics_settings(app_and_db):
+    client, *_ = app_and_db
+    assert isinstance(client.get("/api/flightbridge/inbox").json(), list)
+    m = client.get("/api/flightbridge/metrics").json()
+    assert "response_rate" in m and "opens" not in m
+    assert client.post("/api/flightbridge/settings/followups", json={"days": [9, 4]}).status_code == 400
+    assert client.post("/api/flightbridge/settings/followups", json={"days": [3, 7, 14]}).json()["followup_schedule_days"] == [3, 7, 14]
+    assert client.get("/api/flightbridge/settings").json()["followup_schedule_days"] == [3, 7, 14]

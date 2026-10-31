@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import psycopg
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from auth import get_current_employee
@@ -318,3 +318,165 @@ def set_kill_switch(k: KillSwitch, emp=Depends(require_admin)):
         _audit(cur, emp["id"], "kill_switch_set", "system_setting", "outbound_kill_switch", {"engaged": k.engaged})
     return {"outbound_kill_switch": k.engaged,
             "note": "Releasing the kill switch alone sends nothing: DRY_RUN=false and OUTBOUND_ENABLED=true are also required."}
+
+
+# ---------------------------------------------------------------- outreach templates (the paste box)
+class TemplateIn(BaseModel):
+    kind: str
+    subject: str = Field(max_length=150)
+    body: str = Field(max_length=20000)
+
+
+@router.get("/templates")
+def list_templates(emp=Depends(require_admin)):
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""SELECT id, kind, version, subject, body, status, validation, created_at, approved_at
+                         FROM flightbridge.outreach_template ORDER BY kind, version DESC LIMIT 200""")
+        return _rows(cur)
+
+
+@router.post("/templates")
+def save_template(t: TemplateIn, emp=Depends(require_admin)):
+    from flightbridge_template_rules import KINDS, validate
+    if t.kind not in KINDS:
+        raise HTTPException(status_code=400, detail=f"kind must be one of {list(KINDS)}")
+    v = validate(t.subject, t.body)
+    if len(t.body.strip()) < 20 or not t.subject.strip():
+        raise HTTPException(status_code=400, detail="; ".join(v["errors"]) or "subject and body are required")
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT coalesce(max(version),0)+1 FROM flightbridge.outreach_template WHERE kind=%s", (t.kind,))
+        ver = cur.fetchone()[0]
+        cur.execute("""INSERT INTO flightbridge.outreach_template (kind, version, subject, body, validation, created_by)
+                       VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
+                    (t.kind, ver, t.subject.strip(), t.body.strip(), json.dumps(v), emp["id"]))
+        tid = cur.fetchone()[0]
+        _audit(cur, emp["id"], "template_saved", "outreach_template", tid, {"kind": t.kind, "version": ver, "ok": v["ok"]})
+    return {"id": str(tid), "version": ver, "validation": v}
+
+
+@router.post("/templates/{template_id}/approve")
+def approve_template(template_id: str, emp=Depends(require_admin)):
+    from flightbridge_template_rules import validate
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT kind, subject, body, status FROM flightbridge.outreach_template WHERE id=%s FOR UPDATE", (template_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Template not found")
+        v = validate(row[1], row[2])
+        if not v["ok"]:
+            raise HTTPException(status_code=400, detail="Fix before approving: " + "; ".join(v["errors"]))
+        cur.execute("UPDATE flightbridge.outreach_template SET status='archived' WHERE kind=%s AND status='approved'", (row[0],))
+        cur.execute("""UPDATE flightbridge.outreach_template SET status='approved', approved_by=%s, approved_at=now(), validation=%s
+                       WHERE id=%s""", (emp["id"], json.dumps(v), template_id))
+        _audit(cur, emp["id"], "template_approved", "outreach_template", template_id, {"kind": row[0]})
+    return {"status": "approved", "kind": row[0]}
+
+
+# ---------------------------------------------------------------- inbox
+@router.get("/inbox")
+def inbox(risk: Optional[str] = None, unmatched: bool = False, limit: int = 100, emp=Depends(require_admin)):
+    limit = max(1, min(limit, 300))
+    where, args = ["m.direction='inbound'"], []
+    if risk in ("GREEN", "AMBER", "RED"):
+        where.append("k.risk=%s"); args.append(risk)
+    if unmatched:
+        where.append("m.match_method='unmatched'")
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(f"""SELECT m.id, m.thread_id, m.from_address, m.subject, left(m.body_text, 600) AS preview, m.occurred_at,
+                               m.match_method, m.is_bounce, m.is_auto_reply, m.is_unsubscribe, k.intent, k.risk, k.confidence,
+                               k.signals, k.injection, o.name AS org_name, o.country
+                          FROM flightbridge.email_message m
+                     LEFT JOIN flightbridge.ai_classification k ON k.message_id = m.id
+                          JOIN flightbridge.email_thread t ON t.id = m.thread_id
+                     LEFT JOIN flightbridge.organisation o ON o.id = t.org_id
+                         WHERE {' AND '.join(where)} ORDER BY m.occurred_at DESC LIMIT %s""", (*args, limit))
+        return _rows(cur)
+
+
+# ---------------------------------------------------------------- settings
+class FollowupSettings(BaseModel):
+    days: list[int]
+
+
+@router.get("/settings")
+def get_settings(emp=Depends(require_admin)):
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT key, value FROM flightbridge.system_setting")
+        return {r[0]: r[1] for r in cur.fetchall()}
+
+
+@router.post("/settings/followups")
+def set_followups(f: FollowupSettings, emp=Depends(require_admin)):
+    if not (1 <= len(f.days) <= 3) or any(d < 2 or d > 60 for d in f.days) or f.days != sorted(set(f.days)):
+        raise HTTPException(status_code=400, detail="Give 1-3 increasing day offsets between 2 and 60, e.g. [4, 9, 16]")
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""INSERT INTO flightbridge.system_setting (key, value, updated_at, updated_by)
+                       VALUES ('followup_schedule_days', %s::jsonb, now(), %s)
+                       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now(), updated_by=EXCLUDED.updated_by""",
+                    (json.dumps(f.days), emp["id"]))
+        _audit(cur, emp["id"], "followup_schedule_set", "system_setting", "followup_schedule_days", {"days": f.days})
+    return {"followup_schedule_days": f.days}
+
+
+# ---------------------------------------------------------------- metrics (documented calculations)
+@router.get("/metrics")
+def metrics(emp=Depends(require_admin)):
+    """contacted = distinct orgs with >=1 SENT initial; replied = contacted orgs with >=1 non-auto, non-bounce inbound;
+    response_rate = replied / contacted. Opens are NOT tracked (a pixel cannot prove an email was read)."""
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            WITH sent AS (SELECT DISTINCT org_id FROM flightbridge.outbound_message WHERE kind='initial' AND status='sent'),
+                 replied AS (SELECT DISTINCT t.org_id FROM flightbridge.email_message m JOIN flightbridge.email_thread t ON t.id=m.thread_id
+                             WHERE m.direction='inbound' AND NOT m.is_auto_reply AND NOT m.is_bounce AND t.org_id IN (SELECT org_id FROM sent))
+            SELECT (SELECT count(*) FROM sent), (SELECT count(*) FROM replied),
+                   (SELECT count(*) FROM flightbridge.email_message WHERE direction='inbound'),
+                   (SELECT count(*) FROM flightbridge.email_message WHERE direction='inbound' AND is_bounce),
+                   (SELECT count(*) FROM flightbridge.approval_task WHERE status='open'),
+                   (SELECT count(*) FROM flightbridge.approval_task WHERE status IN ('approved','edited_approved')),
+                   (SELECT count(*) FROM flightbridge.approval_task WHERE status='edited_approved'),
+                   (SELECT count(*) FROM flightbridge.approval_task WHERE status='rejected')""")
+        r = cur.fetchone()
+        cur.execute("SELECT risk, count(*) FROM flightbridge.ai_classification GROUP BY 1")
+        by_risk = {k: v for k, v in cur.fetchall()}
+        cur.execute("SELECT o.country, count(DISTINCT o.id) FROM flightbridge.organisation o GROUP BY 1 ORDER BY 2 DESC")
+        by_country = {k: v for k, v in cur.fetchall()}
+    contacted, replied = r[0], r[1]
+    return {"schools_contacted": contacted, "schools_replied": replied,
+            "response_rate": round(replied / contacted, 3) if contacted else None,
+            "inbound_total": r[2], "bounces": r[3], "approvals_open": r[4], "approvals_approved": r[5],
+            "approvals_edited": r[6], "approvals_rejected": r[7], "inbound_by_risk": by_risk, "schools_by_country": by_country}
+
+
+# ---------------------------------------------------------------- Hostinger webhook (hint only; no auth dependency)
+@router.post("/webhooks/hostinger")
+async def hostinger_webhook(request: Request):
+    """Hostinger authenticates deliveries with `Authorization: Bearer <secret>` (SDK v1.18.2 model docs).
+    The event is stored once (dedupe on the payload hash) and the worker re-reads the mailbox over the API;
+    the payload itself is never trusted for content."""
+    import hashlib
+    import hmac
+    import os
+    secret = os.getenv("FB_HOSTINGER_WEBHOOK_SECRET", "")
+    auth = request.headers.get("authorization", "")
+    if not secret or not hmac.compare_digest(auth.encode(), f"Bearer {secret}".encode()):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    raw = await request.body()
+    if len(raw) > 256_000:
+        raise HTTPException(status_code=413, detail="payload too large")
+    try:
+        payload = json.loads(raw or b"{}")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid JSON")
+    key = hashlib.sha256(raw).hexdigest()
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""INSERT INTO flightbridge.webhook_event (provider, event_key, payload) VALUES ('hostinger', %s, %s)
+                       ON CONFLICT (provider, event_key) DO NOTHING""", (key, json.dumps(payload)))
+    return {"ok": True}
