@@ -167,6 +167,13 @@ def import_from_mongodb():
     client = get_mongo_client()
     if not client:
         return
+    # Runs every 60s; 150s lease keeps one instance as the importer while it lives.
+    # Taken after the client check so an instance without Mongo configured never
+    # holds the lease and blocks an instance that has it.
+    from job_lease import acquire_lease
+    if not acquire_lease('mongo_import', 150):
+        client.close()
+        return
     
     try:
         db_name = os.getenv('MONGODB_DATABASE', 'weoneaviation')

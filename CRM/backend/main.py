@@ -3447,6 +3447,11 @@ def run_attendance_retention():
     Summary upsert (step A) and delete (step C) run in ONE transaction so a
     failure can never delete rows without an archived summary.
     """
+    # Monthly cron fires on every instance at the same minute; the 6-hour lease
+    # lets exactly one of them run it.
+    from job_lease import acquire_lease
+    if not acquire_lease('attendance_retention', 6 * 3600):
+        return None
     cutoff = _attendance_retention_cutoff()
     try:
         with get_db() as conn:

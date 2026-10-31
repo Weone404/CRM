@@ -1,11 +1,15 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from database import get_db
 from keepalive import self_ping
+from job_lease import acquire_lease
 import logging
 
 logger = logging.getLogger(__name__)
 
 def check_sla_breaches():
+    # Runs every 5 min; 10-min lease keeps one instance as the runner while it lives.
+    if not acquire_lease('sla_check', 600):
+        return
     try:
         with get_db() as conn:
             cur = conn.cursor()

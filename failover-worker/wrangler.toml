@@ -1,0 +1,7 @@
+name = "crm-failover"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+[vars]
+# Highest priority first. Replace the Koyeb/Railway URLs after deploying them.
+BACKENDS = "https://crm-p8j8.onrender.com"
