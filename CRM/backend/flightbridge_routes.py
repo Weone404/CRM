@@ -31,10 +31,31 @@ HUMAN_FACTS = {
 DECISIONS = {"approve", "edit_approve", "reject", "more_research", "resolve", "reassign"}
 
 
+def _fb_role(emp: dict) -> Optional[str]:
+    """'admin' = CRM Admin department or permissions.flightbridge == 'admin';
+    'researcher' = permissions.flightbridge == 'researcher' (can verify schools/evidence, never approve or send)."""
+    if emp.get("department") == "Admin":
+        return "admin"
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT permissions FROM employee WHERE id = %s", (emp["id"],))
+        row = cur.fetchone()
+    perms = (row[0] if row else None) or {}
+    role = perms.get("flightbridge") if isinstance(perms, dict) else None
+    return role if role in ("admin", "researcher") else None
+
+
+def require_member(current_emp=Depends(get_current_employee)):
+    role = _fb_role(current_emp)
+    if role is None:
+        raise HTTPException(status_code=403, detail="FlightBridge access has not been granted to this account")
+    return {**current_emp, "fb_role": role}
+
+
 def require_admin(current_emp=Depends(get_current_employee)):
-    if current_emp.get("department") != "Admin":
-        raise HTTPException(status_code=403, detail="FlightBridge requires Admin department")
-    return current_emp
+    if _fb_role(current_emp) != "admin":
+        raise HTTPException(status_code=403, detail="This action needs a FlightBridge admin")
+    return {**current_emp, "fb_role": "admin"}
 
 
 class _SchemaGuard:
@@ -60,7 +81,7 @@ def _rows(cur):
 
 
 @router.get("/summary")
-def summary(emp=Depends(require_admin)):
+def summary(emp=Depends(require_member)):
     with _SchemaGuard(), get_db() as conn:
         cur = conn.cursor()
         out = {}
@@ -79,7 +100,7 @@ def summary(emp=Depends(require_admin)):
 
 
 @router.get("/approvals")
-def list_approvals(status: str = "open", emp=Depends(require_admin)):
+def list_approvals(status: str = "open", emp=Depends(require_member)):
     with _SchemaGuard(), get_db() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -96,7 +117,7 @@ def list_approvals(status: str = "open", emp=Depends(require_admin)):
 
 
 @router.get("/approvals/{task_id}")
-def approval_detail(task_id: str, emp=Depends(require_admin)):
+def approval_detail(task_id: str, emp=Depends(require_member)):
     with _SchemaGuard(), get_db() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -190,7 +211,7 @@ def decide(task_id: str, d: Decision, emp=Depends(require_admin)):
 
 
 @router.get("/outbound")
-def list_outbound(limit: int = 50, emp=Depends(require_admin)):
+def list_outbound(limit: int = 50, emp=Depends(require_member)):
     limit = max(1, min(limit, 200))
     with _SchemaGuard(), get_db() as conn:
         cur = conn.cursor()
@@ -210,7 +231,7 @@ def list_outbound(limit: int = 50, emp=Depends(require_admin)):
 
 
 @router.get("/outbound/{outbound_id}")
-def outbound_detail(outbound_id: str, emp=Depends(require_admin)):
+def outbound_detail(outbound_id: str, emp=Depends(require_member)):
     with _SchemaGuard(), get_db() as conn:
         cur = conn.cursor()
         cur.execute("SELECT id, status, kind, subject, body_text, ref_token, created_at FROM flightbridge.outbound_message WHERE id=%s",
@@ -242,7 +263,7 @@ class EvidenceIn(BaseModel):
 
 
 @router.post("/evidence")
-def add_evidence(e: EvidenceIn, emp=Depends(require_admin)):
+def add_evidence(e: EvidenceIn, emp=Depends(require_member)):
     if e.fact not in HUMAN_FACTS:
         raise HTTPException(status_code=400, detail=f"fact must be one of {sorted(HUMAN_FACTS)}")
     if not e.source_url.lower().startswith(("https://", "http://")):
@@ -260,7 +281,7 @@ def add_evidence(e: EvidenceIn, emp=Depends(require_admin)):
 
 
 @router.get("/suppressions")
-def list_suppressions(emp=Depends(require_admin)):
+def list_suppressions(emp=Depends(require_member)):
     with _SchemaGuard(), get_db() as conn:
         cur = conn.cursor()
         cur.execute("""SELECT s.id, s.scope, s.domain, s.reason, s.created_at, o.name AS org_name
@@ -328,7 +349,7 @@ class TemplateIn(BaseModel):
 
 
 @router.get("/templates")
-def list_templates(emp=Depends(require_admin)):
+def list_templates(emp=Depends(require_member)):
     with _SchemaGuard(), get_db() as conn:
         cur = conn.cursor()
         cur.execute("""SELECT id, kind, version, subject, body, status, validation, created_at, approved_at
@@ -377,7 +398,7 @@ def approve_template(template_id: str, emp=Depends(require_admin)):
 
 # ---------------------------------------------------------------- inbox
 @router.get("/inbox")
-def inbox(risk: Optional[str] = None, unmatched: bool = False, limit: int = 100, emp=Depends(require_admin)):
+def inbox(risk: Optional[str] = None, unmatched: bool = False, limit: int = 100, emp=Depends(require_member)):
     limit = max(1, min(limit, 300))
     where, args = ["m.direction='inbound'"], []
     if risk in ("GREEN", "AMBER", "RED"):
@@ -403,7 +424,7 @@ class FollowupSettings(BaseModel):
 
 
 @router.get("/settings")
-def get_settings(emp=Depends(require_admin)):
+def get_settings(emp=Depends(require_member)):
     with _SchemaGuard(), get_db() as conn:
         cur = conn.cursor()
         cur.execute("SELECT key, value FROM flightbridge.system_setting")
@@ -426,7 +447,7 @@ def set_followups(f: FollowupSettings, emp=Depends(require_admin)):
 
 # ---------------------------------------------------------------- metrics (documented calculations)
 @router.get("/metrics")
-def metrics(emp=Depends(require_admin)):
+def metrics(emp=Depends(require_member)):
     """contacted = distinct orgs with >=1 SENT initial; replied = contacted orgs with >=1 non-auto, non-bounce inbound;
     response_rate = replied / contacted. Opens are NOT tracked (a pixel cannot prove an email was read)."""
     with _SchemaGuard(), get_db() as conn:
@@ -445,7 +466,7 @@ def metrics(emp=Depends(require_admin)):
         r = cur.fetchone()
         cur.execute("SELECT risk, count(*) FROM flightbridge.ai_classification GROUP BY 1")
         by_risk = {k: v for k, v in cur.fetchall()}
-        cur.execute("SELECT o.country, count(DISTINCT o.id) FROM flightbridge.organisation o GROUP BY 1 ORDER BY 2 DESC")
+        cur.execute("SELECT o.country, count(DISTINCT o.id) FROM flightbridge.organisation o WHERE o.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC")
         by_country = {k: v for k, v in cur.fetchall()}
     contacted, replied = r[0], r[1]
     return {"schools_contacted": contacted, "schools_replied": replied,
@@ -480,3 +501,139 @@ async def hostinger_webhook(request: Request):
         cur.execute("""INSERT INTO flightbridge.webhook_event (provider, event_key, payload) VALUES ('hostinger', %s, %s)
                        ON CONFLICT (provider, event_key) DO NOTHING""", (key, json.dumps(payload)))
     return {"ok": True}
+
+
+
+# ---------------------------------------------------------------- identity & team (standalone app)
+@router.get("/me")
+def me(emp=Depends(require_member)):
+    return {"id": emp["id"], "name": emp.get("name"), "department": emp.get("department"), "role": emp["fb_role"]}
+
+
+@router.get("/team")
+def team(emp=Depends(require_admin)):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""SELECT id, name, department, coalesce(permissions->>'flightbridge', '') AS fb_role
+                         FROM employee WHERE active = true ORDER BY name""")
+        rows = _rows(cur)
+    for r in rows:
+        r["effective_role"] = "admin" if r["department"] == "Admin" else (r["fb_role"] or None)
+    return rows
+
+
+class RoleIn(BaseModel):
+    role: Optional[str] = None      # 'researcher' | 'admin' | None (remove)
+
+
+@router.post("/team/{employee_id}/role")
+def set_role(employee_id: str, r: RoleIn, emp=Depends(require_admin)):
+    if r.role not in (None, "researcher", "admin"):
+        raise HTTPException(status_code=400, detail="role must be researcher, admin or null")
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        if r.role is None:
+            cur.execute("UPDATE employee SET permissions = coalesce(permissions,'{}'::jsonb) - 'flightbridge' WHERE id=%s RETURNING id",
+                        (employee_id,))
+        else:
+            cur.execute("""UPDATE employee SET permissions = coalesce(permissions,'{}'::jsonb) || jsonb_build_object('flightbridge', %s::text)
+                           WHERE id=%s RETURNING id""", (r.role, employee_id))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Employee not found")
+        _audit(cur, emp["id"], "flightbridge_role_set", "employee", employee_id, {"role": r.role})
+    return {"employee_id": employee_id, "role": r.role}
+
+
+# ---------------------------------------------------------------- schools (organisations)
+@router.get("/schools")
+def schools(country: Optional[str] = None, status: Optional[str] = None, q: Optional[str] = None,
+            limit: int = 200, emp=Depends(require_member)):
+    limit = max(1, min(limit, 500))
+    where, args = ["o.deleted_at IS NULL"], []
+    if country:
+        where.append("o.country = %s"); args.append(country.upper()[:2])
+    if status:
+        where.append("o.status = %s"); args.append(status)
+    if q:
+        where.append("(o.name ILIKE %s OR o.website_domain ILIKE %s OR ra.approval_ref ILIKE %s)"); args += [f"%{q}%"] * 3
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(f"""
+            SELECT o.id, o.name, o.country, o.city, o.website_domain, o.status, o.rejection_reason, o.updated_at,
+                   ra.authority_code, ra.classification, ra.approval_ref, ra.status AS approval_status, ra.checked_at,
+                   qr.score, qr.recommended_action,
+                   (SELECT count(*) FROM flightbridge.contact c WHERE c.org_id = o.id) AS contacts
+              FROM flightbridge.organisation o
+         LEFT JOIN LATERAL (SELECT * FROM flightbridge.regulatory_approval r WHERE r.org_id = o.id
+                             ORDER BY r.checked_at DESC LIMIT 1) ra ON true
+         LEFT JOIN LATERAL (SELECT score, recommended_action FROM flightbridge.qualification_result x WHERE x.org_id = o.id
+                             ORDER BY computed_at DESC LIMIT 1) qr ON true
+             WHERE {' AND '.join(where)}
+             ORDER BY o.country, o.name LIMIT %s""", (*args, limit))
+        return _rows(cur)
+
+
+@router.get("/schools/{org_id}")
+def school_detail(org_id: str, emp=Depends(require_member)):
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM flightbridge.organisation WHERE id=%s", (org_id,))
+        rows = _rows(cur)
+        if not rows:
+            raise HTTPException(status_code=404, detail="School not found")
+        out = rows[0]
+        for key, sql in {
+            "identifiers": "SELECT scheme, value, source_url FROM flightbridge.organisation_identifier WHERE org_id=%s",
+            "regulatory": """SELECT id, authority_code, classification, approval_ref, courses, status, source_url, source_version,
+                                    checked_at, next_check_due FROM flightbridge.regulatory_approval WHERE org_id=%s""",
+            "contacts": """SELECT c.id, c.email, c.is_role_address, c.role, c.source_url, c.verification_level,
+                                  (SELECT json_agg(json_build_object('fact', e.fact, 'method', e.method, 'excerpt', e.excerpt,
+                                          'source_url', e.source_url, 'expires_at', e.expires_at) ORDER BY e.verified_at DESC)
+                                     FROM flightbridge.contact_fact_evidence e WHERE e.contact_id = c.id) AS evidence
+                             FROM flightbridge.contact c WHERE c.org_id=%s ORDER BY c.is_role_address DESC, c.email""",
+            "qualification": """SELECT score, breakdown, missing, risks, recommended_action, confidence, computed_at
+                                  FROM flightbridge.qualification_result WHERE org_id=%s ORDER BY computed_at DESC LIMIT 1""",
+            "pages": "SELECT url, http_status, robots_allowed, fetched_at FROM flightbridge.website_page WHERE org_id=%s ORDER BY fetched_at DESC LIMIT 30",
+            "history": """SELECT at, actor_type, action, payload FROM flightbridge.audit_log
+                           WHERE entity='organisation' AND entity_id=%s ORDER BY at DESC LIMIT 30""",
+        }.items():
+            cur.execute(sql, (org_id,))
+            out[key] = _rows(cur)
+        out["qualification"] = (out["qualification"] or [None])[0]
+        return out
+
+
+class ReviewIn(BaseModel):
+    decision: str                      # qualified | rejected | needs_human_review
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+
+@router.post("/schools/{org_id}/review")
+def review_school(org_id: str, r: ReviewIn, emp=Depends(require_member)):
+    if r.decision not in ("qualified", "rejected", "needs_human_review"):
+        raise HTTPException(status_code=400, detail="decision must be qualified, rejected or needs_human_review")
+    if r.decision == "rejected" and not (r.reason and r.reason.strip()):
+        raise HTTPException(status_code=400, detail="A reason is required to reject a school")
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""UPDATE flightbridge.organisation SET status=%s, rejection_reason=%s, updated_at=now()
+                       WHERE id=%s AND status NOT IN ('contacted','interested','negotiation','partner') RETURNING id""",
+                    (r.decision, r.reason.strip() if r.decision == "rejected" else None, org_id))
+        if not cur.fetchone():
+            raise HTTPException(status_code=409, detail="School not found or already in conversation")
+        _audit(cur, emp["id"], f"school_{r.decision}", "organisation", org_id, {"reason": r.reason, "by_role": emp["fb_role"]})
+    return {"status": r.decision}
+
+
+@router.post("/schools/{org_id}/regulatory/{approval_id}/verify")
+def verify_regulatory(org_id: str, approval_id: int, emp=Depends(require_member)):
+    """A person confirmed this record on the regulator's own site (needed for FAA / Transport Canada / CASA)."""
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""UPDATE flightbridge.regulatory_approval
+                          SET status='verified_by_human', checked_by=%s, checked_at=now(), next_check_due=now() + interval '90 days'
+                        WHERE id=%s AND org_id=%s RETURNING id""", (emp["id"], approval_id, org_id))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Regulatory record not found")
+        _audit(cur, emp["id"], "regulatory_verified_by_human", "organisation", org_id, {"approval_id": approval_id})
+    return {"status": "verified_by_human"}

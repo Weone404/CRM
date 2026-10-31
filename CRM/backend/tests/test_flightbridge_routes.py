@@ -185,3 +185,59 @@ def test_inbox_metrics_settings(app_and_db):
     assert client.post("/api/flightbridge/settings/followups", json={"days": [9, 4]}).status_code == 400
     assert client.post("/api/flightbridge/settings/followups", json={"days": [3, 7, 14]}).json()["followup_schedule_days"] == [3, 7, 14]
     assert client.get("/api/flightbridge/settings").json()["followup_schedule_days"] == [3, 7, 14]
+
+
+def test_researcher_role_can_review_but_not_approve(app_and_db):
+    client, conn, who, admin, sales = app_and_db
+    # Admin grants the research role to the Sales employee.
+    r = client.post(f"/api/flightbridge/team/{sales}/role", json={"role": "researcher"})
+    assert r.status_code == 200
+    assert any(m["id"] == sales and m["effective_role"] == "researcher" for m in client.get("/api/flightbridge/team").json())
+    task, _, org = _seed_task(conn)
+    ra = conn.execute("""INSERT INTO flightbridge.regulatory_approval (org_id, authority_code, classification, status, source_url,
+                          checked_at, next_check_due) VALUES (%s,'FAA','PART141_FAA','listed_in_register','https://faa.example',
+                          now(), now()) RETURNING id""", (org,)).fetchone()[0]
+    who["emp"] = {"id": sales, "department": "Sales", "name": "FB Sales"}
+    try:
+        assert client.get("/api/flightbridge/me").json()["role"] == "researcher"
+        assert client.get("/api/flightbridge/summary").status_code == 200
+        lst = client.get("/api/flightbridge/schools", params={"q": "Route Test"}).json()
+        assert any(s["id"] == org for s in lst)
+        det = client.get(f"/api/flightbridge/schools/{org}").json()
+        assert det["regulatory"][0]["status"] == "listed_in_register" and det["contacts"]
+        assert client.post(f"/api/flightbridge/schools/{org}/regulatory/{ra}/verify").json()["status"] == "verified_by_human"
+        assert client.post(f"/api/flightbridge/schools/{org}/review", json={"decision": "rejected"}).status_code == 400
+        assert client.post(f"/api/flightbridge/schools/{org}/review",
+                           json={"decision": "rejected", "reason": "Helicopter only"}).status_code == 200
+        # Admin-only actions are refused.
+        assert client.post(f"/api/flightbridge/approvals/{task}/decision", json={"action": "approve"}).status_code == 403
+        assert client.post("/api/flightbridge/kill-switch", json={"engaged": False}).status_code == 403
+        assert client.get("/api/flightbridge/team").status_code == 403
+        assert client.post(f"/api/flightbridge/team/{sales}/role", json={"role": "admin"}).status_code == 403
+    finally:
+        who["emp"] = {"id": admin, "department": "Admin"}
+    hist = client.get(f"/api/flightbridge/schools/{org}").json()["history"]
+    assert {"school_rejected", "regulatory_verified_by_human"} <= {h["action"] for h in hist}
+    assert client.post(f"/api/flightbridge/team/{sales}/role", json={"role": None}).status_code == 200
+    who["emp"] = {"id": sales, "department": "Sales"}
+    try:
+        assert client.get("/api/flightbridge/me").status_code == 403
+    finally:
+        who["emp"] = {"id": admin, "department": "Admin"}
+
+
+def test_review_refuses_schools_in_conversation(app_and_db):
+    client, conn, *_ = app_and_db
+    org = conn.execute("INSERT INTO flightbridge.organisation (name, country, status) VALUES ('Busy Aero','GB','contacted') "
+                       "RETURNING id").fetchone()[0]
+    assert client.post(f"/api/flightbridge/schools/{org}/review", json={"decision": "qualified"}).status_code == 409
+
+
+def test_cors_allows_flightbridge_origins_only(app_and_db):
+    client, *_ = app_and_db
+    for origin, ok in [("https://flying.weoneaviation.in", True),
+                       ("https://flightbridge-ai-abc123-weone404s-projects.vercel.app", True),
+                       ("https://flightbridge-ai-abc123-someone-else.vercel.app", False),
+                       ("https://evil.example", False)]:
+        r = client.options("/api/flightbridge/me", headers={"Origin": origin, "Access-Control-Request-Method": "GET"})
+        assert (r.headers.get("access-control-allow-origin") == origin) is ok, origin
