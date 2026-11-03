@@ -30,6 +30,8 @@ def app_and_db():
                          "('FB Sales', %s, 'x', 'Sales', %s) RETURNING id", (uuid.uuid4().hex[:10], "fbsales" + uuid.uuid4().hex[:6])).fetchone()[0]
     who = {"emp": {"id": str(admin), "department": "Admin", "name": "FB Admin"}}
     main.app.dependency_overrides[get_current_employee] = lambda: who["emp"]
+    from flightbridge_routes import get_fb_employee
+    main.app.dependency_overrides[get_fb_employee] = lambda: who["emp"]
     yield TestClient(main.app), conn, who, str(admin), str(sales)
     main.app.dependency_overrides.clear()
     conn.close()
@@ -377,3 +379,46 @@ def test_areas_tree_eligibility_decisions_and_area_search(app_and_db):
     q = client.post("/api/flightbridge/automation/run", json={"kind": "search_area", "area_id": aid})
     assert q.status_code == 200 and (q.json()["queued"] or q.json()["already_queued"])
     assert client.post("/api/flightbridge/automation/run", json={"kind": "search_area"}).status_code == 400
+
+
+def test_supabase_session_token_is_accepted_for_flightbridge(app_and_db, monkeypatch):
+    """CRM frontend in VITE_BACKEND=supabase mode sends a Supabase ES256 access token; Render verifies it via JWKS."""
+    import json as _json
+    import time
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from jose import jwk, jwt as jjwt
+    import main
+    import supabase_jwt
+    from auth import get_current_employee
+    client, conn, who, admin, sales = app_and_db
+    priv = ec.generate_private_key(ec.SECP256R1())
+    from cryptography.hazmat.primitives import serialization
+    pem = priv.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+    pub = jwk.construct(priv.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo).decode(), "ES256").to_dict()
+    pub.update({"kid": "test-kid", "alg": "ES256", "use": "sig"})
+    pub = {k: (v.decode() if isinstance(v, bytes) else v) for k, v in pub.items()}
+    monkeypatch.setenv("SUPABASE_URL", "https://testref.supabase.co")
+    monkeypatch.setattr(supabase_jwt, "_keys", lambda force=False: {"test-kid": pub})
+    auth_uid = str(uuid.uuid4())
+    conn.execute("UPDATE employee SET auth_user_id=%s WHERE id=%s", (auth_uid, admin))
+
+    def token(**over):
+        claims = {"sub": auth_uid, "aud": "authenticated", "iss": "https://testref.supabase.co/auth/v1",
+                  "exp": int(time.time()) + 600, "role": "authenticated", **over}
+        return jjwt.encode(claims, pem.decode(), algorithm="ES256", headers={"kid": "test-kid"})
+
+    saved = dict(main.app.dependency_overrides)
+    from flightbridge_routes import get_fb_employee
+    main.app.dependency_overrides.pop(get_current_employee, None)     # use the real auth path
+    main.app.dependency_overrides.pop(get_fb_employee, None)
+    try:
+        ok = client.get("/api/flightbridge/me", headers={"Authorization": f"Bearer {token()}"})
+        assert ok.status_code == 200 and ok.json()["role"] == "admin"
+        for bad in (token(aud="anon"), token(iss="https://evil.supabase.co/auth/v1"), token(exp=int(time.time()) - 10),
+                    token(sub=str(uuid.uuid4())), token()[:-4] + "AAAA"):
+            assert client.get("/api/flightbridge/me", headers={"Authorization": f"Bearer {bad}"}).status_code == 401
+        # the rest of the CRM API is NOT opened to Supabase tokens by this bridge
+        assert client.get("/api/employees", headers={"Authorization": f"Bearer {token()}"}).status_code == 401
+    finally:
+        main.app.dependency_overrides.clear()
+        main.app.dependency_overrides.update(saved)

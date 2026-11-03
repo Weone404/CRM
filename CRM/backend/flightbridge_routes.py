@@ -13,7 +13,34 @@ import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from auth import get_current_employee
+from fastapi.security import HTTPAuthorizationCredentials
+
+from auth import get_current_employee, security
+
+
+def get_fb_employee(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """The CRM's own login token, or (when the CRM frontend runs on Supabase) a Supabase Auth session token
+    mapped to the employee through employee.auth_user_id."""
+    try:
+        return get_current_employee(credentials)
+    except HTTPException:
+        pass
+    try:
+        from supabase_jwt import verify
+        claims = verify(credentials.credentials)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
+    with get_db() as conn:
+        cur = conn.cursor()
+        try:
+            cur.execute("""SELECT id, name, phone, email, department, active FROM employee
+                            WHERE auth_user_id = %s AND active = true""", (claims.get("sub"),))
+        except psycopg.errors.UndefinedColumn:
+            raise HTTPException(status_code=401, detail="Could not validate credentials")
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
+    return {"id": str(row[0]), "name": row[1], "phone": row[2], "email": row[3], "department": row[4], "active": row[5]}
 from database import get_db
 
 router = APIRouter(prefix="/api/flightbridge", tags=["flightbridge"])
@@ -45,14 +72,14 @@ def _fb_role(emp: dict) -> Optional[str]:
     return role if role in ("admin", "researcher") else None
 
 
-def require_member(current_emp=Depends(get_current_employee)):
+def require_member(current_emp=Depends(get_fb_employee)):
     role = _fb_role(current_emp)
     if role is None:
         raise HTTPException(status_code=403, detail="FlightBridge access has not been granted to this account")
     return {**current_emp, "fb_role": role}
 
 
-def require_admin(current_emp=Depends(get_current_employee)):
+def require_admin(current_emp=Depends(get_fb_employee)):
     if _fb_role(current_emp) != "admin":
         raise HTTPException(status_code=403, detail="This action needs a FlightBridge admin")
     return {**current_emp, "fb_role": "admin"}

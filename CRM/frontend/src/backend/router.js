@@ -161,6 +161,18 @@ export async function handleApiRequest(method, path, query, rawBody) {
   return detail(501, `Not moved to the new backend yet: ${method} ${path}`);
 }
 
+// FlightBridge stays on the Render API (its engine runs there). Its calls go to Render unchanged,
+// carrying the Supabase session token, which Render verifies (CRM/backend/supabase_jwt.py).
+export const isRenderPassthrough = (path) => path.startsWith('/api/flightbridge/');
+
+export async function withSupabaseAuth(init = {}) {
+  const { data } = supabase ? await supabase.auth.getSession() : { data: {} };
+  const token = data?.session?.access_token;
+  const headers = new Headers(init.headers || {});
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  return { ...init, headers };
+}
+
 // Clear the Supabase session too when the app logs out (App removes 'token').
 export async function signOutSupabase() {
   if (supabase) await supabase.auth.signOut().catch(() => {});
