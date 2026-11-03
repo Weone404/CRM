@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { login } from '../api';
+import { USE_SUPABASE } from '../backend/mode';
 
 export default function Login({ onLogin, onSwitchToEmployee, onSwitchToStudent }) {
   const [loginId, setLoginId] = useState('');
@@ -14,7 +15,7 @@ export default function Login({ onLogin, onSwitchToEmployee, onSwitchToStudent }
       localStorage.setItem('token', data.access_token);
       localStorage.setItem('employee', JSON.stringify(data.employee));
       onLogin(data.employee);
-    } catch (err) { setError('Invalid credentials'); }
+    } catch (err) { setError(USE_SUPABASE ? (err.message || 'Incorrect login details.') : 'Invalid credentials'); }
     finally { setLoading(false); }
   };
 
@@ -26,8 +27,8 @@ export default function Login({ onLogin, onSwitchToEmployee, onSwitchToStudent }
         <p className="text-sm mb-7 text-center" style={{ color: '#6e6e73' }}>CRM · Sign in to continue</p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-1.5" style={{ color: '#424245' }}>Login ID</label>
-            <input type="text" value={loginId} onChange={(e) => setLoginId(e.target.value)} className="glass-input w-full px-4 py-2.5" placeholder="Your login ID" autoComplete="username" required autoFocus />
+            <label className="block text-sm font-medium mb-1.5" style={{ color: '#424245' }}>{USE_SUPABASE ? 'Login ID, phone or email' : 'Login ID'}</label>
+            <input type="text" value={loginId} onChange={(e) => setLoginId(e.target.value)} className="glass-input w-full px-4 py-2.5" placeholder={USE_SUPABASE ? "Login ID, phone or email" : "Your login ID"} autoComplete="username" required autoFocus />
           </div>
           <div>
             <label className="block text-sm font-medium mb-1.5" style={{ color: '#424245' }}>Password</label>

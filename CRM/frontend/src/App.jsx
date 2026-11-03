@@ -8,6 +8,8 @@ import LoadingSpinner from './components/LoadingSpinner';
 import BirthdayPopup from './components/BirthdayPopup';
 import { apiFetch, fetchConfig, API_URL } from './api';
 import { SEGMENTS, segmentOf } from './utils/charter';
+import { signOutSupabase } from './backend/router';
+import { USE_SUPABASE } from './backend/mode';
 
 // Code-split everything that isn't needed for the first paint. Each of these
 // tabs/modals now ships as its own chunk fetched on demand, so a Sales user
@@ -24,6 +26,7 @@ const AddQuery = lazy(() => import('./components/AddQuery'));
 const StudentDirectory = lazy(() => import('./components/StudentDirectory'));
 const Attendance = lazy(() => import('./components/Attendance'));
 const FlightBridge = lazy(() => import('./components/FlightBridge'));
+const AIIntegrations = lazy(() => import('./components/AIIntegrations'));
 
 // Tabs the birthday popup is allowed to appear over: the landing tab plus the
 // two people-facing views. Anywhere else it would be an interruption.
@@ -145,8 +148,8 @@ export default function App() {
     await syncNow();
   };
 
-  const handleLogout = () => { localStorage.removeItem('token'); localStorage.removeItem('employee'); setEmployee(null); };
-  const handleStudentLogout = () => { localStorage.removeItem('student_token'); localStorage.removeItem('student'); setStudent(null); setShowStudentLogin(false); };
+  const handleLogout = () => { if (USE_SUPABASE) signOutSupabase(); localStorage.removeItem('token'); localStorage.removeItem('employee'); setEmployee(null); };
+  const handleStudentLogout = () => { if (USE_SUPABASE) signOutSupabase(); localStorage.removeItem('student_token'); localStorage.removeItem('student'); setStudent(null); setShowStudentLogin(false); };
 
   const handleChangePassword = async (e) => {
     e.preventDefault(); setPasswordError('');
@@ -178,6 +181,7 @@ export default function App() {
     canAccessDirectory && { id: 'team', label: 'Team' },
     department === 'Admin' && { id: 'policy', label: 'Policy Docs' },
     department === 'Admin' && { id: 'partnerships', label: 'FlightBridge AI' },
+    USE_SUPABASE && department === 'Admin' && { id: 'settings', label: '⚙️ Settings' },
     isEmployeeSession && { id: 'profile', label: 'My Profile' },
     isEmployeeSession && { id: 'leave', label: 'My Leave' },
   ].filter(Boolean);
@@ -279,6 +283,7 @@ export default function App() {
           {activeTab === 'team' && canAccessDirectory && <EmployeeDirectory />}
           {activeTab === 'policy' && department === 'Admin' && <PolicyDocs />}
           {activeTab === 'partnerships' && department === 'Admin' && <FlightBridge />}
+          {activeTab === 'settings' && USE_SUPABASE && department === 'Admin' && <AIIntegrations />}
           {activeTab === 'profile' && isEmployeeSession && <MyProfile />}
           {activeTab === 'leave' && isEmployeeSession && <LeaveCalendar employeeId={employee.id} />}
         </Suspense>

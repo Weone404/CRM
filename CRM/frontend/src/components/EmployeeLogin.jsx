@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { showToast } from '../utils/toast';
 import { API_URL } from '../api';
+import { USE_SUPABASE } from '../backend/mode';
 
 export default function EmployeeLogin({ onLogin }) {
   const [loginId, setLoginId] = useState('');
@@ -33,8 +34,10 @@ export default function EmployeeLogin({ onLogin }) {
           <p className="text-sm mt-2" style={{ color: '#6e6e73' }}>Sign in to access your workspace</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div><label className="block text-sm font-medium mb-2" style={{ color: '#424245' }}>Login ID</label><input type="text" value={loginId} onChange={(e) => setLoginId(e.target.value)} className="glass-input w-full px-4 py-3" placeholder="Enter your login ID" required autoFocus /></div>
-          <div><label className="block text-sm font-medium mb-2" style={{ color: '#424245' }}>PIN (if set)</label><input type="password" value={pin} onChange={(e) => setPin(e.target.value)} className="glass-input w-full px-4 py-3" placeholder="4-digit PIN (optional)" maxLength={4} pattern="[0-9]*" /></div>
+          <div><label className="block text-sm font-medium mb-2" style={{ color: '#424245' }}>{USE_SUPABASE ? 'Login ID, phone or email' : 'Login ID'}</label><input type="text" value={loginId} onChange={(e) => setLoginId(e.target.value)} className="glass-input w-full px-4 py-3" placeholder="Enter your login ID" required autoFocus /></div>
+          <div><label className="block text-sm font-medium mb-2" style={{ color: '#424245' }}>{USE_SUPABASE ? 'Password' : 'PIN (if set)'}</label>{USE_SUPABASE
+            ? <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} className="glass-input w-full px-4 py-3" placeholder="Your password (first time: your mobile number)" autoComplete="current-password" required />
+            : <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} className="glass-input w-full px-4 py-3" placeholder="4-digit PIN (optional)" maxLength={4} pattern="[0-9]*" />}</div>
           <button type="submit" disabled={loading} className="glass-btn w-full py-3">{loading ? 'Signing In...' : 'Sign In'}</button>
         </form>
         <div className="mt-6 pt-6 text-center" style={{ borderTop: '1px solid #e5e5ea' }}>

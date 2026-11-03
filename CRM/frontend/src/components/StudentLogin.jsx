@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { API_URL } from '../api';
+import { USE_SUPABASE } from '../backend/mode';
 
 export default function StudentLogin({ onLogin, onBack }) {
   const [mobile, setMobile] = useState('');
@@ -28,7 +29,9 @@ export default function StudentLogin({ onLogin, onBack }) {
         <p className="text-sm mb-7 text-center" style={{ color: '#6e6e73' }}>We One Aviation · Sign in to continue</p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div><label className="block text-sm font-medium mb-1.5" style={{ color: '#424245' }}>Mobile Number</label><input type="tel" inputMode="numeric" value={mobile} onChange={(e) => setMobile(e.target.value.replace(/\D/g, '').slice(0, 10))} className="glass-input w-full px-4 py-2.5 tracking-widest" placeholder="10-digit mobile number" maxLength={10} autoComplete="username" required autoFocus /></div>
-          <div><label className="block text-sm font-medium mb-1.5" style={{ color: '#424245' }}>PIN</label><input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))} className="glass-input w-full px-4 py-2.5 tracking-widest" placeholder="4-digit PIN" maxLength={4} autoComplete="current-password" required /></div>
+          <div><label className="block text-sm font-medium mb-1.5" style={{ color: '#424245' }}>{USE_SUPABASE ? 'Password' : 'PIN'}</label>{USE_SUPABASE
+            ? <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} className="glass-input w-full px-4 py-2.5" placeholder="Your password (first time: your mobile number)" autoComplete="current-password" required />
+            : <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))} className="glass-input w-full px-4 py-2.5 tracking-widest" placeholder="4-digit PIN" maxLength={4} autoComplete="current-password" required />}</div>
           {error && <div className="rounded-lg px-4 py-3 text-sm" style={{ background: '#fef2f2', border: '1px solid #fca5a5', color: '#991b1b' }}>{error}</div>}
           <button type="submit" disabled={loading} className="glass-btn w-full py-2.5">{loading ? 'Signing in… (server may take up to a minute to wake)' : 'Sign in'}</button>
         </form>
