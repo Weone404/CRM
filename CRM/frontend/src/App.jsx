@@ -62,6 +62,16 @@ export default function App() {
 
   const isEmployeeSession = employee?.is_employee_session === true;
   const department = employee?.department || '';
+  // FlightBridge AI: CRM admins, plus anyone given a FlightBridge role (research assistant) in FlightBridge AI > Team.
+  const [fbRole, setFbRole] = useState(null);
+  useEffect(() => {
+    if (!employee || department === 'Admin') { setFbRole(null); return; }
+    let live = true;
+    apiFetch('/api/flightbridge/me', { token: localStorage.getItem('token') })
+      .then((r) => (r.ok ? r.json() : null)).then((m) => { if (live) setFbRole(m?.role || null); }).catch(() => {});
+    return () => { live = false; };
+  }, [employee, department]);
+  const canAccessFlightBridge = department === 'Admin' || !!fbRole;
   const canAccessLeads = department === 'Admin' || department === 'Sales';
   const canAccessDirectory = department === 'Admin';
   const canAccessAllTasks = department === 'Admin';
@@ -180,7 +190,7 @@ export default function App() {
     canAccessCameras && { id: 'attendance', label: '📷 Attendance' },
     canAccessDirectory && { id: 'team', label: 'Team' },
     department === 'Admin' && { id: 'policy', label: 'Policy Docs' },
-    department === 'Admin' && { id: 'partnerships', label: 'FlightBridge AI' },
+    canAccessFlightBridge && { id: 'partnerships', label: 'FlightBridge AI' },
     USE_SUPABASE && department === 'Admin' && { id: 'settings', label: '⚙️ Settings' },
     isEmployeeSession && { id: 'profile', label: 'My Profile' },
     isEmployeeSession && { id: 'leave', label: 'My Leave' },
@@ -282,7 +292,7 @@ export default function App() {
           {activeTab === 'attendance' && canAccessCameras && <Attendance />}
           {activeTab === 'team' && canAccessDirectory && <EmployeeDirectory />}
           {activeTab === 'policy' && department === 'Admin' && <PolicyDocs />}
-          {activeTab === 'partnerships' && department === 'Admin' && <FlightBridge />}
+          {activeTab === 'partnerships' && canAccessFlightBridge && <FlightBridge />}
           {activeTab === 'settings' && USE_SUPABASE && department === 'Admin' && <AIIntegrations />}
           {activeTab === 'profile' && isEmployeeSession && <MyProfile />}
           {activeTab === 'leave' && isEmployeeSession && <LeaveCalendar employeeId={employee.id} />}

@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiFetch } from '../api';
 import { showToast } from '../utils/toast';
+import FlightBridgeSchools from './FlightBridgeSchools';
+import { Areas, Automation, Team } from './FlightBridgeOps';
 
 // FlightBridge partnership module (Admin only). This screen records human decisions.
 // It never sends email: the central FlightBridge service runs compliance checks and is the only sender.
@@ -10,8 +12,6 @@ const OUT_STYLE = {
   dry_run_rendered: 'bg-blue-100 text-blue-800', blocked: 'bg-red-100 text-red-800', needs_review: 'bg-yellow-100 text-yellow-800',
   sent: 'bg-green-100 text-green-800', send_unknown: 'bg-orange-100 text-orange-800', failed: 'bg-red-100 text-red-800',
 };
-// The full standalone workspace (schools by country/region, automation, team). Same login and data as the CRM.
-const FLIGHTBRIDGE_APP_URL = import.meta.env.VITE_FLIGHTBRIDGE_URL || 'https://flying.weoneaviation.in';
 
 const HUMAN_FACTS = [
   'message_relevant_to_business_role', 'no_refusal_statement_near_address', 'address_conspicuously_published',
@@ -384,7 +384,7 @@ function Settings() {
     try { const r = await call('/automation/run', { method: 'POST', body: JSON.stringify({ kind: 'cycle' }) }); showToast(r.message, 'success'); }
     catch (e) { showToast(e.message, 'error'); }
   };
-  if (error) return <div className="glass-card p-4 text-red-600">{error}{/migration|schema/i.test(error) ? ' — run FLIGHTBRIDGE_INSTALL.sql / migration 040 in Supabase.' : ''}</div>;
+  if (error) return <div className="glass-card p-4 text-red-600">{error}{/migration|schema/i.test(error) ? ' — the server is installing the tables; reload in a minute.' : ''}</div>;
   if (!data) return <div className="glass-card p-4 text-glass-muted">Loading settings…</div>;
   const keyMap = Object.fromEntries(data.keys.map((k) => [k.name, k]));
   const last = auto?.runs?.[0];
@@ -436,7 +436,8 @@ function Settings() {
 }
 
 export default function FlightBridge() {
-  const [view, setView] = useState('queue');
+  const [view, setView] = useState('schools');
+  const [me, setMe] = useState(null);
   const [summary, setSummary] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [statusFilter, setStatusFilter] = useState('open');
@@ -448,8 +449,8 @@ export default function FlightBridge() {
   const load = useCallback(async () => {
     try {
       setError(null);
-      const [s, t, o] = await Promise.all([call('/summary'), call(`/approvals?status=${statusFilter}`), call('/outbound?limit=50')]);
-      setSummary(s); setTasks(t); setOutbound(o);
+      const [m, s, t, o] = await Promise.all([call('/me'), call('/summary'), call(`/approvals?status=${statusFilter}`), call('/outbound?limit=50')]);
+      setMe(m); setSummary(s); setTasks(t); setOutbound(o);
     } catch (e) { setError(e.message); }
   }, [statusFilter]);
   useEffect(() => { load(); }, [load]);
@@ -474,32 +475,30 @@ export default function FlightBridge() {
     } catch (e) { showToast(e.message, 'error'); }
   };
 
-  const openApp = (
-    <a href={FLIGHTBRIDGE_APP_URL} target="_blank" rel="noopener noreferrer" className="glass-btn px-3 py-2 text-sm">
-      Open FlightBridge AI
-    </a>
-  );
   if (error) {
     return (
       <div className="glass-card p-6 space-y-3">
         <p className="text-red-600">FlightBridge unavailable: {error}</p>
-        {/schema not installed/i.test(error) && <p className="text-sm text-glass-muted">Run migrations 037, 038 and 039 in the Supabase SQL editor, then reload.</p>}
-        {openApp}
+        {/schema not installed/i.test(error) && <p className="text-sm text-glass-muted">The server is installing the FlightBridge tables. Reload in a minute.</p>}
+        <button className="glass-btn px-3 py-2 text-sm" onClick={load}>Retry</button>
       </div>
     );
   }
   if (selected) return <ApprovalDetail id={selected} onBack={() => setSelected(null)} onDone={() => { setSelected(null); load(); }} />;
   const killEngaged = summary?.kill_switches?.outbound_kill_switch !== false;
+  const isAdmin = me?.role === 'admin';
+  const VIEWS = [['schools', 'Schools'], ['areas', 'Areas'], ['automation', 'Automation'], ['queue', 'Approval queue'],
+    isAdmin && ['templates', 'Email templates'], ['inbox', 'Inbox'], ['outbound', 'Outbound & checks'], ['metrics', 'Metrics'],
+    isAdmin && ['suppression', 'Suppression'], isAdmin && ['team', 'Team'], isAdmin && ['settings', 'Settings']].filter(Boolean);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap justify-between items-center gap-2">
         <h2 className="text-xl font-bold text-glass-primary">FlightBridge AI</h2>
         <div className="flex flex-wrap gap-2">
-        {openApp}
-        <button onClick={toggleKill} className="glass-btn px-3 py-2 text-sm" style={{ background: killEngaged ? '#ef4444' : '#f59e0b' }}>
+        {isAdmin && <button onClick={toggleKill} className="glass-btn px-3 py-2 text-sm" style={{ background: killEngaged ? '#ef4444' : '#f59e0b' }}>
           {killEngaged ? '⛔ Outbound kill switch: ENGAGED' : '⚠️ Kill switch released'}
-        </button>
+        </button>}
         </div>
       </div>
 
@@ -513,16 +512,19 @@ export default function FlightBridge() {
       )}
 
       <div className="flex gap-2 overflow-x-auto whitespace-nowrap">
-        {[['queue', 'Approval queue'], ['templates', 'Email templates'], ['inbox', 'Inbox'], ['outbound', 'Outbound & checks'],
-          ['metrics', 'Metrics'], ['suppression', 'Suppression'], ['settings', 'Settings']].map(([v, label]) => (
+        {VIEWS.map(([v, label]) => (
           <button key={v} onClick={() => setView(v)} className={`glass-tab-btn ${view === v ? 'active' : ''}`}>{label}</button>
         ))}
       </div>
 
-      {view === 'templates' && <Templates />}
+      {view === 'areas' && <Areas isAdmin={isAdmin} />}
+      {view === 'automation' && <Automation isAdmin={isAdmin} />}
+      {view === 'team' && isAdmin && <Team meId={me?.id} />}
+      {view === 'templates' && isAdmin && <Templates />}
       {view === 'inbox' && <Inbox />}
       {view === 'metrics' && <Metrics />}
-      {view === 'settings' && <Settings />}
+      {view === 'settings' && isAdmin && <Settings />}
+      {view === 'schools' && <FlightBridgeSchools />}
 
       {view === 'queue' && (
         <div className="space-y-2">
@@ -555,7 +557,7 @@ export default function FlightBridge() {
         </div>
       )}
 
-      {view === 'suppression' && (
+      {view === 'suppression' && isAdmin && (
         <div className="glass-card p-4 space-y-2">
           <div className="text-sm text-glass-secondary">Suppression is permanent. Domain scope cannot be used for shared providers such as gmail.com.</div>
           <div className="flex flex-wrap gap-2">

@@ -773,21 +773,25 @@ def automation_status(emp=Depends(require_member)):
                          FROM flightbridge.worker_run ORDER BY started_at DESC LIMIT 20""")
         runs = _rows(cur)
         cur.execute("""SELECT j.id, j.kind, j.status, j.requested_at, j.started_at, j.finished_at, j.result,
-                              o.name AS org_name, e.name AS requested_by_name
+                              coalesce(o.name, ar.name) AS org_name, e.name AS requested_by_name
                          FROM flightbridge.job_request j
                     LEFT JOIN flightbridge.organisation o ON o.id = j.org_id
+                    LEFT JOIN flightbridge.area ar ON ar.id = j.area_id
                     LEFT JOIN employee e ON e.id = j.requested_by
                         ORDER BY j.requested_at DESC LIMIT 20""")
         jobs = _rows(cur)
         cur.execute("""SELECT runner, max(started_at) AS last_seen FROM flightbridge.worker_run
                         WHERE started_at > now() - interval '7 days' GROUP BY 1 ORDER BY 2 DESC""")
         runners = _rows(cur)
-        cur.execute("""SELECT a.at, a.actor_type, a.action, a.entity, a.entity_id, a.payload, o.name AS org_name
+        cur.execute("""SELECT a.at, a.actor_type, a.action, a.entity, a.entity_id, a.payload,
+                              coalesce(o.name, ar.name) AS org_name
                          FROM flightbridge.audit_log a
                     LEFT JOIN flightbridge.organisation o ON a.entity='organisation' AND o.id::text = a.entity_id
+                    LEFT JOIN flightbridge.area ar ON a.entity='area' AND ar.id::text = a.entity_id
                         WHERE a.action IN ('website_search','research_stored','qualified','draft_created','draft_skipped',
                                            'organisation_created','school_qualified','school_rejected','regulatory_verified_by_human',
-                                           'approval_approved','approval_edited_approved','template_approved','kill_switch_set')
+                                           'approval_approved','approval_edited_approved','template_approved','kill_switch_set',
+                                           'area_searched','eligibility_set')
                         ORDER BY a.at DESC LIMIT 40""")
         activity = _rows(cur)
         cur.execute("SELECT value FROM flightbridge.system_setting WHERE key='autopilot'")
@@ -828,17 +832,19 @@ def automation_run(r: RunIn, emp=Depends(require_member)):
             _audit(cur, emp["id"], "run_requested", "job_request", row[0], {"kind": r.kind, "org_id": r.org_id, "area_id": r.area_id})
     started = _dispatch_github() if row else False
     return {"queued": bool(row), "already_queued": not row, "started_now": started,
-            "message": ("Started." if started else "Queued. It runs on the next worker cycle (every 15 minutes, "
-                        "or within a minute while the Mac runner is on).") if row else "Already queued."}
+            "message": ("Started." if started else "Queued – starts within a minute.") if row else "Already queued."}
     # (the CRM-server engine polls the queue every 30 seconds, so in practice it starts within a minute)
 
 
 class AutopilotIn(BaseModel):
+    discover_areas: bool = True
     find_websites: bool
     research: bool
+    eligibility: bool = True
     qualify: bool
     draft: bool
     batch_size: int = Field(ge=1, le=50)
+    areas_per_cycle: int = Field(default=2, ge=1, le=10)
 
 
 @router.post("/automation/settings")

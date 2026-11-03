@@ -160,12 +160,7 @@ app.add_middleware(
         "https://pilotschool.in",
         "https://www.bookmycharter.in",
         "https://bookmycharter.in",
-        # FlightBridge standalone workspace
-        "https://flying.weoneaviation.in",
-        "https://flightbridge-ai.vercel.app",
     ],
-    # FlightBridge preview deployments in the We One Vercel team only
-    allow_origin_regex=r"https://flightbridge-ai-[a-z0-9-]+-weone404s-projects\.vercel\.app",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
