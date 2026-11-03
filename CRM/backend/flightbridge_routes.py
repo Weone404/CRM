@@ -91,7 +91,7 @@ class _SchemaGuard:
 
     def __exit__(self, exc_type, exc, tb):
         if exc_type and issubclass(exc_type, psycopg.errors.UndefinedTable):
-            raise HTTPException(status_code=503, detail="FlightBridge schema not installed (apply migrations 037 and 038)")
+            raise HTTPException(status_code=503, detail="FlightBridge schema not installed yet – the server installs it on start-up; retry in a minute")
         return False
 
 
@@ -602,6 +602,7 @@ def schools(country: Optional[str] = None, status: Optional[str] = None, q: Opti
             SELECT o.id, o.name, o.country, o.region, o.city, o.website_domain, o.status, o.rejection_reason, o.updated_at,
                    o.area_id, o.eligibility, o.org_kind,
                    (SELECT count(*) FROM flightbridge.contact_phone p WHERE p.org_id = o.id) AS phones,
+                   (SELECT array_agg(DISTINCT ch.kind) FROM flightbridge.contact_channel ch WHERE ch.org_id = o.id) AS channels,
                    ra.authority_code, ra.classification, ra.approval_ref, ra.status AS approval_status, ra.checked_at,
                    qr.score, qr.recommended_action,
                    (SELECT count(*) FROM flightbridge.contact c WHERE c.org_id = o.id) AS contacts
@@ -640,6 +641,8 @@ def school_detail(org_id: str, emp=Depends(require_member)):
             "phones": """SELECT phone, display, source, source_url, found_at FROM flightbridge.contact_phone WHERE org_id=%s
                           ORDER BY CASE source WHEN 'website' THEN 0 WHEN 'regulator' THEN 1 WHEN 'human' THEN 2 ELSE 3 END""",
             "area": "SELECT a.id, a.name, a.region, a.kind FROM flightbridge.area a JOIN flightbridge.organisation o ON o.area_id=a.id WHERE o.id=%s",
+            "channels": """SELECT kind, url, source_url, found_at FROM flightbridge.contact_channel WHERE org_id=%s
+                            ORDER BY CASE kind WHEN 'contact_form' THEN 0 WHEN 'linkedin' THEN 1 ELSE 2 END, url""",
             "jobs": """SELECT id, kind, status, requested_at, finished_at, result FROM flightbridge.job_request
                         WHERE org_id=%s ORDER BY requested_at DESC LIMIT 5""",
             "history": """SELECT at, actor_type, action, payload FROM flightbridge.audit_log
@@ -791,16 +794,18 @@ def automation_status(emp=Depends(require_member)):
                         WHERE a.action IN ('website_search','research_stored','qualified','draft_created','draft_skipped',
                                            'organisation_created','school_qualified','school_rejected','regulatory_verified_by_human',
                                            'approval_approved','approval_edited_approved','template_approved','kill_switch_set',
-                                           'area_searched','eligibility_set')
+                                           'area_searched','eligibility_set','contact_hunt')
                         ORDER BY a.at DESC LIMIT 40""")
         activity = _rows(cur)
         cur.execute("SELECT value FROM flightbridge.system_setting WHERE key='autopilot'")
         row = cur.fetchone()
         cur.execute("""SELECT count(*) FILTER (WHERE website_domain IS NULL AND status IN ('discovered','research_pending')),
                               count(*) FILTER (WHERE website_domain IS NOT NULL AND status IN ('discovered','research_pending')),
-                              count(*) FILTER (WHERE status='research_completed')
-                         FROM flightbridge.organisation WHERE deleted_at IS NULL""")
-        backlog = dict(zip(("need_website", "need_research", "need_scoring"), cur.fetchone()))
+                              count(*) FILTER (WHERE status='research_completed'),
+                              count(*) FILTER (WHERE website_domain IS NOT NULL AND status NOT IN ('discovered','research_pending')
+                                               AND NOT EXISTS (SELECT 1 FROM flightbridge.contact c WHERE c.org_id=o.id))
+                         FROM flightbridge.organisation o WHERE deleted_at IS NULL""")
+        backlog = dict(zip(("need_website", "need_research", "need_scoring", "no_email"), cur.fetchone()))
     return {"runs": runs, "jobs": jobs, "runners": runners, "activity": activity,
             "autopilot": row[0] if row else None, "backlog": backlog}
 
@@ -840,6 +845,7 @@ class AutopilotIn(BaseModel):
     discover_areas: bool = True
     find_websites: bool
     research: bool
+    find_contacts: bool = True
     eligibility: bool = True
     qualify: bool
     draft: bool

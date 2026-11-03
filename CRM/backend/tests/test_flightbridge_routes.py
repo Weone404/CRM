@@ -235,10 +235,11 @@ def test_review_refuses_schools_in_conversation(app_and_db):
     assert client.post(f"/api/flightbridge/schools/{org}/review", json={"decision": "qualified"}).status_code == 409
 
 
-def test_cors_allows_flightbridge_origins_only(app_and_db):
+def test_cors_allows_the_crm_only(app_and_db):
     client, *_ = app_and_db
-    for origin, ok in [("https://flying.weoneaviation.in", True),
-                       ("https://flightbridge-ai-abc123-weone404s-projects.vercel.app", True),
+    for origin, ok in [("https://crm-pi-self.vercel.app", True),
+                       ("https://flying.weoneaviation.in", False),            # standalone app dropped
+                       ("https://flightbridge-ai-abc123-weone404s-projects.vercel.app", False),
                        ("https://flightbridge-ai-abc123-someone-else.vercel.app", False),
                        ("https://evil.example", False)]:
         r = client.options("/api/flightbridge/me", headers={"Origin": origin, "Access-Control-Request-Method": "GET"})

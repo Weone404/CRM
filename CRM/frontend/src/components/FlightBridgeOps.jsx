@@ -119,13 +119,14 @@ const ACTION = {
   template_approved: () => 'Template approved',
   kill_switch_set: (p) => (p.engaged ? 'Sending paused' : 'Kill switch released'),
   area_searched: (p) => `Searched: ${p.new || 0} new, ${p.matched || 0} already known`,
+  contact_hunt: (p) => (p.contacts ? `Contact hunt: ${p.contacts} email${p.contacts === 1 ? '' : 's'} found` : `Contact hunt: no email on the website${p.channels ? ', links saved' : ''}`),
   eligibility_set: (p) => `Eligibility: ${{ eligible_verified: 'eligible', eligible_claimed: 'check needed', unqualified: 'unqualified', unknown: 'not checked' }[p.to] || p.to}`,
 };
-const GROUPABLE = ['organisation_created', 'website_search', 'research_stored', 'qualified', 'draft_created', 'eligibility_set', 'area_searched'];
+const GROUPABLE = ['organisation_created', 'website_search', 'research_stored', 'qualified', 'draft_created', 'eligibility_set', 'area_searched', 'contact_hunt'];
 const GROUP_LABEL = {
   organisation_created: (n) => `${n} new schools found`, website_search: (n) => `Searched ${n} websites`,
   research_stored: (n) => `Read ${n} school websites`, qualified: (n) => `Scored ${n} schools`,
-  draft_created: (n) => `Drafted ${n} emails`, eligibility_set: (n) => `Checked eligibility of ${n} schools`, area_searched: (n) => `Searched ${n} areas`,
+  draft_created: (n) => `Drafted ${n} emails`, contact_hunt: (n) => `Searched ${n} schools for contacts`, eligibility_set: (n) => `Checked eligibility of ${n} schools`, area_searched: (n) => `Searched ${n} areas`,
 };
 function groupActivity(items) {
   const out = [];
@@ -144,6 +145,8 @@ function summarise(st = {}) {
   n(r.find_websites?.found, 'website found', 'websites found');
   n(r.research?.researched, 'site read', 'sites read');
   n(r.research?.emails_found, 'email', 'emails');
+  n(r.find_contacts?.emails_found, 'email from contact hunt', 'emails from contact hunt');
+  n(r.find_contacts?.phones_found, 'phone from Google', 'phones from Google');
   n(r.eligibility?.eligible_verified, 'eligible', 'eligible');
   n(r.qualify?.qualified, 'good fit', 'good fit');
   n(r.draft?.drafts_created, 'draft', 'drafts');
@@ -195,10 +198,11 @@ export function Automation({ isAdmin }) {
         <button className="glass-btn px-3 py-2 text-sm" onClick={() => go('cycle')}>Run a cycle now</button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
         {stage(null, '1 · Search areas', 'Google search inside each area for schools.', 'discover_areas')}
         {stage(d.backlog.need_website, '2 · Find website', 'Kept only if the site names the school.', 'find_websites', 'find_websites')}
         {stage(d.backlog.need_research, '3 · Read website', 'Public emails, phones and facts from the school’s own site.', 'research', 'research_batch')}
+        {stage(d.backlog.no_email, '3b · Contact hunt', 'No email yet: contact, about and privacy pages read again; Google phone; LinkedIn and enquiry-form links.', 'find_contacts')}
         {stage(null, '4 · Eligibility', 'Checked against the country’s own standard.', 'eligibility')}
         {stage(d.backlog.need_scoring, '5 · Score fit', 'Unclear cases go to a person.', 'qualify')}
         {stage(null, '6 · Draft email', 'Eligible schools only, from your approved template.', 'draft')}
@@ -258,7 +262,7 @@ export function Automation({ isAdmin }) {
 }
 
 function Autopilot({ cfg, onSaved }) {
-  const [v, setV] = useState({ discover_areas: true, find_websites: true, research: true, eligibility: true, qualify: true, draft: true, batch_size: 8, areas_per_cycle: 2, ...cfg });
+  const [v, setV] = useState({ discover_areas: true, find_websites: true, research: true, find_contacts: true, eligibility: true, qualify: true, draft: true, batch_size: 8, areas_per_cycle: 2, ...cfg });
   useEffect(() => { setV((x) => ({ ...x, ...cfg })); }, [cfg]);
   const save = async () => {
     try { await call('/automation/settings', { method: 'POST', body: JSON.stringify({ ...v, batch_size: Number(v.batch_size), areas_per_cycle: Number(v.areas_per_cycle) }) }); showToast('Saved – applies from the next cycle', 'success'); onSaved(); }
@@ -271,7 +275,7 @@ function Autopilot({ cfg, onSaved }) {
       <h3 className="font-bold">Autopilot</h3>
       <p className="text-xs text-glass-muted mb-2">Steps that run by themselves each cycle. Sending is never automatic.</p>
       <div className="flex flex-wrap gap-x-5 gap-y-2 items-center">
-        {box('discover_areas', 'Search areas')}{box('find_websites', 'Find websites')}{box('research', 'Read websites')}
+        {box('discover_areas', 'Search areas')}{box('find_websites', 'Find websites')}{box('research', 'Read websites')}{box('find_contacts', 'Contact hunt')}
         {box('eligibility', 'Eligibility')}{box('qualify', 'Score fit')}{box('draft', 'Draft emails')}
         {num('areas_per_cycle', 'Areas per cycle', 10)}{num('batch_size', 'Schools per step', 50)}
         <button className="glass-btn px-3 py-1.5 text-sm" onClick={save}>Save</button>

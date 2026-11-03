@@ -23,6 +23,7 @@ const SECTIONS = [
 ];
 const SEC = Object.fromEntries(SECTIONS.map(([k, l, c]) => [k, { label: l, cls: c }]));
 const PHONE_SRC = { website: 'website', regulator: 'regulator register', google_places: 'Google', human: 'added by a person' };
+const CHANNEL = { contact_form: 'Enquiry form', linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', x: 'X', youtube: 'YouTube', whatsapp: 'WhatsApp' };
 
 function Tree({ regions, sel, onSel }) {
   const [open, setOpen] = useState({});
@@ -124,8 +125,13 @@ function Detail({ id, onChanged, onClose }) {
         <div className="font-semibold mb-1">Contacts</div>
         {(s.phones || []).map((p) => <div key={p.phone}><a className="font-semibold" href={`tel:${p.phone}`}>{p.display}</a> <span className="text-xs text-gray-500">from {PHONE_SRC[p.source] || p.source}</span></div>)}
         {(s.contacts || []).map((c) => <div key={c.id}><a className="font-semibold" href={`mailto:${c.email}`}>{c.email}</a> <span className="text-xs text-gray-500">{c.is_role_address ? 'shared inbox' : 'named person'} · <a className="underline" href={c.source_url} target="_blank" rel="noreferrer noopener">found here</a></span></div>)}
-        {!(s.phones || []).length && !(s.contacts || []).length && <div className="text-gray-500">No contact details found yet.</div>}
-        <div className="text-xs text-gray-500 mt-1">Emails come only from the school’s own website – never guessed.</div>
+        {(s.channels || []).length > 0 && (
+          <div className="flex flex-wrap gap-2 mt-2">
+            {s.channels.map((c) => <a key={c.url} className="glass-badge bg-blue-50 text-blue-700 underline" href={c.url} target="_blank" rel="noreferrer noopener">{CHANNEL[c.kind] || c.kind}</a>)}
+          </div>
+        )}
+        {!(s.phones || []).length && !(s.contacts || []).length && !(s.channels || []).length && <div className="text-gray-500">No contact details found yet.</div>}
+        <div className="text-xs text-gray-500 mt-1">Emails come only from the school’s own website – never guessed. LinkedIn and other pages are links for you to open; they aren’t scraped.</div>
       </div>
 
       {s.profile && (
@@ -204,7 +210,7 @@ export default function FlightBridgeSchools() {
                     <tr key={s.id} className={`border-t border-gray-100 cursor-pointer ${openId === s.id ? 'bg-blue-50' : 'hover:bg-gray-50'}`} onClick={() => setOpenId(s.id)}>
                       <td className="p-2"><div className="font-semibold">{s.name}{s.org_kind === 'ground_school' && <span className="glass-badge bg-purple-100 text-purple-800 ml-1">institute</span>}</div><div className="text-xs text-gray-500">{[s.city, s.region].filter((x, i, a) => x && a.indexOf(x) === i).join(', ')}{s.website_domain ? ` · ${s.website_domain}` : ''}</div></td>
                       <td className="p-2 text-xs">{s.approval_ref ? `${(s.authority_code || '').replace('_', ' ')} ${s.approval_ref}` : <span className={`glass-badge ${SEC[s.eligibility]?.cls}`}>{SEC[s.eligibility]?.label}</span>}</td>
-                      <td className="p-2 text-right text-xs whitespace-nowrap">{s.contacts} email · {s.phones || 0} phone</td>
+                      <td className="p-2 text-right text-xs whitespace-nowrap">{s.contacts} email · {s.phones || 0} phone{!Number(s.contacts) && (s.channels || []).includes('contact_form') ? ' · form' : ''}{(s.channels || []).includes('linkedin') ? ' · in' : ''}</td>
                     </tr>
                   ))}
                 </tbody>
