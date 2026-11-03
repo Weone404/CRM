@@ -1,10 +1,9 @@
 -- FlightBridge AI: one-step install/upgrade for the CRM database (= CRM migrations 037-041, in order).
--- Supabase project syytqcadmtgowckdnbqh -> SQL Editor -> New query -> paste ALL of this -> Run (nothing highlighted).
--- Every name is schema-qualified. Idempotent: safe to run again (already-installed parts are skipped).
+-- Optional since engine 1.2: the CRM server installs these itself on start-up. Idempotent; schema-qualified.
 BEGIN;
 
 -- ===== 001_flightbridge_schema.sql =====
--- FlightBridge AI schema (canonical source: nikkk07/FlightBridge-AI db/migrations/001_flightbridge_schema.sql)
+-- FlightBridge AI schema (canonical source: nikkk07/FlightBridge-AI flightbridge/migrations/001_flightbridge_schema.sql)
 -- Lives in its own Postgres schema so it can never collide with CRM tables in `public`.
 -- Additive only: creates schema `flightbridge`; touches nothing in `public` except FKs to public.employee(id).
 -- Idempotent: safe to re-run.
@@ -441,7 +440,7 @@ RESET client_min_messages;
 
 -- ===== 002_templates_inbound_followups.sql =====
 -- FlightBridge 002: owner-pasted outreach templates, inbound processing, AI classification, follow-up settings.
--- Canonical source: nikkk07/FlightBridge-AI db/migrations/002_templates_inbound_followups.sql (copied to CRM as 038).
+-- Canonical source: nikkk07/FlightBridge-AI flightbridge/migrations/002_templates_inbound_followups.sql (copied to CRM as 038).
 -- Additive and idempotent. Reversible: DROP TABLE flightbridge.outreach_template, flightbridge.ai_classification,
 --   flightbridge.webhook_event, flightbridge.mailbox_cursor CASCADE; ALTER TABLE ... DROP COLUMN (listed below).
 SET client_min_messages = warning;
@@ -527,7 +526,7 @@ RESET client_min_messages;
 
 -- ===== 003_automation.sql =====
 -- FlightBridge 003: automation engine — worker run log, run-now job queue, autopilot settings, website profiles.
--- Canonical source: nikkk07/FlightBridge-AI db/migrations/003_automation.sql (copied to CRM as 039).
+-- Canonical source: nikkk07/FlightBridge-AI flightbridge/migrations/003_automation.sql (copied to CRM as 039).
 -- Additive and idempotent. Reversible: DROP TABLE flightbridge.worker_run, flightbridge.job_request,
 --   flightbridge.organisation_profile; DELETE FROM flightbridge.system_setting WHERE key='autopilot'.
 SET client_min_messages = warning;
@@ -584,7 +583,7 @@ RESET client_min_messages;
 
 -- ===== 004_integrations.sql =====
 -- FlightBridge 004: API keys entered in the app (encrypted), integration settings, and a single-runner engine lock.
--- Canonical source: nikkk07/FlightBridge-AI db/migrations/004_integrations.sql (copied to CRM as 040).
+-- Canonical source: nikkk07/FlightBridge-AI flightbridge/migrations/004_integrations.sql (copied to CRM as 040).
 -- Every name is schema-qualified (the Supabase SQL Editor does not honour SET search_path). Idempotent.
 -- Reversible: DROP TABLE flightbridge.integration_secret, flightbridge.engine_lease;
 --   DELETE FROM flightbridge.system_setting WHERE key='integrations'.
@@ -619,7 +618,7 @@ RESET client_min_messages;
 
 -- ===== 005_areas_eligibility.sql =====
 -- FlightBridge 005: Country > State > Area discovery, per-country eligibility, phone numbers, new official registers.
--- Canonical source: nikkk07/FlightBridge-AI db/migrations/005_areas_eligibility.sql (copied to CRM as 041).
+-- Canonical source: nikkk07/FlightBridge-AI flightbridge/migrations/005_areas_eligibility.sql (copied to CRM as 041).
 -- Every name is schema-qualified. Idempotent. Additive (CHECK constraints are widened, never narrowed).
 -- Reversible: DROP TABLE flightbridge.contact_phone, flightbridge.area CASCADE;
 --   ALTER TABLE flightbridge.organisation DROP COLUMN area_id, DROP COLUMN eligibility, DROP COLUMN eligibility_reasons,
@@ -759,4 +758,3 @@ ON CONFLICT (country, region, name) DO NOTHING;
 RESET client_min_messages;
 
 COMMIT;
-SELECT to_regclass('flightbridge.organisation') AS m037, to_regclass('flightbridge.outreach_template') AS m038, to_regclass('flightbridge.worker_run') AS m039, to_regclass('flightbridge.integration_secret') AS m040, to_regclass('flightbridge.area') AS m041;

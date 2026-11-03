@@ -1,10 +1,10 @@
 -- 040: FlightBridge integrations (API keys saved in the app, encrypted), engine lock.
--- COPY of nikkk07/FlightBridge-AI db/migrations/004_integrations.sql (canonical). Do not edit here;
--- edit upstream and re-copy. sha256 of canonical file: 42e1f55e620df946daf2727407781b55f801d335c08734402509ad97cb5edacb
+-- COPY of nikkk07/FlightBridge-AI flightbridge/migrations/004_integrations.sql (canonical). Do not edit here;
+-- edit upstream and re-copy. sha256 of canonical file: 2cc7d60f5224dce8d8f7a20793d1f1c8a25ad87346fd0334b49768e5ae28482e
 -- Apply AFTER 039 in the Supabase SQL editor. Additive; touches only schema 'flightbridge'.
 
 -- FlightBridge 004: API keys entered in the app (encrypted), integration settings, and a single-runner engine lock.
--- Canonical source: nikkk07/FlightBridge-AI db/migrations/004_integrations.sql (copied to CRM as 040).
+-- Canonical source: nikkk07/FlightBridge-AI flightbridge/migrations/004_integrations.sql (copied to CRM as 040).
 -- Every name is schema-qualified (the Supabase SQL Editor does not honour SET search_path). Idempotent.
 -- Reversible: DROP TABLE flightbridge.integration_secret, flightbridge.engine_lease;
 --   DELETE FROM flightbridge.system_setting WHERE key='integrations'.

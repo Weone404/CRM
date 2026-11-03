@@ -66,10 +66,24 @@ def poll_queue():
         log.debug("FlightBridge queue poll skipped: %s", exc)
 
 
+def ensure_schema():
+    """Install FlightBridge's own database updates (idempotent, flightbridge schema only). Never raises."""
+    try:
+        s = _settings()
+        if s.database_url:
+            from flightbridge.db import ensure_schema as _ensure
+            log.info("FlightBridge schema: %s", _ensure(s.database_url))
+    except ImportError:
+        log.warning("FlightBridge engine not installed (requirements.txt: flightbridge)")
+    except Exception:
+        log.exception("FlightBridge schema update failed; the app keeps running and retries on the next cycle")
+
+
 def register(scheduler) -> None:
     """Add the FlightBridge jobs to the CRM's existing scheduler. Safe to call once at start-up."""
     if scheduler is None or os.environ.get("FLIGHTBRIDGE_ENGINE", "").lower() == "off":
         return
+    threading.Thread(target=ensure_schema, name="flightbridge-schema", daemon=True).start()
     scheduler.add_job(run_cycle, "interval", minutes=CYCLE_MINUTES, id="flightbridge_cycle", replace_existing=True,
                       max_instances=1, coalesce=True, next_run_time=datetime.now() + timedelta(minutes=2))
     scheduler.add_job(poll_queue, "interval", seconds=QUEUE_POLL_SECONDS, id="flightbridge_queue", replace_existing=True,

@@ -1,10 +1,10 @@
 -- 041: FlightBridge Country > State > Area discovery, per-country eligibility, phone numbers.
--- COPY of nikkk07/FlightBridge-AI db/migrations/005_areas_eligibility.sql (canonical). Do not edit here;
--- edit upstream and re-copy. sha256 of canonical file: d1012401d2aed7367e7f06ca38649ea956e25a9d77e106bf55b224cb69e5fec7
+-- COPY of nikkk07/FlightBridge-AI flightbridge/migrations/005_areas_eligibility.sql (canonical). Do not edit here;
+-- edit upstream and re-copy. sha256 of canonical file: 4e2ca94ec941f25a255fe45f2908e4b9f9477fd2129a4ccee4314b0ee03a1ee9
 -- Apply AFTER 040 in the Supabase SQL editor. Additive; touches only schema 'flightbridge'.
 
 -- FlightBridge 005: Country > State > Area discovery, per-country eligibility, phone numbers, new official registers.
--- Canonical source: nikkk07/FlightBridge-AI db/migrations/005_areas_eligibility.sql (copied to CRM as 041).
+-- Canonical source: nikkk07/FlightBridge-AI flightbridge/migrations/005_areas_eligibility.sql (copied to CRM as 041).
 -- Every name is schema-qualified. Idempotent. Additive (CHECK constraints are widened, never narrowed).
 -- Reversible: DROP TABLE flightbridge.contact_phone, flightbridge.area CASCADE;
 --   ALTER TABLE flightbridge.organisation DROP COLUMN area_id, DROP COLUMN eligibility, DROP COLUMN eligibility_reasons,

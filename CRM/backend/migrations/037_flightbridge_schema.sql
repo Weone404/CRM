@@ -1,9 +1,9 @@
 -- 037: FlightBridge partnership module schema.
--- COPY of nikkk07/FlightBridge-AI db/migrations/001_flightbridge_schema.sql (canonical). Do not edit here;
--- edit upstream and re-copy. sha256 of canonical file: 07ce6c27f6644cf5ec23e3909c195a5ddd2cd89128721f6b8cb6c5749983caa6
+-- COPY of nikkk07/FlightBridge-AI flightbridge/migrations/001_flightbridge_schema.sql (canonical). Do not edit here;
+-- edit upstream and re-copy. sha256 of canonical file: c5e6fd613496f59d332d3c0f506d61b1e0e0201701dbdd4240927914cf7746f6
 -- Apply in the Supabase SQL editor like earlier migrations. Creates schema 'flightbridge' only; public tables untouched.
 
--- FlightBridge AI schema (canonical source: nikkk07/FlightBridge-AI db/migrations/001_flightbridge_schema.sql)
+-- FlightBridge AI schema (canonical source: nikkk07/FlightBridge-AI flightbridge/migrations/001_flightbridge_schema.sql)
 -- Lives in its own Postgres schema so it can never collide with CRM tables in `public`.
 -- Additive only: creates schema `flightbridge`; touches nothing in `public` except FKs to public.employee(id).
 -- Idempotent: safe to re-run.

@@ -1,10 +1,10 @@
 -- 039: FlightBridge automation engine (worker run log, Run-now queue, autopilot settings, website profiles).
--- COPY of nikkk07/FlightBridge-AI db/migrations/003_automation.sql (canonical). Do not edit here;
--- edit upstream and re-copy. sha256 of canonical file: d51a6f6db06270fb422e5572ef8786a697f47ca6e93bb2cd692c53ce80e0381c
+-- COPY of nikkk07/FlightBridge-AI flightbridge/migrations/003_automation.sql (canonical). Do not edit here;
+-- edit upstream and re-copy. sha256 of canonical file: e370561a132453d1c262878a0139f81c77e79431d7a6b0e6239e80ea4e43c1e4
 -- Apply AFTER 038 in the Supabase SQL editor. Additive; touches only schema 'flightbridge'.
 
 -- FlightBridge 003: automation engine — worker run log, run-now job queue, autopilot settings, website profiles.
--- Canonical source: nikkk07/FlightBridge-AI db/migrations/003_automation.sql (copied to CRM as 039).
+-- Canonical source: nikkk07/FlightBridge-AI flightbridge/migrations/003_automation.sql (copied to CRM as 039).
 -- Additive and idempotent. Reversible: DROP TABLE flightbridge.worker_run, flightbridge.job_request,
 --   flightbridge.organisation_profile; DELETE FROM flightbridge.system_setting WHERE key='autopilot'.
 SET client_min_messages = warning;
