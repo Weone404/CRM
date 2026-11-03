@@ -315,6 +315,9 @@ def test_engine_runs_inside_the_crm_and_respects_the_switch(app_and_db, monkeypa
     import flightbridge_engine
     from flightbridge import automation
     monkeypatch.setattr(automation, "REGISTER_DIR", __import__("pathlib").Path("/nonexistent"))
+    monkeypatch.setattr(automation, "sync_cricos", lambda *a, **k: {"skipped": "offline test"})
+    monkeypatch.setattr(automation, "discover_areas", lambda *a, **k: {"skipped": "offline test"})
+    conn.execute("DELETE FROM flightbridge.engine_lease")          # a lock left by an interrupted earlier run
     conn.execute("""INSERT INTO flightbridge.system_setting (key, value) VALUES ('integrations', '{"engine_in_crm": false}')
                     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value""")
     from flightbridge import secrets
@@ -333,3 +336,44 @@ def test_engine_runs_inside_the_crm_and_respects_the_switch(app_and_db, monkeypa
     sch = FakeScheduler()
     flightbridge_engine.register(sch)
     assert sch.jobs == ["flightbridge_cycle", "flightbridge_queue"]
+
+
+def test_areas_tree_eligibility_decisions_and_area_search(app_and_db):
+    client, conn, who, admin, sales = app_and_db
+    area_name = "Queenstown " + uuid.uuid4().hex[:6]
+    r = client.post("/api/flightbridge/areas", json={"country": "NZ", "region": "Otago", "name": area_name,
+                                                     "kind": "training_hub", "radius_km": 25, "lat": -45.02, "lng": 168.74})
+    assert r.status_code == 200
+    aid = r.json()["id"]
+    assert client.post("/api/flightbridge/areas", json={"country": "NZ", "region": "Otago", "name": area_name,
+                                                        "lat": -45.02, "lng": 168.74}).status_code == 409
+    assert client.patch(f"/api/flightbridge/areas/{aid}", json={"enabled": False}).json()["enabled"] is False
+    org = conn.execute("""INSERT INTO flightbridge.organisation (name, country, region, area_id, status)
+                          VALUES ('Remarkables Flight School','NZ','Otago',%s,'research_completed') RETURNING id""", (aid,)).fetchone()[0]
+    conn.execute("UPDATE flightbridge.organisation SET area_id=NULL WHERE name='Remarkables Flight School' AND id<>%s", (org,))
+    tree = client.get("/api/flightbridge/regions").json()
+    nz = next(c for c in tree if c["country"] == "NZ")
+    otago = next(x for x in nz["regions"] if x["region"] == "Otago")
+    assert any(a["id"] == aid and a["total"] == 1 for a in otago["areas"])
+    lst = client.get("/api/flightbridge/schools", params={"area_id": aid}).json()
+    assert [s["name"] for s in lst] == ["Remarkables Flight School"]
+    bad = client.post(f"/api/flightbridge/schools/{org}/eligibility", json={"decision": "unqualified"})
+    assert bad.status_code == 400
+    client.post(f"/api/flightbridge/team/{sales}/role", json={"role": "researcher"})
+    who["emp"] = {"id": sales, "department": "Sales"}
+    try:      # the research assistant can make eligibility decisions
+        r = client.post(f"/api/flightbridge/schools/{org}/eligibility",
+                        json={"decision": "confirm", "reference": "NZ141-77", "source_url": "https://www.aviation.govt.nz/x"})
+        assert r.status_code == 200 and r.json()["eligibility"] == "eligible_verified"
+        assert client.post("/api/flightbridge/areas", json={"country": "NZ", "region": "X", "name": "Y", "lat": 1, "lng": 1}).status_code == 403
+    finally:
+        who["emp"] = {"id": admin, "department": "Admin"}
+        client.post(f"/api/flightbridge/team/{sales}/role", json={"role": None})
+    det = client.get(f"/api/flightbridge/schools/{org}").json()
+    assert det["eligibility"] == "eligible_verified" and det["area"]["name"] == area_name
+    assert det["eligibility_rule"]["credential"].startswith("CAA NZ Part 141")
+    assert client.post(f"/api/flightbridge/schools/{org}/eligibility",
+                       json={"decision": "unqualified", "note": "Closed for training"}).json()["eligibility"] == "unqualified"
+    q = client.post("/api/flightbridge/automation/run", json={"kind": "search_area", "area_id": aid})
+    assert q.status_code == 200 and (q.json()["queued"] or q.json()["already_queued"])
+    assert client.post("/api/flightbridge/automation/run", json={"kind": "search_area"}).status_code == 400

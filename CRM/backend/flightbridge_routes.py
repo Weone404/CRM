@@ -547,9 +547,18 @@ def set_role(employee_id: str, r: RoleIn, emp=Depends(require_admin)):
 # ---------------------------------------------------------------- schools (organisations)
 @router.get("/schools")
 def schools(country: Optional[str] = None, status: Optional[str] = None, q: Optional[str] = None,
-            region: Optional[str] = None, limit: int = 200, emp=Depends(require_member)):
-    limit = max(1, min(limit, 500))
+            region: Optional[str] = None, area_id: Optional[int] = None, eligibility: Optional[str] = None,
+            kind: Optional[str] = None, limit: int = 300, emp=Depends(require_member)):
+    limit = max(1, min(limit, 1000))
     where, args = ["o.deleted_at IS NULL"], []
+    if area_id == 0:
+        where.append("o.area_id IS NULL")
+    elif area_id:
+        where.append("o.area_id = %s"); args.append(area_id)
+    if eligibility in ("unknown", "eligible_verified", "eligible_claimed", "unqualified"):
+        where.append("o.eligibility = %s"); args.append(eligibility)
+    if kind in ("flying_school", "ground_school"):
+        where.append("o.org_kind = %s"); args.append(kind)
     if country:
         where.append("o.country = %s"); args.append(country.upper()[:2])
     if region == "__none__":
@@ -564,6 +573,8 @@ def schools(country: Optional[str] = None, status: Optional[str] = None, q: Opti
         cur = conn.cursor()
         cur.execute(f"""
             SELECT o.id, o.name, o.country, o.region, o.city, o.website_domain, o.status, o.rejection_reason, o.updated_at,
+                   o.area_id, o.eligibility, o.org_kind,
+                   (SELECT count(*) FROM flightbridge.contact_phone p WHERE p.org_id = o.id) AS phones,
                    ra.authority_code, ra.classification, ra.approval_ref, ra.status AS approval_status, ra.checked_at,
                    qr.score, qr.recommended_action,
                    (SELECT count(*) FROM flightbridge.contact c WHERE c.org_id = o.id) AS contacts
@@ -599,6 +610,9 @@ def school_detail(org_id: str, emp=Depends(require_member)):
                                   FROM flightbridge.qualification_result WHERE org_id=%s ORDER BY computed_at DESC LIMIT 1""",
             "pages": "SELECT url, http_status, robots_allowed, fetched_at FROM flightbridge.website_page WHERE org_id=%s ORDER BY fetched_at DESC LIMIT 30",
             "profile": "SELECT summary, signals, evidence, generator, updated_at FROM flightbridge.organisation_profile WHERE org_id=%s",
+            "phones": """SELECT phone, display, source, source_url, found_at FROM flightbridge.contact_phone WHERE org_id=%s
+                          ORDER BY CASE source WHEN 'website' THEN 0 WHEN 'regulator' THEN 1 WHEN 'human' THEN 2 ELSE 3 END""",
+            "area": "SELECT a.id, a.name, a.region, a.kind FROM flightbridge.area a JOIN flightbridge.organisation o ON o.area_id=a.id WHERE o.id=%s",
             "jobs": """SELECT id, kind, status, requested_at, finished_at, result FROM flightbridge.job_request
                         WHERE org_id=%s ORDER BY requested_at DESC LIMIT 5""",
             "history": """SELECT at, actor_type, action, payload FROM flightbridge.audit_log
@@ -608,6 +622,13 @@ def school_detail(org_id: str, emp=Depends(require_member)):
             out[key] = _rows(cur)
         out["qualification"] = (out["qualification"] or [None])[0]
         out["profile"] = (out["profile"] or [None])[0]
+        out["area"] = (out["area"] or [None])[0]
+        try:
+            from flightbridge.eligibility import load_rules
+            rule = load_rules().get(out["country"])
+            out["eligibility_rule"] = {"credential": rule["credential"], "lookup": rule["lookup"]} if rule else None
+        except ImportError:
+            out["eligibility_rule"] = None
         return out
 
 
@@ -660,16 +681,42 @@ def regions(emp=Depends(require_member)):
                          FROM flightbridge.organisation WHERE deleted_at IS NULL
                         GROUP BY 1, 2 ORDER BY 1, 2 NULLS LAST""")
         rows = _rows(cur)
+        try:
+            cur.execute("""SELECT a.id, a.country, a.region, a.name, a.kind, a.enabled, a.last_searched_at,
+                                  count(o.id) AS total,
+                                  count(o.id) FILTER (WHERE o.eligibility='eligible_verified') AS verified,
+                                  count(o.id) FILTER (WHERE o.eligibility='eligible_claimed') AS claimed,
+                                  count(o.id) FILTER (WHERE o.eligibility='unqualified') AS unqualified
+                             FROM flightbridge.area a
+                        LEFT JOIN flightbridge.organisation o ON o.area_id=a.id AND o.deleted_at IS NULL
+                            GROUP BY a.id ORDER BY a.country, a.region, a.name""")
+            areas = _rows(cur)
+            cur.execute("""SELECT country, region, count(*) AS n FROM flightbridge.organisation
+                            WHERE deleted_at IS NULL AND area_id IS NULL GROUP BY 1, 2""")
+            unplaced = {(r["country"], r["region"]): r["n"] for r in _rows(cur)}
+        except psycopg.errors.UndefinedTable:
+            conn.rollback()
+            areas, unplaced = [], {}
     out = {}
     for r in rows:
         c = out.setdefault(r["country"], {"country": r["country"], "total": 0, "needs_look": 0, "regions": []})
         c["total"] += r["total"]; c["needs_look"] += r["needs_look"]
-        c["regions"].append({k: r[k] for k in ("region", "total", "needs_look", "good_fit", "in_contact")})
-    return sorted(out.values(), key=lambda c: -c["total"])
+        c["regions"].append({**{k: r[k] for k in ("region", "total", "needs_look", "good_fit", "in_contact")},
+                             "areas": [], "unplaced": unplaced.get((r["country"], r["region"]), 0)})
+    for a in areas:                       # areas with no schools yet still show (so they can be searched)
+        c = out.setdefault(a["country"], {"country": a["country"], "total": 0, "needs_look": 0, "regions": []})
+        reg = next((x for x in c["regions"] if x["region"] == a["region"]), None)
+        if reg is None:
+            reg = {"region": a["region"], "total": 0, "needs_look": 0, "good_fit": 0, "in_contact": 0, "areas": [], "unplaced": 0}
+            c["regions"].append(reg)
+        reg["areas"].append({k: a[k] for k in ("id", "name", "kind", "enabled", "last_searched_at", "total", "verified", "claimed", "unqualified")})
+    for c in out.values():
+        c["regions"].sort(key=lambda x: (-x["total"], x["region"] or ""))
+    return sorted(out.values(), key=lambda c: (-c["total"], c["country"]))
 
 
 # ---------------------------------------------------------------- automation (worker status, Run now)
-JOB_KINDS = {"cycle", "research_school", "find_websites", "research_batch"}
+JOB_KINDS = {"cycle", "research_school", "find_websites", "research_batch", "search_area"}
 AUTOPILOT_KEYS = {"find_websites", "research", "qualify", "draft"}
 
 
@@ -730,6 +777,7 @@ def automation_status(emp=Depends(require_member)):
 class RunIn(BaseModel):
     kind: str
     org_id: Optional[str] = None
+    area_id: Optional[int] = None
 
 
 @router.post("/automation/run")
@@ -738,17 +786,24 @@ def automation_run(r: RunIn, emp=Depends(require_member)):
         raise HTTPException(status_code=400, detail=f"kind must be one of {sorted(JOB_KINDS)}")
     if r.kind == "research_school" and not r.org_id:
         raise HTTPException(status_code=400, detail="org_id is required to research one school")
+    if r.kind == "search_area" and not r.area_id:
+        raise HTTPException(status_code=400, detail="area_id is required to search an area")
     with _SchemaGuard(), get_db() as conn:
         cur = conn.cursor()
-        cur.execute("""INSERT INTO flightbridge.job_request (kind, org_id, requested_by) VALUES (%s,%s,%s)
-                       ON CONFLICT DO NOTHING RETURNING id""", (r.kind, r.org_id, emp["id"]))
+        if r.area_id is not None:
+            cur.execute("""INSERT INTO flightbridge.job_request (kind, org_id, area_id, requested_by) VALUES (%s,%s,%s,%s)
+                           ON CONFLICT DO NOTHING RETURNING id""", (r.kind, r.org_id, r.area_id, emp["id"]))
+        else:
+            cur.execute("""INSERT INTO flightbridge.job_request (kind, org_id, requested_by) VALUES (%s,%s,%s)
+                           ON CONFLICT DO NOTHING RETURNING id""", (r.kind, r.org_id, emp["id"]))
         row = cur.fetchone()
         if row:
-            _audit(cur, emp["id"], "run_requested", "job_request", row[0], {"kind": r.kind, "org_id": r.org_id})
+            _audit(cur, emp["id"], "run_requested", "job_request", row[0], {"kind": r.kind, "org_id": r.org_id, "area_id": r.area_id})
     started = _dispatch_github() if row else False
     return {"queued": bool(row), "already_queued": not row, "started_now": started,
             "message": ("Started." if started else "Queued. It runs on the next worker cycle (every 15 minutes, "
                         "or within a minute while the Mac runner is on).") if row else "Already queued."}
+    # (the CRM-server engine polls the queue every 30 seconds, so in practice it starts within a minute)
 
 
 class AutopilotIn(BaseModel):
@@ -913,3 +968,115 @@ class _PsycopgAdapter:
     def execute(self, sql, args=None):
         self.cur.execute(sql, args)
         return self.cur
+
+
+
+# ---------------------------------------------------------------- areas (Country > State > Area)
+class AreaIn(BaseModel):
+    country: str = Field(min_length=2, max_length=2)
+    region: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=120)
+    kind: str = "training_hub"
+    radius_km: int = Field(default=40, ge=2, le=50)
+    lat: Optional[float] = Field(default=None, ge=-90, le=90)
+    lng: Optional[float] = Field(default=None, ge=-180, le=180)
+
+
+@router.get("/areas")
+def areas_list(emp=Depends(require_member)):
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""SELECT a.*, (SELECT count(*) FROM flightbridge.organisation o WHERE o.area_id=a.id AND o.deleted_at IS NULL) AS schools
+                         FROM flightbridge.area a ORDER BY a.country, a.region, a.name""")
+        return _rows(cur)
+
+
+@router.post("/areas")
+def areas_add(a: AreaIn, emp=Depends(require_admin)):
+    if a.kind not in ("training_hub", "demand_hub"):
+        raise HTTPException(status_code=400, detail="kind must be training_hub or demand_hub")
+    lat, lng = a.lat, a.lng
+    if lat is None or lng is None:
+        try:
+            from flightbridge import secrets
+            from flightbridge.research.discover import geocode
+            from flightbridge.research.places import PlacesError
+        except ImportError:
+            raise HTTPException(status_code=503, detail="FlightBridge engine is not installed on the server")
+        secrets.configure(_db_url())
+        try:
+            found = geocode(a.name.strip(), a.region.strip(), a.country.upper())
+        except PlacesError as exc:
+            raise HTTPException(status_code=400, detail=f"Couldn't locate the area with Google: {exc}. Add the Google Places key in Settings, or enter coordinates.")
+        if not found:
+            raise HTTPException(status_code=400, detail="Google couldn't find that place. Check the spelling or enter coordinates.")
+        lat, lng = found
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""INSERT INTO flightbridge.area (country, region, name, kind, lat, lng, radius_km, notes)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,'added in the app') ON CONFLICT (country, region, name) DO NOTHING
+                       RETURNING id""", (a.country.upper(), a.region.strip(), a.name.strip(), a.kind, lat, lng, a.radius_km))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=409, detail="That area already exists")
+        _audit(cur, emp["id"], "area_added", "area", row[0], {"name": a.name, "region": a.region, "country": a.country})
+    return {"id": row[0], "lat": lat, "lng": lng}
+
+
+class AreaPatch(BaseModel):
+    enabled: Optional[bool] = None
+    radius_km: Optional[int] = Field(default=None, ge=2, le=50)
+
+
+@router.patch("/areas/{area_id}")
+def areas_patch(area_id: int, p: AreaPatch, emp=Depends(require_admin)):
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""UPDATE flightbridge.area SET enabled=coalesce(%s, enabled), radius_km=coalesce(%s, radius_km)
+                       WHERE id=%s RETURNING id""", (p.enabled, p.radius_km, area_id))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Area not found")
+        _audit(cur, emp["id"], "area_changed", "area", area_id, p.model_dump(exclude_none=True))
+    return {"id": area_id, **p.model_dump(exclude_none=True)}
+
+
+# ---------------------------------------------------------------- eligibility decisions by a person
+class EligibilityIn(BaseModel):
+    decision: str                                     # confirm | unqualified | recheck
+    reference: Optional[str] = Field(default=None, max_length=80)
+    source_url: Optional[str] = Field(default=None, max_length=2048)
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+@router.post("/schools/{org_id}/eligibility")
+def school_eligibility(org_id: str, e: EligibilityIn, emp=Depends(require_member)):
+    try:
+        from flightbridge import eligibility as elig
+    except ImportError:
+        raise HTTPException(status_code=503, detail="FlightBridge engine is not installed on the server")
+    if e.decision not in ("confirm", "unqualified", "recheck"):
+        raise HTTPException(status_code=400, detail="decision must be confirm, unqualified or recheck")
+    if e.decision == "unqualified" and not (e.note and e.note.strip()):
+        raise HTTPException(status_code=400, detail="Say why it's unqualified")
+    if e.source_url and not e.source_url.lower().startswith(("https://", "http://")):
+        raise HTTPException(status_code=400, detail="source_url must be a web address")
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        a = _PsycopgAdapter(cur)
+        cur.execute("SELECT 1 FROM flightbridge.organisation WHERE id=%s", (org_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="School not found")
+        try:
+            if e.decision == "confirm":
+                result = elig.confirm(a, org_id, emp["id"], e.reference, e.source_url)
+            elif e.decision == "unqualified":
+                elig.mark_unqualified(a, org_id, emp["id"], e.note.strip())
+                result = "unqualified"
+            else:
+                cur.execute("UPDATE flightbridge.organisation SET eligibility_reasons='[]'::jsonb WHERE id=%s", (org_id,))
+                result = elig.evaluate_org(a, org_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        _audit(cur, emp["id"], f"eligibility_{e.decision}", "organisation", org_id,
+               {"result": result, "reference": e.reference, "note": e.note, "by_role": emp["fb_role"]})
+    return {"eligibility": result}
