@@ -80,10 +80,10 @@ function Detail({ id, onChanged, onClose }) {
     try { const r = await call('/automation/run', { method: 'POST', body: JSON.stringify({ kind: 'research_school', org_id: id }) }); showToast(r.message, 'success'); }
     catch (e) { showToast(e.message, 'error'); }
   };
-  if (!s) return <div className="glass-card p-4 text-sm text-gray-500">Loading…</div>;
+  if (!s) return <div className="p-5 text-sm text-gray-500">Loading…</div>;
   const sec = SEC[s.eligibility] || SEC.unknown;
   return (
-    <div className="glass-card p-4 space-y-3 text-sm">
+    <div className="p-5 space-y-4 text-sm">
       <div className="flex justify-between gap-2">
         <div>
           <div className="text-lg font-bold">{s.name}</div>
@@ -162,6 +162,7 @@ export default function FlightBridgeSchools() {
     return call(`/schools?${p}`).then(setList, (e) => showToast(e.message, 'error'));
   }, [sel]);
   useEffect(() => { loadTree(); }, [loadTree]);
+  useEffect(() => { const k = (e) => e.key === 'Escape' && setOpenId(null); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, []);
   useEffect(() => { setList(null); setSection(null); loadList(); }, [loadList]);
 
   const counts = useMemo(() => { const c = {}; (list || []).forEach((s) => { c[s.eligibility || 'unknown'] = (c[s.eligibility || 'unknown'] || 0) + 1; }); return c; }, [list]);
@@ -174,8 +175,8 @@ export default function FlightBridgeSchools() {
   };
 
   return (
-    <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(200px, 260px) 1fr' }}>
-      <div className="glass-card p-3 h-fit max-h-[75vh] overflow-y-auto"><Tree regions={regions} sel={sel} onSel={(s) => { setSel(s); setOpenId(null); }} /></div>
+    <div className="grid gap-4 md:grid-cols-[230px_1fr]">
+      <div className="glass-card p-3 h-fit md:max-h-[75vh] overflow-y-auto"><Tree regions={regions} sel={sel} onSel={(s) => { setSel(s); setOpenId(null); }} /></div>
       <div className="space-y-3 min-w-0">
         <div className="flex flex-wrap justify-between items-center gap-2">
           <div>
@@ -194,8 +195,8 @@ export default function FlightBridgeSchools() {
         </div>
         <div className="text-xs text-gray-500">{SECTIONS.find(([k]) => k === active)?.[3]}</div>
         {list === null ? <div className="text-gray-500 text-sm">Loading…</div> : rows.length === 0 ? <div className="glass-card p-6 text-center text-gray-500 text-sm">Nothing here.</div> : (
-          <div className="grid gap-3" style={{ gridTemplateColumns: openId ? '1fr 1fr' : '1fr' }}>
-            <div className="glass-card overflow-hidden">
+          <div>
+            <div className="glass-card overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-xs text-gray-500 text-left"><tr><th className="p-2">School</th><th className="p-2">Approval</th><th className="p-2 text-right">Contacts</th></tr></thead>
                 <tbody>
@@ -209,7 +210,13 @@ export default function FlightBridgeSchools() {
                 </tbody>
               </table>
             </div>
-            {openId && <Detail id={openId} onChanged={() => { loadList(); loadTree(); }} onClose={() => setOpenId(null)} />}
+            {openId && (
+              <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={() => setOpenId(null)}>
+                <div className="w-full max-w-xl h-full overflow-y-auto bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+                  <Detail id={openId} onChanged={() => { loadList(); loadTree(); }} onClose={() => setOpenId(null)} />
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
