@@ -277,3 +277,59 @@ def test_run_now_queue_dedupes_and_autopilot_is_admin_only(app_and_db):
     finally:
         who["emp"] = {"id": admin, "department": "Admin"}
         client.post(f"/api/flightbridge/team/{sales}/role", json={"role": None})
+
+
+def test_integration_keys_saved_encrypted_and_never_returned(app_and_db, monkeypatch):
+    client, conn, who, admin, sales = app_and_db
+    from flightbridge import integrations
+    monkeypatch.setattr(integrations, "check", lambda name, value, mailbox_token=None: (True, "Connected."))
+    r = client.post("/api/flightbridge/integrations/google_places_api_key", json={"value": "  AIzaSyTESTKEY-wxyz  "})
+    assert r.status_code == 200 and r.json()["last4"] == "wxyz" and r.json()["test_ok"] is True
+    ct = conn.execute("SELECT ciphertext FROM flightbridge.integration_secret WHERE name='google_places_api_key'").fetchone()[0]
+    assert "AIzaSy" not in ct
+    st = client.get("/api/flightbridge/integrations").json()
+    assert "AIzaSyTESTKEY" not in str(st)
+    g = next(k for k in st["keys"] if k["name"] == "google_places_api_key")
+    assert g["saved"] and g["last4"] == "wxyz" and g["last_test_ok"] is True
+    from flightbridge import secrets
+    assert secrets.get("google_places_api_key", __import__("os").environ["DATABASE_URL"]) == "AIzaSyTESTKEY-wxyz"
+    assert client.post("/api/flightbridge/integrations/not_a_key", json={"value": "x"}).status_code == 404
+    bad = client.post("/api/flightbridge/integrations-settings", json={"llm_provider": "openai"})
+    assert bad.status_code == 400
+    ok = client.post("/api/flightbridge/integrations-settings",
+                     json={"engine_in_crm": True, "llm_provider": "groq", "llm_model": "", "inbound_source": "none"})
+    assert ok.status_code == 200 and client.get("/api/flightbridge/integrations").json()["settings"]["llm_provider"] == "groq"
+    client.post(f"/api/flightbridge/team/{sales}/role", json={"role": "researcher"})
+    who["emp"] = {"id": sales, "department": "Sales"}
+    try:
+        assert client.get("/api/flightbridge/integrations").status_code == 403
+        assert client.post("/api/flightbridge/integrations/groq_api_key", json={"value": "gsk_x"}).status_code == 403
+    finally:
+        who["emp"] = {"id": admin, "department": "Admin"}
+        client.post(f"/api/flightbridge/team/{sales}/role", json={"role": None})
+    assert client.delete("/api/flightbridge/integrations/google_places_api_key").json()["saved"] is False
+
+
+def test_engine_runs_inside_the_crm_and_respects_the_switch(app_and_db, monkeypatch):
+    client, conn, *_ = app_and_db
+    import flightbridge_engine
+    from flightbridge import automation
+    monkeypatch.setattr(automation, "REGISTER_DIR", __import__("pathlib").Path("/nonexistent"))
+    conn.execute("""INSERT INTO flightbridge.system_setting (key, value) VALUES ('integrations', '{"engine_in_crm": false}')
+                    ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value""")
+    from flightbridge import secrets
+    secrets.configure(None)
+    assert flightbridge_engine.run_cycle() is None                       # switched off in Settings
+    conn.execute("UPDATE flightbridge.system_setting SET value='{\"engine_in_crm\": true}' WHERE key='integrations'")
+    secrets.configure(None)
+    out = flightbridge_engine.run_cycle("manual")
+    assert out and out.get("run_id") and out["dry_run"] is True and out["outbound_enabled"] is False
+    runner = conn.execute("SELECT runner FROM flightbridge.worker_run WHERE id=%s", (out["run_id"],)).fetchone()[0]
+    assert runner == "crm-server"
+
+    class FakeScheduler:
+        def __init__(self): self.jobs = []
+        def add_job(self, fn, trigger, **kw): self.jobs.append(kw["id"])
+    sch = FakeScheduler()
+    flightbridge_engine.register(sch)
+    assert sch.jobs == ["flightbridge_cycle", "flightbridge_queue"]

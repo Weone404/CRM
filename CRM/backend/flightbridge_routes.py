@@ -769,3 +769,147 @@ def automation_settings(a: AutopilotIn, emp=Depends(require_admin)):
                     (json.dumps(a.model_dump()), emp["id"]))
         _audit(cur, emp["id"], "autopilot_set", "system_setting", "autopilot", a.model_dump())
     return a.model_dump()
+
+
+
+# ---------------------------------------------------------------- integrations (API keys entered here; encrypted at rest)
+INTEGRATION_KEYS = {
+    "google_places_api_key": "Google Places API key",
+    "groq_api_key": "Groq API key",
+    "gemini_api_key": "Gemini API key",
+    "hostinger_mail_api_token": "Hostinger Mail API token",
+    "hostinger_mailbox_resource_id": "Hostinger mailbox ID",
+}
+
+
+def _fb_pkg():
+    try:
+        from flightbridge import integrations, secrets
+        return secrets, integrations
+    except ImportError:
+        raise HTTPException(status_code=503, detail="FlightBridge engine is not installed on the server (requirements.txt)")
+
+
+@router.get("/integrations")
+def integrations_status(emp=Depends(require_admin)):
+    import os
+    secrets, _ = _fb_pkg()
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""SELECT name, last4, updated_at, last_test_at, last_test_ok, last_test_message
+                         FROM flightbridge.integration_secret""")
+        saved = {r["name"]: r for r in _rows(cur)}
+        cur.execute("SELECT value FROM flightbridge.system_setting WHERE key='integrations'")
+        row = cur.fetchone()
+    keys = []
+    for name, label in INTEGRATION_KEYS.items():
+        env_name = secrets.NAMES[name]
+        r = saved.get(name) or {}
+        keys.append({"name": name, "label": label, "saved": bool(r), "last4": r.get("last4"),
+                     "updated_at": r.get("updated_at"), "from_server_env": bool(os.environ.get(env_name)),
+                     "last_test_at": r.get("last_test_at"), "last_test_ok": r.get("last_test_ok"),
+                     "last_test_message": r.get("last_test_message")})
+    cfg = dict(secrets.DEFAULT_SETTINGS)
+    if row and isinstance(row[0], dict):
+        cfg.update({k: v for k, v in row[0].items() if k in cfg})
+    return {"keys": keys, "settings": cfg, "engine_env_off": os.environ.get("FLIGHTBRIDGE_ENGINE", "").lower() == "off",
+            "dry_run": os.environ.get("DRY_RUN", "true").strip() != "false",
+            "outbound_enabled": os.environ.get("OUTBOUND_ENABLED", "false").strip() == "true"}
+
+
+class KeyIn(BaseModel):
+    value: str = Field(min_length=1, max_length=4000)
+
+
+def _record_test(cur, name, ok, msg):
+    cur.execute("""UPDATE flightbridge.integration_secret SET last_test_at=now(), last_test_ok=%s, last_test_message=%s
+                   WHERE name=%s""", (ok, msg[:500], name))
+
+
+@router.post("/integrations/{name}")
+def integrations_save(name: str, k: KeyIn, emp=Depends(require_admin)):
+    if name not in INTEGRATION_KEYS:
+        raise HTTPException(status_code=404, detail="Unknown key")
+    secrets, integrations = _fb_pkg()
+    value = k.value.strip()
+    token = None
+    if name == "hostinger_mailbox_resource_id":
+        token = secrets.get("hostinger_mail_api_token", _db_url())
+    ok, msg = integrations.check(name, value, mailbox_token=token)
+    try:
+        with _SchemaGuard(), get_db() as conn:
+            cur = conn.cursor()
+            l4 = secrets.save(_PsycopgAdapter(cur), name, value, emp["id"])
+            _record_test(cur, name, ok, msg)
+            _audit(cur, emp["id"], "integration_key_saved", "integration", name, {"last4": l4, "test_ok": ok})
+    except secrets.SecretUnreadable as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"name": name, "saved": True, "last4": l4, "test_ok": ok, "message": msg}
+
+
+@router.post("/integrations/{name}/test")
+def integrations_test(name: str, emp=Depends(require_admin)):
+    if name not in INTEGRATION_KEYS:
+        raise HTTPException(status_code=404, detail="Unknown key")
+    secrets, integrations = _fb_pkg()
+    url = _db_url()
+    secrets.configure(url)
+    value = secrets.get(name, url)
+    if not value:
+        raise HTTPException(status_code=400, detail="No key saved (or it can't be read any more - enter it again)")
+    ok, msg = integrations.check(name, value, mailbox_token=secrets.get("hostinger_mail_api_token", url))
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        _record_test(cur, name, ok, msg)
+    return {"name": name, "test_ok": ok, "message": msg}
+
+
+@router.delete("/integrations/{name}")
+def integrations_delete(name: str, emp=Depends(require_admin)):
+    if name not in INTEGRATION_KEYS:
+        raise HTTPException(status_code=404, detail="Unknown key")
+    secrets, _ = _fb_pkg()
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM flightbridge.integration_secret WHERE name=%s", (name,))
+        _audit(cur, emp["id"], "integration_key_removed", "integration", name, {})
+    secrets.configure(None)
+    return {"name": name, "saved": False}
+
+
+class IntegrationSettingsIn(BaseModel):
+    engine_in_crm: bool = True
+    llm_provider: str = "none"
+    llm_model: str = Field(default="", max_length=100)
+    inbound_source: str = "none"
+
+
+@router.post("/integrations-settings")
+def integrations_settings(i: IntegrationSettingsIn, emp=Depends(require_admin)):
+    if i.llm_provider not in ("none", "groq", "gemini"):
+        raise HTTPException(status_code=400, detail="llm_provider must be none, groq or gemini")
+    if i.inbound_source not in ("none", "hostinger"):
+        raise HTTPException(status_code=400, detail="inbound_source must be none or hostinger")
+    with _SchemaGuard(), get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""INSERT INTO flightbridge.system_setting (key, value, updated_at, updated_by)
+                       VALUES ('integrations', %s::jsonb, now(), %s)
+                       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now(), updated_by=EXCLUDED.updated_by""",
+                    (json.dumps(i.model_dump()), emp["id"]))
+        _audit(cur, emp["id"], "integration_settings_set", "system_setting", "integrations", i.model_dump())
+    return i.model_dump()
+
+
+def _db_url():
+    import os
+    return os.environ.get("FLIGHTBRIDGE_DATABASE_URL") or os.environ.get("DATABASE_URL")
+
+
+class _PsycopgAdapter:
+    """flightbridge.secrets.save expects conn.execute(); the CRM gives a cursor."""
+    def __init__(self, cur):
+        self.cur = cur
+
+    def execute(self, sql, args=None):
+        self.cur.execute(sql, args)
+        return self.cur

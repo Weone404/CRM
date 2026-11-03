@@ -124,6 +124,9 @@ async def lifespan(app: FastAPI):
         id='attendance_retention', replace_existing=True,
     )
     logging.info("Attendance retention job registered (1st of month, 02:00 IST)")
+    # FlightBridge AI engine: research cycle every 15 min + Run-now requests. Never raises; can be switched off in its Settings.
+    from flightbridge_engine import register as register_flightbridge
+    register_flightbridge(scheduler)
     yield
     if scheduler:
         scheduler.shutdown()

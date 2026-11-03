@@ -311,6 +311,130 @@ function Metrics() {
   );
 }
 
+
+const KEY_HELP = {
+  google_places_api_key: { where: 'Google Cloud > APIs & Services > Credentials. Enable "Places API (New)" in the same project.', used: 'Finds each school\'s official website.' },
+  groq_api_key: { where: 'console.groq.com > API Keys (free tier).', used: 'Writes a 2-sentence summary of each school and double-checks replies.' },
+  gemini_api_key: { where: 'aistudio.google.com > Get API key (free tier).', used: 'Same as Groq - use one of the two.' },
+  hostinger_mail_api_token: { where: 'hPanel > Emails > your mailbox > API access.', used: 'Reads replies from schools.' },
+  hostinger_mailbox_resource_id: { where: 'Shown next to the API token in hPanel.', used: 'Which mailbox to read.' },
+};
+const GROUPS = [
+  { title: 'Website search', keys: ['google_places_api_key'] },
+  { title: 'Free AI (optional)', keys: ['groq_api_key', 'gemini_api_key'], provider: true },
+  { title: 'Mailbox (replies)', keys: ['hostinger_mail_api_token', 'hostinger_mailbox_resource_id'], inbound: true },
+];
+
+function KeyRow({ k, onChanged }) {
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const help = KEY_HELP[k.name] || {};
+  const run = async (fn) => { setBusy(true); try { await fn(); onChanged(); } catch (e) { showToast(e.message, 'error'); } finally { setBusy(false); } };
+  const save = () => run(async () => {
+    const r = await call(`/integrations/${k.name}`, { method: 'POST', body: JSON.stringify({ value }) });
+    setValue('');
+    showToast(r.test_ok ? `Saved and tested: ${r.message}` : `Saved, but the test failed: ${r.message}`, r.test_ok ? 'success' : 'warning');
+  });
+  const test = () => run(async () => {
+    const r = await call(`/integrations/${k.name}/test`, { method: 'POST' });
+    showToast(r.message, r.test_ok ? 'success' : 'warning');
+  });
+  const remove = () => { if (confirm(`Remove the saved ${k.label}?`)) run(() => call(`/integrations/${k.name}`, { method: 'DELETE' })); };
+  const status = k.from_server_env ? { text: 'Set on the server', cls: 'bg-blue-100 text-blue-800' }
+    : !k.saved ? { text: 'Not set', cls: 'bg-gray-100 text-gray-700' }
+    : k.last_test_ok === true ? { text: `Working · …${k.last4}`, cls: 'bg-green-100 text-green-800' }
+    : k.last_test_ok === false ? { text: `Problem · …${k.last4}`, cls: 'bg-red-100 text-red-800' }
+    : { text: `Saved · …${k.last4}`, cls: 'bg-yellow-100 text-yellow-800' };
+  return (
+    <div className="py-3 border-t border-gray-100 first:border-t-0">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="font-semibold text-sm">{k.label}</div>
+          <div className="text-xs text-glass-muted">{help.used}</div>
+        </div>
+        <Badge text={status.text} style={status.cls} />
+      </div>
+      {k.last_test_ok === false && k.last_test_message && <div className="text-xs text-red-700 mt-1">{k.last_test_message}</div>}
+      <div className="flex flex-wrap gap-2 mt-2">
+        <input type="password" autoComplete="off" spellCheck={false} className="glass-input flex-1 min-w-[220px] px-3 py-2 text-sm"
+          placeholder={k.saved ? 'Paste a new key to replace it' : 'Paste the key here'} value={value} onChange={(e) => setValue(e.target.value)} />
+        <button className="glass-btn px-3 py-2 text-sm" disabled={busy || !value.trim()} onClick={save}>{busy ? 'Checking…' : 'Save & test'}</button>
+        {k.saved && <button className="px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50" disabled={busy} onClick={test}>Test</button>}
+        {k.saved && <button className="px-3 py-2 text-sm rounded-lg border border-red-200 bg-white text-red-600 hover:bg-red-50" disabled={busy} onClick={remove}>Remove</button>}
+      </div>
+      <div className="text-xs text-glass-muted mt-1">Where to get it: {help.where}</div>
+    </div>
+  );
+}
+
+function Settings() {
+  const [data, setData] = useState(null);
+  const [auto, setAuto] = useState(null);
+  const [error, setError] = useState(null);
+  const load = useCallback(async () => {
+    try { setError(null); const [i, a] = await Promise.all([call('/integrations'), call('/automation')]); setData(i); setAuto(a); }
+    catch (e) { setError(e.message); }
+  }, []);
+  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
+  const saveSettings = async (patch) => {
+    try { await call('/integrations-settings', { method: 'POST', body: JSON.stringify({ ...data.settings, ...patch }) }); showToast('Saved', 'success'); load(); }
+    catch (e) { showToast(e.message, 'error'); }
+  };
+  const runNow = async () => {
+    try { const r = await call('/automation/run', { method: 'POST', body: JSON.stringify({ kind: 'cycle' }) }); showToast(r.message, 'success'); }
+    catch (e) { showToast(e.message, 'error'); }
+  };
+  if (error) return <div className="glass-card p-4 text-red-600">{error}{/migration|schema/i.test(error) ? ' — run FLIGHTBRIDGE_INSTALL.sql / migration 040 in Supabase.' : ''}</div>;
+  if (!data) return <div className="glass-card p-4 text-glass-muted">Loading settings…</div>;
+  const keyMap = Object.fromEntries(data.keys.map((k) => [k.name, k]));
+  const last = auto?.runs?.[0];
+  const lastErr = last && (last.error || Object.entries({ ...(last.stats || {}), ...((last.stats || {}).research || {}) }).filter(([kk]) => kk.endsWith('_error')).map(([, v]) => v)[0]);
+  const s = data.settings;
+  return (
+    <div className="space-y-4">
+      <div className="glass-card p-4">
+        <div className="flex flex-wrap justify-between items-start gap-3">
+          <div>
+            <h3 className="font-bold">Automation</h3>
+            <p className="text-sm text-glass-muted">Runs on the CRM server every 15 minutes: finds websites, reads them, scores schools, drafts emails for approval. Nothing is sent from here.</p>
+            <p className="text-sm mt-2">
+              {data.engine_env_off ? 'Switched off on the server (FLIGHTBRIDGE_ENGINE=off).'
+                : !s.engine_in_crm ? 'Paused.'
+                : last ? <>Last cycle {new Date(last.started_at).toLocaleString('en-IN')} on {last.runner} — <b>{last.status}</b></> : 'Waiting for the first cycle (starts within 2 minutes of the server starting).'}
+            </p>
+            {lastErr && <p className="text-xs text-red-700 mt-1">{String(lastErr).includes('GOOGLE_PLACES_API_KEY') ? 'Website search needs the Google Places key below.' : String(lastErr)}</p>}
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!s.engine_in_crm} onChange={(e) => saveSettings({ engine_in_crm: e.target.checked })} /> Run automation</label>
+            <button className="glass-btn px-3 py-2 text-sm" onClick={runNow}>Run a cycle now</button>
+          </div>
+        </div>
+        <div className="text-xs text-glass-muted mt-2">Sending: {data.dry_run || !data.outbound_enabled ? 'off on the server (dry run) — emails can be approved but not sent.' : 'enabled on the server; the kill switch still applies.'}</div>
+      </div>
+
+      {GROUPS.map((g) => (
+        <div key={g.title} className="glass-card p-4">
+          <div className="flex flex-wrap justify-between items-center gap-2 mb-1">
+            <h3 className="font-bold">{g.title}</h3>
+            {g.provider && (
+              <label className="text-sm flex items-center gap-2">Use
+                <select className="glass-input px-2 py-1 text-sm" value={s.llm_provider} onChange={(e) => saveSettings({ llm_provider: e.target.value })}>
+                  <option value="none">No AI (keywords only)</option><option value="groq">Groq</option><option value="gemini">Gemini</option>
+                </select>
+              </label>
+            )}
+            {g.inbound && (
+              <label className="text-sm flex items-center gap-2"><input type="checkbox" checked={s.inbound_source === 'hostinger'} onChange={(e) => saveSettings({ inbound_source: e.target.checked ? 'hostinger' : 'none' })} /> Read replies from this mailbox</label>
+            )}
+          </div>
+          {g.keys.map((name) => keyMap[name] && <KeyRow key={name} k={keyMap[name]} onChanged={load} />)}
+        </div>
+      ))}
+      <p className="text-xs text-glass-muted">Keys are encrypted before they are stored and are never shown again — only the last 4 characters. Only admins can see this page.</p>
+    </div>
+  );
+}
+
 export default function FlightBridge() {
   const [view, setView] = useState('queue');
   const [summary, setSummary] = useState(null);
@@ -390,7 +514,7 @@ export default function FlightBridge() {
 
       <div className="flex gap-2 overflow-x-auto whitespace-nowrap">
         {[['queue', 'Approval queue'], ['templates', 'Email templates'], ['inbox', 'Inbox'], ['outbound', 'Outbound & checks'],
-          ['metrics', 'Metrics & settings'], ['suppression', 'Suppression']].map(([v, label]) => (
+          ['metrics', 'Metrics'], ['suppression', 'Suppression'], ['settings', 'Settings']].map(([v, label]) => (
           <button key={v} onClick={() => setView(v)} className={`glass-tab-btn ${view === v ? 'active' : ''}`}>{label}</button>
         ))}
       </div>
@@ -398,6 +522,7 @@ export default function FlightBridge() {
       {view === 'templates' && <Templates />}
       {view === 'inbox' && <Inbox />}
       {view === 'metrics' && <Metrics />}
+      {view === 'settings' && <Settings />}
 
       {view === 'queue' && (
         <div className="space-y-2">

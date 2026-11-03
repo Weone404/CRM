@@ -15,3 +15,5 @@ pymongo==4.6.1
 boto3==1.35.49
 Pillow==12.3.0
 pillow-heif==0.21.0
+# FlightBridge AI engine (pinned commit; update the hash to upgrade)
+flightbridge @ https://github.com/nikkk07/FlightBridge-AI/archive/704bd73716315183374b7764480bf442ed205eb9.zip
