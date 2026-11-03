@@ -9,6 +9,7 @@
 // Routes that are not migrated yet answer 501 so a gap is visible, never silent.
 import { supabase, AUTH_FUNCTION_URL, SUPABASE_PUBLISHABLE_KEY } from './supabaseClient';
 import { createClient } from '@supabase/supabase-js';
+import { STUDENT_ROUTES } from './students';
 
 const json = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -75,6 +76,7 @@ async function studentLogin(mobile, password) {
     await supabase.auth.signOut();
     return detail(401, 'Invalid mobile number or password');
   }
+  await supabase.rpc('api_student_touch_login').then(() => {}, () => {});
   const { data: s } = await supabase.from('student').select('id, first_name, last_name').eq('id', r.profile.person_id).single();
   return json(200, {
     access_token: r.session.access_token,
@@ -134,6 +136,8 @@ const ROUTES = [
   ['GET', /^\/api\/outbox$/, () => rpc('api_outbox')],
   ['POST', /^\/api\/outbox\/([0-9a-f-]{36})\/approve$/, ({ params }) => rpc('api_outbox_set_status', { p_message_id: params[0], p_status: 'approved' })],
   ['POST', /^\/api\/outbox\/([0-9a-f-]{36})\/sent$/, ({ params }) => rpc('api_outbox_set_status', { p_message_id: params[0], p_status: 'sent' })],
+
+  ...STUDENT_ROUTES,
 ];
 
 const PUBLIC_PATHS = /^\/api\/auth\/(login|employee-login|student-login)$/;
@@ -144,6 +148,7 @@ export async function handleApiRequest(method, path, query, rawBody) {
   if (typeof rawBody === 'string' && rawBody) {
     try { body = JSON.parse(rawBody); } catch { body = null; }
   }
+  const form = rawBody instanceof FormData ? rawBody : null;
   for (const [m, pattern, handler] of ROUTES) {
     if (m !== method) continue;
     const match = pattern.exec(path);
@@ -152,7 +157,7 @@ export async function handleApiRequest(method, path, query, rawBody) {
       return detail(401, 'Could not validate credentials');
     }
     try {
-      return await handler({ params: match.slice(1), body, query });
+      return await handler({ params: match.slice(1), body, query, form });
     } catch (err) {
       console.error('[supabase-backend]', method, path, err);
       return detail(500, 'Something went wrong. Please try again.');

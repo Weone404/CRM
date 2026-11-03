@@ -4,6 +4,7 @@ import { API_URL } from '../api';
 import { formatDate } from '../utils/formatters';
 import { showToast } from '../utils/toast';
 import { COURSES } from '../constants/courses';
+import { USE_SUPABASE } from '../backend/mode';
 
 // FastAPI sends `detail` as a string for HTTPException but as a list of
 // {loc, msg} objects for 422s — flatten both so the toast never shows [object Object].
@@ -615,6 +616,7 @@ function EditStudent({ student, onClose, onSaved }) {
 
 function SetPinModal({ studentId, studentName, onClose }) {
   const [pin, setPin] = useState('');
+  const [resetPassword, setResetPassword] = useState(false);
   const [loginEnabled, setLoginEnabled] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -627,6 +629,7 @@ function SetPinModal({ studentId, studentName, onClose }) {
     // Send only what was provided: a PIN (if typed) and the login_enabled toggle.
     const body = { login_enabled: loginEnabled };
     if (pin) body.pin = pin;
+    if (USE_SUPABASE && resetPassword) body.reset_password = true;
     setSaving(true);
     try {
       const res = await fetch(`${API_URL}/api/students/${studentId}/set-pin`, {
@@ -645,9 +648,16 @@ function SetPinModal({ studentId, studentName, onClose }) {
   return createPortal(
     <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
       <div className="glass-strong max-w-md w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
-        <h3 className="text-lg font-bold text-glass-primary mb-1">Set Student Login PIN</h3>
+        <h3 className="text-lg font-bold text-glass-primary mb-1">{USE_SUPABASE ? 'Student Login' : 'Set Student Login PIN'}</h3>
         <p className="text-sm text-glass-muted mb-4">{studentName}</p>
         <form onSubmit={save} className="space-y-4">
+          {USE_SUPABASE ? (
+            <label className="flex items-start gap-2 text-sm text-gray-700">
+              <input type="checkbox" className="mt-1" checked={resetPassword} onChange={(e) => setResetPassword(e.target.checked)} />
+              <span>Reset password to their mobile number<br />
+                <span className="text-xs text-glass-muted">The student signs in with their mobile number and can change the password later.</span></span>
+            </label>
+          ) : (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">New 4-digit PIN</label>
             <input
@@ -662,6 +672,7 @@ function SetPinModal({ studentId, studentName, onClose }) {
             />
             <p className="text-xs text-glass-muted mt-1">The student signs in with their mobile number + this PIN.</p>
           </div>
+          )}
           <label className="flex items-center gap-2 text-sm text-gray-700">
             <input type="checkbox" checked={loginEnabled} onChange={(e) => setLoginEnabled(e.target.checked)} />
             Login enabled

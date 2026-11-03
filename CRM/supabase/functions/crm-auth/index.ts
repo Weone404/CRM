@@ -3,7 +3,7 @@
 // POST { action: "login", identifier, password }
 //   -> { session: { access_token, refresh_token, expires_at, expires_in, token_type }, profile }
 // POST { action: "provision", bootstrap_token }            (one-time, before any admin exists)
-// POST { action: "provision" }  + Authorization: Bearer <admin access token>
+// POST { action: "provision" }  + Authorization: Bearer <Admin or Sales access token>
 //   Creates a Supabase Auth account for every active employee / student without one.
 //   Temporary password = their own mobile number (digits). An employee without a mobile
 //   keeps their existing CRM password (bcrypt hash imported as-is).
@@ -28,10 +28,13 @@ const ALLOWED_ORIGINS = new Set([
   "http://localhost:5173",
 ]);
 
+// Vercel preview deployments of the `crm` project (team weone404s-projects).
+const VERCEL_PREVIEW = /^https:\/\/crm-[a-z0-9-]+-weone404s-projects\.vercel\.app$/;
+
 function cors(req: Request): Record<string, string> {
   const origin = req.headers.get("Origin") ?? "";
   return {
-    "Access-Control-Allow-Origin": ALLOWED_ORIGINS.has(origin) ? origin : "https://crm.weoneaviation.in",
+    "Access-Control-Allow-Origin": ALLOWED_ORIGINS.has(origin) || VERCEL_PREVIEW.test(origin) ? origin : "https://crm.weoneaviation.in",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Vary": "Origin",
@@ -49,14 +52,17 @@ const admin: SupabaseClient = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-async function callerIsAdmin(req: Request): Promise<boolean> {
+async function callerDepartment(req: Request): Promise<string | null> {
   const auth = req.headers.get("Authorization") ?? "";
   const token = auth.replace(/^Bearer\s+/i, "");
-  if (!token || token === ANON_KEY) return false;
+  if (!token || token === ANON_KEY) return null;
   const { data, error } = await admin.auth.getUser(token);
-  if (error || !data.user) return false;
+  if (error || !data.user) return null;
   const { data: prof } = await admin.rpc("svc_person_profile", { auth_id: data.user.id });
-  return Array.isArray(prof) && prof[0]?.person_type === "employee" && prof[0]?.department === "Admin";
+  return Array.isArray(prof) && prof[0]?.person_type === "employee" ? (prof[0]?.department ?? null) : null;
+}
+async function callerIsAdmin(req: Request): Promise<boolean> {
+  return (await callerDepartment(req)) === "Admin";
 }
 
 // Mobile number -> temporary password: last 10 digits (or all digits if fewer).
@@ -116,12 +122,14 @@ async function login(req: Request, body: Record<string, unknown>): Promise<Respo
 }
 
 async function provision(req: Request, body: Record<string, unknown>): Promise<Response> {
-  let authorised = await callerIsAdmin(req);
+  // Admin, or Sales (who add students): only creates missing logins, never changes existing ones.
+  const dept = await callerDepartment(req);
+  let authorised = dept === "Admin" || dept === "Sales";
   if (!authorised && typeof body.bootstrap_token === "string") {
     const { data } = await admin.rpc("svc_use_bootstrap_token", { token: body.bootstrap_token });
     authorised = data === true;
   }
-  if (!authorised) return json(req, 403, { error: "Admin only." });
+  if (!authorised) return json(req, 403, { error: "Admin or Sales only." });
 
   const { data: people, error } = await admin.rpc("svc_people_to_provision");
   if (error) return json(req, 500, { error: error.message });
