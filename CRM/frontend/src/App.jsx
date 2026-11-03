@@ -23,6 +23,7 @@ const PolicyDocs = lazy(() => import('./components/PolicyDocs'));
 const AddQuery = lazy(() => import('./components/AddQuery'));
 const StudentDirectory = lazy(() => import('./components/StudentDirectory'));
 const Attendance = lazy(() => import('./components/Attendance'));
+const FlightBridge = lazy(() => import('./components/FlightBridge'));
 
 // Tabs the birthday popup is allowed to appear over: the landing tab plus the
 // two people-facing views. Anywhere else it would be an interruption.
@@ -176,6 +177,7 @@ export default function App() {
     canAccessCameras && { id: 'attendance', label: '📷 Attendance' },
     canAccessDirectory && { id: 'team', label: 'Team' },
     department === 'Admin' && { id: 'policy', label: 'Policy Docs' },
+    department === 'Admin' && { id: 'partnerships', label: 'FlightBridge AI' },
     isEmployeeSession && { id: 'profile', label: 'My Profile' },
     isEmployeeSession && { id: 'leave', label: 'My Leave' },
   ].filter(Boolean);
@@ -276,6 +278,7 @@ export default function App() {
           {activeTab === 'attendance' && canAccessCameras && <Attendance />}
           {activeTab === 'team' && canAccessDirectory && <EmployeeDirectory />}
           {activeTab === 'policy' && department === 'Admin' && <PolicyDocs />}
+          {activeTab === 'partnerships' && department === 'Admin' && <FlightBridge />}
           {activeTab === 'profile' && isEmployeeSession && <MyProfile />}
           {activeTab === 'leave' && isEmployeeSession && <LeaveCalendar employeeId={employee.id} />}
         </Suspense>
