@@ -73,8 +73,20 @@ function tempPassword(phoneDigits: string | null): string | null {
   return d.length > 10 ? d.slice(-10) : d;
 }
 
+// "+91 98765 43210", "098765-43210", "919876543210" -> "9876543210". Anything else is returned unchanged.
+function mobile10(raw: string): string {
+  const t = raw.trim();
+  if (!/^[\s+().\-\d]+$/.test(t)) return t;
+  let d = t.replace(/\D/g, "");
+  if (d.length === 12 && d.startsWith("91")) d = d.slice(2);
+  else if (d.length === 13 && d.startsWith("091")) d = d.slice(3);
+  else if (d.length === 11 && d.startsWith("0")) d = d.slice(1);
+  return d.length === 10 ? d : t;
+}
+
 async function login(req: Request, body: Record<string, unknown>): Promise<Response> {
-  const identifier = String(body.identifier ?? "").trim();
+  // Phone numbers count as the same login however they are typed (so the lockout can't be dodged either).
+  const identifier = mobile10(String(body.identifier ?? ""));
   const password = String(body.password ?? "");
   if (!identifier || !password) return json(req, 400, { error: "Enter your login ID / phone / email and password." });
 
@@ -97,10 +109,18 @@ async function login(req: Request, body: Record<string, unknown>): Promise<Respo
   }
 
   const anonClient = createClient(SUPABASE_URL, ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
-  const { data: signIn, error: signErr } = await anonClient.auth.signInWithPassword({
+  let { data: signIn, error: signErr } = await anonClient.auth.signInWithPassword({
     email: rows[0].auth_email,
     password,
   });
+  // The first password is the mobile number: also accept it typed with +91 / 0 / spaces.
+  const cleanPw = mobile10(password);
+  if ((signErr || !signIn.session) && cleanPw !== password) {
+    ({ data: signIn, error: signErr } = await anonClient.auth.signInWithPassword({
+      email: rows[0].auth_email,
+      password: cleanPw,
+    }));
+  }
   if (signErr || !signIn.session) {
     await admin.rpc("svc_login_record", { identifier, ok: false });
     return json(req, 401, generic);

@@ -42,6 +42,22 @@ export const formatRelativeTime = (dateString) => {
   return formatDate(dateString);
 };
 
+// Indian mobile numbers as plain 10 digits: "+91 98765 43210", "098765-43210", "919876543210" -> "9876543210".
+// Anything that isn't a phone number (e.g. a login ID) is returned unchanged.
+export const toMobile10 = (raw) => {
+  const t = String(raw ?? '').trim();
+  if (!/^[\s+().\-\d]+$/.test(t)) return t;
+  let d = t.replace(/\D/g, '');
+  if (d.length === 12 && d.startsWith('91')) d = d.slice(2);
+  else if (d.length === 13 && d.startsWith('091')) d = d.slice(3);
+  else if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
+  return d.length === 10 ? d : t;
+};
+
+// For display: no +91.
+export const displayPhone = (phone) => (phone ? toMobile10(phone) : phone);
+
 export const formatPhone = (phone) => {
-  return phone.replace(/(\+91)(\d{5})(\d{5})/, '$1 $2 $3');
+  const d = displayPhone(phone || '');
+  return /^\d{10}$/.test(d) ? `${d.slice(0, 5)} ${d.slice(5)}` : d;
 };

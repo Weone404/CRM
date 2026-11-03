@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { API_URL } from '../api';
-import { formatDate } from '../utils/formatters';
+import { formatDate, displayPhone } from '../utils/formatters';
 import { showToast } from '../utils/toast';
 import { COURSES } from '../constants/courses';
 import { USE_SUPABASE } from '../backend/mode';
@@ -103,7 +103,7 @@ export default function StudentDirectory() {
                   <tr key={s.id} onClick={() => setSelectedId(s.id)}
                     className="border-b hover:bg-blue-50 cursor-pointer">
                     <td className="px-3 py-2 font-medium text-glass-primary">{s.name}</td>
-                    <td className="px-3 py-2">{s.mobile}</td>
+                    <td className="px-3 py-2">{displayPhone(s.mobile)}</td>
                     <td className="px-3 py-2">{s.course || '-'}</td>
                     <td className="px-3 py-2">{s.admission_date || '-'}</td>
                     <td className="px-3 py-2">
@@ -155,7 +155,7 @@ function AddStudent({ onClose, onCreated, onOpenExisting }) {
       first_name: parts[0] || '',
       last_name: parts.length > 1 ? parts.slice(1).join(' ') : '',
       guardian_name: l.guardian_name || '',
-      mobile: l.phone || '',
+      mobile: displayPhone(l.phone) || '',
       address: l.address || '',
       course: l.course_interest || '',
     }));
@@ -207,7 +207,7 @@ function AddStudent({ onClose, onCreated, onOpenExisting }) {
             <label className="block text-sm font-semibold mb-1">Prefill from completed admission</label>
             <select value={form.lead_id} onChange={(e) => prefill(e.target.value)} className={input}>
               <option value="">-- None (enter manually) --</option>
-              {leads.map((l) => <option key={l.id} value={l.id}>{l.name} — {l.phone}</option>)}
+              {leads.map((l) => <option key={l.id} value={l.id}>{l.name} — {displayPhone(l.phone)}</option>)}
             </select>
           </div>
         )}

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { displayPhone } from '../utils/formatters';
 import { API_URL } from '../api';
 
 export default function DispositionStats() {
@@ -126,7 +127,7 @@ export default function DispositionStats() {
                   <div className="flex justify-between items-start mb-2">
                     <div className="flex-1">
                       <div className="font-semibold text-lg">{item.name}</div>
-                      <div className="text-sm text-glass-secondary">{item.phone}</div>
+                      <div className="text-sm text-glass-secondary">{displayPhone(item.phone)}</div>
                       <div className="text-sm text-glass-muted">{item.course_interest}</div>
                     </div>
                     <div className="text-xs text-glass-muted">

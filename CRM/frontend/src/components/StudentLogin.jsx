@@ -1,3 +1,4 @@
+import { toMobile10 } from '../utils/formatters';
 import { useState } from 'react';
 import { API_URL } from '../api';
 import { USE_SUPABASE } from '../backend/mode';
@@ -11,7 +12,7 @@ export default function StudentLogin({ onLogin, onBack }) {
   const handleSubmit = async (e) => {
     e.preventDefault(); setError(''); setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/auth/student-login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mobile, pin }) });
+      const res = await fetch(`${API_URL}/api/auth/student-login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mobile: toMobile10(mobile), pin }) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { setError(data.detail || `Login failed (${res.status})`); return; }
       localStorage.setItem('student_token', data.access_token);
@@ -28,7 +29,7 @@ export default function StudentLogin({ onLogin, onBack }) {
         <h1 className="text-2xl font-bold mb-1 text-center tracking-tight" style={{ color: '#1d1d1f' }}>Student Portal</h1>
         <p className="text-sm mb-7 text-center" style={{ color: '#6e6e73' }}>We One Aviation · Sign in to continue</p>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div><label className="block text-sm font-medium mb-1.5" style={{ color: '#424245' }}>Mobile Number</label><input type="tel" inputMode="numeric" value={mobile} onChange={(e) => setMobile(e.target.value.replace(/\D/g, '').slice(0, 10))} className="glass-input w-full px-4 py-2.5 tracking-widest" placeholder="10-digit mobile number" maxLength={10} autoComplete="username" required autoFocus /></div>
+          <div><label className="block text-sm font-medium mb-1.5" style={{ color: '#424245' }}>Mobile Number</label><input type="tel" inputMode="numeric" value={mobile} onChange={(e) => setMobile(e.target.value.replace(/[^\d+\s()-]/g, '').slice(0, 18))} className="glass-input w-full px-4 py-2.5 tracking-widest" placeholder="10-digit mobile number" autoComplete="username" required autoFocus /></div>
           <div><label className="block text-sm font-medium mb-1.5" style={{ color: '#424245' }}>{USE_SUPABASE ? 'Password' : 'PIN'}</label>{USE_SUPABASE
             ? <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} className="glass-input w-full px-4 py-2.5" placeholder="Your password (first time: your mobile number)" autoComplete="current-password" required />
             : <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))} className="glass-input w-full px-4 py-2.5 tracking-widest" placeholder="4-digit PIN" maxLength={4} autoComplete="current-password" required />}</div>

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { displayPhone } from '../utils/formatters';
 import { createPortal } from 'react-dom';
 import QuoteGenerator from './QuoteGenerator';
 import { CLOSURE, charterRef, formatTime, formatTripDate, labelOf, routeLine, segmentOf, shortPlace } from '../utils/charter';
@@ -55,7 +56,7 @@ export default function LeadDetail({ lead, onClose, onContact }) {
           <div className="flex justify-between items-start mb-4">
             <div>
               <h2 className="text-2xl font-bold text-glass-primary">{lead.name}</h2>
-              <p className="text-glass-secondary">{lead.phone}</p>
+              <p className="text-glass-secondary">{displayPhone(lead.phone)}</p>
               <p className="text-glass-muted">{lead.email}</p>
             </div>
             <button onClick={() => { setTrack(''); onClose(); }} className="text-glass-muted hover:text-glass-primary text-2xl">×</button>

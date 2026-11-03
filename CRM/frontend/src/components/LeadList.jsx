@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { displayPhone } from '../utils/formatters';
 import { CLOSURE, charterRef, closureLabel, isPositiveClosure, tripSummary } from '../utils/charter';
 
 function bucketOf(l) {
@@ -86,7 +87,7 @@ export default function LeadList({ leads, onSelectLead, segment = 'aviation' }) 
             <div className="flex justify-between items-start mb-2 gap-3">
               <div className="flex-1 min-w-0">
                 <div className="font-semibold text-lg text-glass-primary">{lead.name}</div>
-                <div className="text-sm text-glass-secondary">{lead.phone}</div>
+                <div className="text-sm text-glass-secondary">{displayPhone(lead.phone)}</div>
                 {isCharter ? (
                   <div className="text-sm text-glass-primary font-medium mt-0.5">✈️ {tripSummary(lead.charter_details || {})}</div>
                 ) : (

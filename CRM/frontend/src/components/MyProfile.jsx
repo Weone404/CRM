@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { formatDate } from '../utils/formatters';
+import { formatDate, displayPhone } from '../utils/formatters';
 import LoadingSpinner from './LoadingSpinner';
 import AttendanceCalendar from './AttendanceCalendar';
 import { API_URL } from '../api';
@@ -31,7 +31,7 @@ export default function MyProfile() {
         </div>
         <div className="p-8">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div><h3 className="text-sm font-semibold text-glass-muted uppercase mb-4">Personal Information</h3><div className="space-y-3"><div><span className="text-sm text-glass-secondary">Contact Number</span><div className="font-medium text-glass-primary">{profile.phone}</div></div><div><span className="text-sm text-glass-secondary">Email Address</span><div className="font-medium text-glass-primary">{profile.email || 'N/A'}</div></div><div><span className="text-sm text-glass-secondary">Address</span><div className="font-medium text-glass-primary">{profile.address || 'N/A'}</div></div></div></div>
+            <div><h3 className="text-sm font-semibold text-glass-muted uppercase mb-4">Personal Information</h3><div className="space-y-3"><div><span className="text-sm text-glass-secondary">Contact Number</span><div className="font-medium text-glass-primary">{displayPhone(profile.phone)}</div></div><div><span className="text-sm text-glass-secondary">Email Address</span><div className="font-medium text-glass-primary">{profile.email || 'N/A'}</div></div><div><span className="text-sm text-glass-secondary">Address</span><div className="font-medium text-glass-primary">{profile.address || 'N/A'}</div></div></div></div>
             <div><h3 className="text-sm font-semibold text-glass-muted uppercase mb-4">Employment Details</h3><div className="space-y-3"><div><span className="text-sm text-glass-secondary">Date of Joining</span><div className="font-medium text-glass-primary">{profile.joining_date ? formatDate(profile.joining_date) : 'N/A'}</div></div><div><span className="text-sm text-glass-secondary">Status</span><div><span className={`glass-badge ${profile.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{profile.status === 'active' ? 'Active' : 'Non-Active'}</span></div></div>{profile.status === 'non-active' && profile.date_of_leaving && <div><span className="text-sm text-glass-secondary">Date of Leaving</span><div className="font-medium text-glass-primary">{formatDate(profile.date_of_leaving)}</div></div>}</div></div>
           </div>
           <div className="mt-8 pt-8" style={{ borderTop: '1px solid #e5e5ea' }}>
