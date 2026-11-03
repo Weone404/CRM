@@ -10,6 +10,7 @@
 import { supabase, AUTH_FUNCTION_URL, SUPABASE_PUBLISHABLE_KEY } from './supabaseClient';
 import { createClient } from '@supabase/supabase-js';
 import { STUDENT_ROUTES } from './students';
+import { TEAM_ROUTES } from './team';
 
 const json = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -138,6 +139,7 @@ const ROUTES = [
   ['POST', /^\/api\/outbox\/([0-9a-f-]{36})\/sent$/, ({ params }) => rpc('api_outbox_set_status', { p_message_id: params[0], p_status: 'sent' })],
 
   ...STUDENT_ROUTES,
+  ...TEAM_ROUTES,
 ];
 
 const PUBLIC_PATHS = /^\/api\/auth\/(login|employee-login|student-login)$/;

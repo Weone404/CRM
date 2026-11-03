@@ -1,27 +1,11 @@
 // Students module + student portal on Supabase (same responses as the Render API).
 // Documents live in the private Storage bucket `student-documents` under
 // students/<student id>/; the database row is registered through Postgres functions.
-import { supabase, AUTH_FUNCTION_URL, SUPABASE_PUBLISHABLE_KEY } from './supabaseClient';
+import { supabase } from './supabaseClient';
+import { json, detail, call, rpc, authFunction, UUID } from './http';
 
 const BUCKET = 'student-documents';
 const MAX_BYTES = 10 * 1024 * 1024;
-const UUID = '([0-9a-f-]{36})';
-
-const json = (status, body) =>
-  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
-const detail = (status, message) => json(status, { detail: message });
-
-async function call(fn, args = {}) {
-  const { data, error, status } = await supabase.rpc(fn, args);
-  if (!error) return { data };
-  const code = /^PT(\d{3})$/.exec(error.code || '');
-  const httpStatus = code ? Number(code[1]) : (status && status >= 400 ? status : 500);
-  return { error: detail(httpStatus === 401 ? 401 : httpStatus, httpStatus === 401 ? 'Could not validate credentials' : error.message) };
-}
-const rpc = async (fn, args) => {
-  const r = await call(fn, args);
-  return r.error || json(200, r.data);
-};
 
 // --- Image checks (port of _process_image): real type from the file's bytes -----------
 async function sniff(file) {
@@ -82,21 +66,6 @@ async function signedUrl(path) {
   const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, 300);
   if (error) return detail(502, `Could not open the document: ${error.message}`);
   return json(200, { url: data.signedUrl, expires_in: 300 });
-}
-
-async function accessToken() {
-  const { data } = await supabase.auth.getSession();
-  return data.session?.access_token || '';
-}
-
-async function authFunction(payload) {
-  const res = await fetch(AUTH_FUNCTION_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', apikey: SUPABASE_PUBLISHABLE_KEY, Authorization: `Bearer ${await accessToken()}` },
-    body: JSON.stringify(payload),
-  });
-  const body = await res.json().catch(() => ({}));
-  return { ok: res.ok, status: res.status, body };
 }
 
 // --- Routes ------------------------------------------------------------------------------
