@@ -149,6 +149,7 @@ app.add_middleware(
     allow_origins=[
         "https://crm-three-smoky-26.vercel.app",
         "https://crm-pi-self.vercel.app",   # weone404 Vercel project (crm)
+        "https://crm.weoneaviation.in",     # custom domain for the CRM frontend
         "http://localhost:3000",
         # Lead-capture websites that POST to /api/leads/ingest from the browser
         "https://www.weoneaviation.com",
