@@ -11,6 +11,7 @@ import { supabase, AUTH_FUNCTION_URL, SUPABASE_PUBLISHABLE_KEY } from './supabas
 import { createClient } from '@supabase/supabase-js';
 import { STUDENT_ROUTES } from './students';
 import { TEAM_ROUTES } from './team';
+import { ATTENDANCE_ROUTES } from './attendance';
 
 const json = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -140,6 +141,7 @@ const ROUTES = [
 
   ...STUDENT_ROUTES,
   ...TEAM_ROUTES,
+  ...ATTENDANCE_ROUTES,
 ];
 
 const PUBLIC_PATHS = /^\/api\/auth\/(login|employee-login|student-login)$/;
