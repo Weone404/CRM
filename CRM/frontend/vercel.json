@@ -4,6 +4,13 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    {
+      "source": "/api/partner/attendance/by-mobile",
+      "destination": "https://syytqcadmtgowckdnbqh.supabase.co/functions/v1/crm-attendance/partner/attendance/by-mobile"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
   ]
 }
