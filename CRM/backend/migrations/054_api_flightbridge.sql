@@ -675,7 +675,7 @@ BEGIN
         FROM flightbridge.website_page WHERE org_id = v_org ORDER BY fetched_at DESC LIMIT 30) x), '[]'),
     'profile', (SELECT to_jsonb(x) FROM (SELECT summary, signals, evidence, generator, updated_at
         FROM flightbridge.organisation_profile WHERE org_id = v_org) x),
-    'phones', coalesce((SELECT jsonb_agg(to_jsonb(x) - 'o' - 'id' ORDER BY x.o, x.id) FROM (SELECT id, phone, display, source, source_url, found_at,
+    'phones', coalesce((SELECT jsonb_agg(to_jsonb(x) - 'o' - 't' ORDER BY x.o, x.t) FROM (SELECT ctid AS t, phone, display, source, source_url, found_at,
         CASE source WHEN 'website' THEN 0 WHEN 'regulator' THEN 1 WHEN 'human' THEN 2 ELSE 3 END AS o
         FROM flightbridge.contact_phone WHERE org_id = v_org) x), '[]'),
     'area', (SELECT jsonb_build_object('id', a.id, 'name', a.name, 'region', a.region, 'kind', a.kind)
