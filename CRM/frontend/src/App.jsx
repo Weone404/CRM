@@ -6,6 +6,7 @@ import StudentLogin from './components/StudentLogin';
 import LeadList from './components/LeadList';
 import LoadingSpinner from './components/LoadingSpinner';
 import BirthdayPopup from './components/BirthdayPopup';
+import Icon from './components/icons';
 import { apiFetch, fetchConfig, API_URL } from './api';
 import { SEGMENTS, segmentOf } from './utils/charter';
 import { signOutSupabase } from './backend/router';
@@ -54,6 +55,7 @@ export default function App() {
   });
   const setSegment = (value) => { setSegmentState(value); try { localStorage.setItem('lead_segment', value); } catch { /* ignore */ } };
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [showMore, setShowMore] = useState(false);
   const [passwordForm, setPasswordForm] = useState({ old_password: '', new_password: '', confirm_password: '' });
   const [passwordError, setPasswordError] = useState('');
   const [birthdays, setBirthdays] = useState([]);
@@ -185,47 +187,99 @@ export default function App() {
   }
 
   const tabs = [
-    canAccessLeads && { id: 'leads', label: 'Leads' },
-    canAccessLeads && { id: 'students', label: 'Students' },
-    { id: 'tasks', label: isEmployeeSession ? 'My Tasks' : 'Tasks' },
-    canAccessCameras && { id: 'attendance', label: '📷 Attendance' },
-    canAccessDirectory && { id: 'team', label: 'Team' },
-    department === 'Admin' && { id: 'policy', label: 'Policy Docs' },
-    canAccessFlightBridge && { id: 'partnerships', label: 'FlightBridge AI' },
-    USE_SUPABASE && department === 'Admin' && { id: 'settings', label: '⚙️ Settings' },
-    isEmployeeSession && { id: 'profile', label: 'My Profile' },
-    isEmployeeSession && { id: 'leave', label: 'My Leave' },
+    canAccessLeads && { id: 'leads', label: 'Leads', icon: 'leads' },
+    canAccessLeads && { id: 'students', label: 'Students', icon: 'students' },
+    { id: 'tasks', label: isEmployeeSession ? 'My Tasks' : 'Tasks', icon: 'tasks' },
+    canAccessCameras && { id: 'attendance', label: 'Attendance', icon: 'attendance' },
+    canAccessDirectory && { id: 'team', label: 'Team', icon: 'team' },
+    department === 'Admin' && { id: 'policy', label: 'Policy Docs', icon: 'policy' },
+    canAccessFlightBridge && { id: 'partnerships', label: 'FlightBridge AI', icon: 'globe' },
+    USE_SUPABASE && department === 'Admin' && { id: 'settings', label: 'Settings', icon: 'settings' },
+    isEmployeeSession && { id: 'profile', label: 'My Profile', icon: 'profile' },
+    isEmployeeSession && { id: 'leave', label: 'My Leave', icon: 'calendar' },
   ].filter(Boolean);
+  // Phones: the first tabs sit in a bottom bar (thumb reach); the rest open from "More".
+  const BAR = Math.min(4, tabs.length);
+  const barTabs = tabs.slice(0, BAR);
+  const moreTabs = tabs.slice(BAR);
+  const moreActive = moreTabs.some((t) => t.id === activeTab);
+  const go = (id) => { setActiveTab(id); setShowMore(false); window.scrollTo({ top: 0 }); };
 
   return (
-    <div className="min-h-screen" style={{ background: "#f5f5f7" }}>
-      {/* Glass Navigation */}
-      <nav className="glass-nav text-white px-4 sm:px-6 py-3 flex justify-between items-center sticky top-0 z-40">
-        <h1 className="text-lg sm:text-xl font-bold tracking-tight">
-          ✈️ We One Aviation <span className="font-normal text-indigo-200">· CRM</span>
+    <div className="min-h-screen pb-24 md:pb-0" style={{ background: "#f5f5f7" }}>
+      {/* Top bar + tabs stay together at the top while scrolling */}
+      <header className="sticky top-0 z-40">
+      <nav className="glass-nav text-white px-3 sm:px-6 py-2.5 flex justify-between items-center gap-2 relative">
+        <h1 className="text-base sm:text-xl font-bold tracking-tight flex items-center gap-2 min-w-0">
+          <Icon name="plane" size={20} />
+          <span className="truncate">We One Aviation <span className="font-normal text-sky-200">· CRM</span></span>
         </h1>
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {canAccessLeads && (
-            <button onClick={() => setShowOutbox(true)} className="glass-btn-ghost px-3 py-1.5 text-sm">📤 Outbox</button>
+            <button onClick={() => setShowOutbox(true)} className="glass-btn-ghost px-3 py-2 text-sm inline-flex items-center gap-1.5 min-h-[40px]" aria-label="Outbox">
+              <Icon name="outbox" size={16} /><span className="hidden sm:inline">Outbox</span>
+            </button>
           )}
-          <span className="hidden sm:inline text-sm text-indigo-100">👤 {employee.name}</span>
-          <button onClick={() => setShowChangePassword(true)} className="glass-btn-ghost px-2.5 py-1.5 text-sm" title="Change Password">🔒</button>
-          <button onClick={handleLogout} className="glass-btn-ghost px-3 py-1.5 text-sm">Logout</button>
+          <span className="hidden lg:inline text-sm text-slate-200 px-1">{employee.name}</span>
+          <button onClick={() => setShowChangePassword(true)} className="glass-btn-ghost px-2.5 py-2 text-sm hidden md:inline-flex items-center min-h-[40px]" title="Change password" aria-label="Change password"><Icon name="lock" size={16} /></button>
+          <button onClick={handleLogout} className="glass-btn-ghost px-3 py-2 text-sm hidden md:inline-flex items-center gap-1.5 min-h-[40px]"><Icon name="logout" size={16} />Logout</button>
         </div>
       </nav>
 
-      {/* Glass Tab Bar */}
-      <div className="glass-tabs overflow-x-auto whitespace-nowrap sticky top-[57px] z-30">
+      {/* Tabs: tablet and desktop */}
+      <div className="glass-tabs hidden md:block overflow-x-auto whitespace-nowrap relative" role="tablist" aria-label="Sections">
         {tabs.map((t) => (
-          <button key={t.id} onClick={() => setActiveTab(t.id)} className={`glass-tab-btn ${activeTab === t.id ? 'active' : ''}`}>{t.label}</button>
+          <button key={t.id} role="tab" aria-selected={activeTab === t.id} onClick={() => go(t.id)}
+            className={`glass-tab-btn inline-flex items-center gap-2 ${activeTab === t.id ? 'active' : ''}`}>
+            <Icon name={t.icon} size={16} />{t.label}
+          </button>
         ))}
       </div>
+      </header>
+
+      {/* Tabs: phones (bottom bar) */}
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 glass-tabs border-t" style={{ borderColor: 'var(--hairline)', paddingBottom: 'env(safe-area-inset-bottom)' }} aria-label="Sections">
+        <div className="grid" style={{ gridTemplateColumns: `repeat(${barTabs.length + 1}, minmax(0, 1fr))` }}>
+          {barTabs.map((t) => (
+            <button key={t.id} onClick={() => go(t.id)} aria-current={activeTab === t.id ? 'page' : undefined}
+              className={`flex flex-col items-center justify-center gap-0.5 py-2 min-h-[56px] text-[11px] font-medium ${activeTab === t.id ? 'text-[var(--accent)]' : 'text-glass-muted'}`}>
+              <Icon name={t.icon} size={22} strokeWidth={activeTab === t.id ? 2.3 : 1.8} /><span className="truncate max-w-full px-1">{t.label}</span>
+            </button>
+          ))}
+          <button onClick={() => setShowMore(true)} aria-haspopup="dialog"
+            className={`flex flex-col items-center justify-center gap-0.5 py-2 min-h-[56px] text-[11px] font-medium ${moreActive ? 'text-[var(--accent)]' : 'text-glass-muted'}`}>
+            <Icon name="more" size={22} /><span>More</span>
+          </button>
+        </div>
+      </nav>
+
+      {showMore && createPortal(
+        <div className="md:hidden fixed inset-0 z-50 glass-overlay flex items-end" onClick={() => setShowMore(false)}>
+          <div className="w-full bg-white rounded-t-3xl p-4 pb-6 animate-glass-in" style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }} role="dialog" aria-label="More" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="font-semibold text-glass-primary">{employee.name}</div>
+              <button onClick={() => setShowMore(false)} className="p-2 rounded-full text-glass-muted min-h-[44px] min-w-[44px] inline-flex items-center justify-center" aria-label="Close"><Icon name="close" size={20} /></button>
+            </div>
+            <div className="grid grid-cols-1 gap-1">
+              {moreTabs.length > 0 && moreTabs.map((t) => (
+                <button key={t.id} onClick={() => go(t.id)} className={`flex items-center gap-3 px-3 min-h-[48px] rounded-xl text-base ${activeTab === t.id ? 'bg-[var(--accent-light)] text-[var(--accent)] font-semibold' : 'text-glass-primary'}`}>
+                  <Icon name={t.icon} size={20} />{t.label}
+                </button>
+              ))}
+              {moreTabs.length > 0 && <div className="h-px my-1" style={{ background: 'var(--border-subtle)' }} />}
+              <button onClick={() => { setShowMore(false); setShowChangePassword(true); }} className="flex items-center gap-3 px-3 min-h-[48px] rounded-xl text-base text-glass-primary"><Icon name="lock" size={20} />Change password</button>
+              <button onClick={handleLogout} className="flex items-center gap-3 px-3 min-h-[48px] rounded-xl text-base text-red-600"><Icon name="logout" size={20} />Logout</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* Main Content */}
       <div className="p-4 sm:p-6 max-w-7xl mx-auto">
         {activeTab === 'leads' && canAccessLeads && leadsError && (
           <div className="glass-card p-6 text-center animate-glass-in" style={{ borderColor: '#fca5a5' }}>
-            <div className="text-lg font-semibold text-red-800 mb-1">⚠️ Couldn't load leads</div>
+            <div className="text-lg font-semibold text-red-800 mb-1 inline-flex items-center gap-2"><Icon name="alert" size={18} />Couldn't load leads</div>
             <p className="text-sm text-red-700 mb-4">{leadsError}</p>
             <button onClick={syncNow} className="glass-btn px-4 py-2" style={{ background: '#ef4444' }}>Retry</button>
           </div>
@@ -262,7 +316,7 @@ export default function App() {
             </div>
             {segmentFollowups.length > 0 && (
               <div className="glass-card p-4 mb-4" style={{ background: '#fffbe6', borderColor: '#fde047' }}>
-                <h3 className="font-semibold mb-2 text-glass-primary">⏰ Follow-ups Due</h3>
+                <h3 className="font-semibold mb-2 text-glass-primary inline-flex items-center gap-2"><Icon name="clock" size={16} />Follow-ups due</h3>
                 <div className="space-y-2">
                   {segmentFollowups.slice(0, 3).map(f => (
                     <div key={f.id} className="flex justify-between items-center text-sm">
@@ -274,11 +328,11 @@ export default function App() {
               </div>
             )}
             <div className="glass-card p-4">
-              <div className="flex justify-between items-center mb-4">
+              <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
                 <h2 className="text-lg font-semibold text-glass-primary">{segment === 'charter' ? 'Charter Leads' : 'Aviation Leads'}</h2>
                 <div className="flex gap-2">
-                  <button onClick={() => setShowAddQuery(true)} className="glass-btn px-4 py-2" style={{ background: '#22c55e' }}>＋ {segment === 'charter' ? 'Add Enquiry' : 'Add Query'}</button>
-                  <button onClick={syncNow} className="glass-btn px-4 py-2">Sync</button>
+                  <button onClick={() => setShowAddQuery(true)} className="glass-btn px-4 py-2 inline-flex items-center gap-1.5 min-h-[40px]" style={{ background: '#16a34a' }}><Icon name="plus" size={16} />{segment === 'charter' ? 'Add Enquiry' : 'Add Query'}</button>
+                  <button onClick={syncNow} className="glass-btn px-4 py-2 inline-flex items-center gap-1.5 min-h-[40px]"><Icon name="refresh" size={16} />Sync</button>
                 </div>
               </div>
               <LeadList leads={segmentLeads} segment={segment} onSelectLead={setSelectedLead} />

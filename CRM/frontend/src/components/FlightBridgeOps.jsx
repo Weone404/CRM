@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../api';
 import { showToast } from '../utils/toast';
+import { countryName } from '../utils/country';
 
 // FlightBridge areas, automation and team, inside the CRM.
 
@@ -12,7 +13,7 @@ async function call(path, opts = {}) {
   return data;
 }
 const COUNTRY = { US: 'United States', CA: 'Canada', AU: 'Australia', NZ: 'New Zealand', GB: 'United Kingdom', IN: 'India' };
-const cname = (c) => COUNTRY[c] || c;
+const cname = (c) => countryName(c);
 const when = (d) => (d ? new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
 const ago = (d) => {
   const m = Math.round((Date.now() - new Date(d)) / 60000);

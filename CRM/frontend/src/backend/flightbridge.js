@@ -75,6 +75,7 @@ export const FLIGHTBRIDGE_ROUTES = [
   ['GET', r('/settings'), () => rpc('api_fb_settings')],
   ['POST', r('/settings/followups'), ({ body }) => rpc('api_fb_followups_set', { p_data: body || {} })],
   ['GET', r('/metrics'), () => rpc('api_fb_metrics')],
+  ['GET', r('/detector'), () => rpc('api_fb_detector')],
 
   ['GET', r('/me'), () => rpc('api_fb_me')],
   ['GET', r('/team'), () => rpc('api_fb_team')],

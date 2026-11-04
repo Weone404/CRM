@@ -79,7 +79,8 @@
 html {
   /* Fluid root: the whole rem-based UI scales smoothly with the viewport —
      ~15px on phones (tighter, more fits), 16px on tablet/desktop (unchanged). */
-  font-size: clamp(14px, 13px + 0.55vw, 16px);
+  /* 16px everywhere: easy to read on phones too (was 14-16px fluid). */
+  font-size: 16px;
   scroll-behavior: smooth;
   -webkit-text-size-adjust: 100%;
 }
@@ -90,11 +91,15 @@ html, body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-  overflow-x: hidden;
   background: var(--surface-base);
   color: var(--text-primary);
   line-height: 1.5;
 }
+
+/* No sideways page scroll. 'clip' (not 'hidden') on body so it does not become a scroll box,
+   which would stop the sticky top bar and tab bar from sticking. */
+html { overflow-x: hidden; }
+body { overflow-x: clip; }
 
 #root { min-height: 100vh; position: relative; }
 
@@ -350,6 +355,11 @@ input[type="datetime-local"].glass-input { color-scheme: light; }
   /* iOS zooms the page when focusing an input <16px — force 16px on phones
      so focusing a field never triggers a jarring zoom-jump. */
   input, select, textarea { font-size: 16px; }
+}
+
+/* Touch screens: every button, tab and field is at least 44px tall (finger-sized). */
+@media (pointer: coarse) {
+  .glass-btn, .glass-tab-btn, .glass-btn-ghost, select.glass-input, input.glass-input:not([type="checkbox"]):not([type="radio"]) { min-height: 44px; }
 }
 
 /* Tablet: slightly roomier data padding than phone, tighter than desktop */

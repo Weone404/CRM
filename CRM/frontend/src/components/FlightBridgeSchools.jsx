@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../api';
 import { showToast } from '../utils/toast';
+import { countryName } from '../utils/country';
 
 // FlightBridge schools inside the CRM: Country > State > Area, eligibility sections, full details.
 // Same data and API as the standalone FlightBridge app.
@@ -13,11 +14,10 @@ async function call(path, opts = {}) {
   return data;
 }
 
-const COUNTRY = { US: 'United States', CA: 'Canada', AU: 'Australia', NZ: 'New Zealand', GB: 'United Kingdom', IN: 'India', ES: 'Spain', IE: 'Ireland' };
-const cname = (c) => COUNTRY[c] || c;
+const cname = (c) => countryName(c);
 const SECTIONS = [
   ['eligible_verified', 'Eligible', 'bg-green-100 text-green-800', 'Approved by the official register or confirmed by a person.'],
-  ['eligible_claimed', 'Check needed', 'bg-yellow-100 text-yellow-800', 'The website claims the approval – confirm it on the regulator’s site.'],
+  ['eligible_claimed', 'Check needed', 'bg-yellow-100 text-yellow-800', 'The website claims the approval, or the country has no register yet – confirm it on the regulator’s site.'],
   ['unqualified', 'Unqualified', 'bg-red-100 text-red-800', 'No approval found for this country’s standard, or not a pilot-training school.'],
   ['unknown', 'Not checked yet', 'bg-gray-100 text-gray-700', 'Website not read yet – automation will get to these.'],
 ];
@@ -71,6 +71,7 @@ function Detail({ id, onChanged, onClose }) {
   const [s, setS] = useState(null);
   const [note, setNote] = useState('');
   const [ref, setRef] = useState('');
+  const [src, setSrc] = useState('');
   const load = useCallback(() => call(`/schools/${id}`).then(setS, (e) => showToast(e.message, 'error')), [id]);
   useEffect(() => { setS(null); load(); }, [load]);
   const act = async (body, ok) => {
@@ -109,6 +110,17 @@ function Detail({ id, onChanged, onClose }) {
               <input className="glass-input px-2 py-1 text-xs" placeholder="Approval no. (optional)" value={ref} onChange={(e) => setRef(e.target.value)} />
               <button className="glass-btn px-3 py-1 text-xs" onClick={() => act({ decision: 'confirm', reference: ref || null }, 'Marked eligible')}>I checked – it’s approved</button>
             </>
+          )}
+          {s.eligibility !== 'eligible_verified' && !s.eligibility_rule && s.org_kind !== 'ground_school' && (
+            <div className="w-full space-y-2 rounded-lg p-2" style={{ background: '#fffbeb', border: '1px solid #fde68a' }}>
+              <div className="text-xs text-gray-700">No approval register for {cname(s.country)} yet. Check this school on {cname(s.country)}’s civil aviation authority website, then paste that page here.</div>
+              <div className="flex flex-wrap gap-2">
+                <input className="glass-input px-2 py-1 text-xs flex-1 min-w-[200px]" placeholder="Link to the authority page you checked" value={src} onChange={(e) => setSrc(e.target.value)} />
+                <input className="glass-input px-2 py-1 text-xs w-40" placeholder="Approval no. (optional)" value={ref} onChange={(e) => setRef(e.target.value)} />
+                <button className="glass-btn px-3 py-1 text-xs" disabled={!/^https?:\/\//i.test(src.trim())}
+                  onClick={() => act({ decision: 'confirm', reference: ref || null, source_url: src.trim() }, 'Marked eligible')}>I checked – it’s approved</button>
+              </div>
+            </div>
           )}
           {s.eligibility !== 'unqualified' && (
             <>
@@ -189,8 +201,8 @@ export default function FlightBridgeSchools() {
             <div className="text-lg font-bold">{title}</div>
             <div className="text-xs text-gray-500">{sel.country ? [cname(sel.country), sel.region === '__none__' ? null : sel.region].filter(Boolean).join(' › ') : 'Every country'}{sel.kind === 'demand_hub' ? ' · student-demand hub' : ''}</div>
           </div>
-          <div className="flex gap-2">
-            <input className="glass-input px-3 py-1.5 text-sm" placeholder="Search name or website" value={q} onChange={(e) => setQ(e.target.value)} />
+          <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+            <input className="glass-input px-3 py-1.5 text-sm flex-1 sm:flex-none min-w-0" placeholder="Search name or website" aria-label="Search schools" value={q} onChange={(e) => setQ(e.target.value)} />
             {sel.area > 0 && <button className="glass-btn px-3 py-1.5 text-sm" onClick={searchArea}>Search this area now</button>}
           </div>
         </div>

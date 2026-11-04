@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { apiFetch } from '../api';
 import { showToast } from '../utils/toast';
 import FlightBridgeSchools from './FlightBridgeSchools';
+import FlightBridgeDetector from './FlightBridgeDetector';
+import Icon from './icons';
 import { Areas, Automation, Team } from './FlightBridgeOps';
 
 // FlightBridge partnership module (Admin only). This screen records human decisions.
@@ -436,7 +438,7 @@ function Settings() {
 }
 
 export default function FlightBridge() {
-  const [view, setView] = useState('schools');
+  const [view, setView] = useState('detector');
   const [me, setMe] = useState(null);
   const [summary, setSummary] = useState(null);
   const [tasks, setTasks] = useState([]);
@@ -487,7 +489,7 @@ export default function FlightBridge() {
   if (selected) return <ApprovalDetail id={selected} onBack={() => setSelected(null)} onDone={() => { setSelected(null); load(); }} />;
   const killEngaged = summary?.kill_switches?.outbound_kill_switch !== false;
   const isAdmin = me?.role === 'admin';
-  const VIEWS = [['schools', 'Schools'], ['areas', 'Areas'], ['automation', 'Automation'], ['queue', 'Approval queue'],
+  const VIEWS = [['detector', 'School Detector'], ['schools', 'Schools'], ['areas', 'Areas'], ['automation', 'Automation'], ['queue', 'Approval queue'],
     isAdmin && ['templates', 'Email templates'], ['inbox', 'Inbox'], ['outbound', 'Outbound & checks'], ['metrics', 'Metrics'],
     isAdmin && ['suppression', 'Suppression'], isAdmin && ['team', 'Team'], isAdmin && ['settings', 'Settings']].filter(Boolean);
 
@@ -496,8 +498,10 @@ export default function FlightBridge() {
       <div className="flex flex-wrap justify-between items-center gap-2">
         <h2 className="text-xl font-bold text-glass-primary">FlightBridge AI</h2>
         <div className="flex flex-wrap gap-2">
-        {isAdmin && <button onClick={toggleKill} className="glass-btn px-3 py-2 text-sm" style={{ background: killEngaged ? '#ef4444' : '#f59e0b' }}>
-          {killEngaged ? '⛔ Outbound kill switch: ENGAGED' : '⚠️ Kill switch released'}
+        {isAdmin && <button onClick={toggleKill} className="glass-btn px-3 py-2 text-sm inline-flex items-center gap-2 min-h-[40px]" style={{ background: killEngaged ? '#dc2626' : '#d97706' }}
+          title={killEngaged ? 'Nothing can be sent. Click to release.' : 'Sending is possible once the server also allows it.'}>
+          <Icon name={killEngaged ? 'shield' : 'alert'} size={16} />
+          {killEngaged ? 'Sending blocked (kill switch on)' : 'Kill switch released'}
         </button>}
         </div>
       </div>
@@ -506,16 +510,24 @@ export default function FlightBridge() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="glass-card p-3"><div className="text-xs text-glass-muted">Schools</div><div className="text-2xl font-bold">{Object.values(summary.organisations).reduce((a, b) => a + b, 0)}</div></div>
           <div className="glass-card p-3"><div className="text-xs text-glass-muted">Awaiting approval</div><div className="text-2xl font-bold">{summary.approvals.open || 0}</div></div>
-          <div className="glass-card p-3"><div className="text-xs text-glass-muted">Dry-run rendered</div><div className="text-2xl font-bold">{summary.outbound.dry_run_rendered || 0}</div></div>
-          <div className="glass-card p-3"><div className="text-xs text-glass-muted">Blocked / review</div><div className="text-2xl font-bold">{(summary.outbound.blocked || 0) + (summary.outbound.needs_review || 0)}</div></div>
+          <div className="glass-card p-3"><div className="text-xs text-glass-muted">Test emails (not sent)</div><div className="text-2xl font-bold">{summary.outbound.dry_run_rendered || 0}</div></div>
+          <div className="glass-card p-3"><div className="text-xs text-glass-muted">Need a look</div><div className="text-2xl font-bold">{(summary.outbound.blocked || 0) + (summary.outbound.needs_review || 0)}</div></div>
         </div>
       )}
 
-      <div className="flex gap-2 overflow-x-auto whitespace-nowrap">
+      <label className="sm:hidden block">
+        <span className="sr-only">Section</span>
+        <select className="glass-input w-full px-3 py-2.5 text-base font-medium" value={view} onChange={(e) => setView(e.target.value)}>
+          {VIEWS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+        </select>
+      </label>
+      <div className="hidden sm:flex gap-1 overflow-x-auto whitespace-nowrap border-b" style={{ borderColor: 'var(--border-subtle)' }} role="tablist">
         {VIEWS.map(([v, label]) => (
-          <button key={v} onClick={() => setView(v)} className={`glass-tab-btn ${view === v ? 'active' : ''}`}>{label}</button>
+          <button key={v} role="tab" aria-selected={view === v} onClick={() => setView(v)} className={`glass-tab-btn ${view === v ? 'active' : ''}`}>{label}</button>
         ))}
       </div>
+
+      {view === 'detector' && <FlightBridgeDetector />}
 
       {view === 'areas' && <Areas isAdmin={isAdmin} />}
       {view === 'automation' && <Automation isAdmin={isAdmin} />}

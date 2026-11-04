@@ -67,15 +67,16 @@ export default function StudentDirectory() {
     <div className="glass-card p-4 animate-glass-in">
       <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 mb-4">
         <h2 className="text-lg font-semibold">Students</h2>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="🔍 Name, mobile, computer no., course"
-            className="flex-1 sm:w-72 glass-input"
+            placeholder="Search name, mobile, computer no., course"
+            aria-label="Search students"
+            className="flex-1 min-w-[200px] sm:w-72 glass-input px-3 py-2"
           />
-          <button onClick={() => setShowAdd(true)} className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 whitespace-nowrap">
-            ＋ Add Student
+          <button onClick={() => setShowAdd(true)} className="px-4 py-2 min-h-[40px] bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 whitespace-nowrap">
+            + Add Student
           </button>
         </div>
       </div>

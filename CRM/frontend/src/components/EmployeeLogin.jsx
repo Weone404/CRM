@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import AuthBackdrop from './AuthBackdrop';
+import Icon from './icons';
 import { showToast } from '../utils/toast';
 import { API_URL } from '../api';
 import { USE_SUPABASE } from '../backend/mode';
@@ -24,11 +26,11 @@ export default function EmployeeLogin({ onLogin }) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'linear-gradient(135deg, #1d1d1f 0%, #2c2c2e 50%, #1d1d1f 100%)' }}>
+    <AuthBackdrop>
       <div className="glass-strong p-8 max-w-md w-full animate-glass-in">
         <div className="text-center mb-8">
           <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: '#0071e3', boxShadow: '0 4px 12px rgba(0,113,227,0.30)' }}>
-            <span className="text-3xl text-white">👤</span>
+            <span className="text-white"><Icon name="profile" size={34} /></span>
           </div>
           <h1 className="text-2xl font-bold" style={{ color: '#1d1d1f' }}>Employee Portal</h1>
           <p className="text-sm mt-2" style={{ color: '#6e6e73' }}>Sign in to access your workspace</p>
@@ -41,9 +43,9 @@ export default function EmployeeLogin({ onLogin }) {
           <button type="submit" disabled={loading} className="glass-btn w-full py-3">{loading ? 'Signing In...' : 'Sign In'}</button>
         </form>
         <div className="mt-6 pt-6 text-center" style={{ borderTop: '1px solid #e5e5ea' }}>
-          <button onClick={() => window.location.reload()} className="text-sm" style={{ color: '#6e6e73' }}>← Back to Admin Login</button>
+          <button onClick={() => window.location.reload()} className="text-sm" style={{ color: '#6e6e73' }}>Back to admin login</button>
         </div>
       </div>
-    </div>
+    </AuthBackdrop>
   );
 }

@@ -1,5 +1,7 @@
 import { toMobile10 } from '../utils/formatters';
 import { useState } from 'react';
+import AuthBackdrop from './AuthBackdrop';
+import Icon from './icons';
 import { API_URL } from '../api';
 import { USE_SUPABASE } from '../backend/mode';
 
@@ -23,9 +25,9 @@ export default function StudentLogin({ onLogin, onBack }) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'linear-gradient(135deg, #1d1d1f 0%, #2c2c2e 50%, #1d1d1f 100%)' }}>
+    <AuthBackdrop>
       <div className="glass-strong p-8 w-full max-w-md animate-glass-in">
-        <div className="text-5xl text-center mb-3">🎓</div>
+        <div className="flex justify-center mb-3" style={{ color: '#0071e3' }}><Icon name="students" size={40} strokeWidth={1.6} /></div>
         <h1 className="text-2xl font-bold mb-1 text-center tracking-tight" style={{ color: '#1d1d1f' }}>Student Portal</h1>
         <p className="text-sm mb-7 text-center" style={{ color: '#6e6e73' }}>We One Aviation · Sign in to continue</p>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -37,9 +39,9 @@ export default function StudentLogin({ onLogin, onBack }) {
           <button type="submit" disabled={loading} className="glass-btn w-full py-2.5">{loading ? 'Signing in… (server may take up to a minute to wake)' : 'Sign in'}</button>
         </form>
         <div className="mt-6 pt-6 text-center" style={{ borderTop: '1px solid #e5e5ea' }}>
-          <button onClick={onBack} className="text-sm" style={{ color: '#6e6e73' }}>← Back to Login</button>
+          <button onClick={onBack} className="text-sm" style={{ color: '#6e6e73' }}>Back to login</button>
         </div>
       </div>
-    </div>
+    </AuthBackdrop>
   );
 }
