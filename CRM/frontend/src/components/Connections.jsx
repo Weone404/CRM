@@ -13,7 +13,7 @@ const CONNECTIONS = [
     url: `${FN}/crm-leads/charter`, header: true },
   { id: 'hikvision', name: 'Hikvision attendance machine', where: 'Machine web page → Network → HTTP Listening / Event push',
     url: `${FN}/crm-attendance/hikvision?token=`, inUrl: true },
-  { id: 'partner', name: 'Partner apps (e.g. DGCA prep)', where: 'That app\'s settings — address and token. Add ?mobile=…&month=YYYY-MM when calling.',
+  { id: 'partner', name: 'Partner apps (e.g. DGCA prep)', where: `DGCA prep (Vercel): CRM_API_URL = ${typeof window !== 'undefined' ? window.location.origin : ''} and CRM_PARTNER_TOKEN = the token. Other apps: the address below + ?mobile=…&month=YYYY-MM.`,
     url: `${FN}/crm-attendance/partner/attendance/by-mobile`, header: true },
 ];
 
