@@ -12,6 +12,7 @@ import { createClient } from '@supabase/supabase-js';
 import { STUDENT_ROUTES } from './students';
 import { TEAM_ROUTES } from './team';
 import { ATTENDANCE_ROUTES } from './attendance';
+import { DOCS_ROUTES, OUTBOX_ROUTE } from './docs';
 
 const json = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -135,13 +136,14 @@ const ROUTES = [
   ['GET', /^\/api\/courses$/, () => rpc('api_courses')],
   ['PATCH', /^\/api\/courses\/([0-9a-f-]{36})\/installments$/, ({ params, body }) => rpc('api_course_installments', { p_course_id: params[0], p_data: body || {} })],
 
-  ['GET', /^\/api\/outbox$/, () => rpc('api_outbox')],
+  OUTBOX_ROUTE,
   ['POST', /^\/api\/outbox\/([0-9a-f-]{36})\/approve$/, ({ params }) => rpc('api_outbox_set_status', { p_message_id: params[0], p_status: 'approved' })],
   ['POST', /^\/api\/outbox\/([0-9a-f-]{36})\/sent$/, ({ params }) => rpc('api_outbox_set_status', { p_message_id: params[0], p_status: 'sent' })],
 
   ...STUDENT_ROUTES,
   ...TEAM_ROUTES,
   ...ATTENDANCE_ROUTES,
+  ...DOCS_ROUTES,
 ];
 
 const PUBLIC_PATHS = /^\/api\/auth\/(login|employee-login|student-login)$/;

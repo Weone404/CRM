@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { API_URL } from '../api';
+import { USE_SUPABASE } from '../backend/mode';
 
 export default function QuoteGenerator({ lead, onClose }) {
   const [courses, setCourses] = useState([]);
@@ -38,7 +39,7 @@ export default function QuoteGenerator({ lead, onClose }) {
 
     const token = localStorage.getItem('token');
     
-    if (discount > 0) {
+    if (!USE_SUPABASE && discount > 0) {
       await fetch(`${API_URL}/api/courses/${selectedCourse}/discount`, {
         method: 'PATCH',
         headers: {
@@ -49,7 +50,7 @@ export default function QuoteGenerator({ lead, onClose }) {
       });
     }
 
-    if (installments !== selectedCourseData?.installment_count) {
+    if (!USE_SUPABASE && installments !== selectedCourseData?.installment_count) {
       await fetch(`${API_URL}/api/courses/${selectedCourse}/installments`, {
         method: 'PATCH',
         headers: {
@@ -70,7 +71,9 @@ export default function QuoteGenerator({ lead, onClose }) {
       body: JSON.stringify({
         lead_id: lead.id,
         course_id: selectedCourse,
-        down_payment: downPayment
+        down_payment: downPayment,
+        // Supabase: this quote's own discount and instalments (the course itself is not changed)
+        ...(USE_SUPABASE ? { discount_percent: discount, installment_count: installments } : {})
       })
     });
     const data = await res.json();
@@ -80,7 +83,7 @@ export default function QuoteGenerator({ lead, onClose }) {
       alert(`Quote ${data.quote_id} generated! Check Outbox to review before sending.`);
       onClose();
     } else {
-      alert('Failed to generate quote');
+      alert(USE_SUPABASE && data?.detail ? `Could not generate the quote: ${data.detail}` : 'Failed to generate quote');
     }
   };
 
