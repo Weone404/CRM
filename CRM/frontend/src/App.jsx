@@ -27,6 +27,7 @@ const StudentDirectory = lazy(() => import('./components/StudentDirectory'));
 const Attendance = lazy(() => import('./components/Attendance'));
 const FlightBridge = lazy(() => import('./components/FlightBridge'));
 const AIIntegrations = lazy(() => import('./components/AIIntegrations'));
+const Connections = lazy(() => import('./components/Connections'));
 
 // Tabs the birthday popup is allowed to appear over: the landing tab plus the
 // two people-facing views. Anywhere else it would be an interruption.
@@ -293,7 +294,7 @@ export default function App() {
           {activeTab === 'team' && canAccessDirectory && <EmployeeDirectory />}
           {activeTab === 'policy' && department === 'Admin' && <PolicyDocs />}
           {activeTab === 'partnerships' && canAccessFlightBridge && <FlightBridge />}
-          {activeTab === 'settings' && USE_SUPABASE && department === 'Admin' && <AIIntegrations />}
+          {activeTab === 'settings' && USE_SUPABASE && department === 'Admin' && <><AIIntegrations /><Connections /></>}
           {activeTab === 'profile' && isEmployeeSession && <MyProfile />}
           {activeTab === 'leave' && isEmployeeSession && <LeaveCalendar employeeId={employee.id} />}
         </Suspense>
