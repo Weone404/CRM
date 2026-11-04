@@ -13,9 +13,18 @@ const PROVIDERS = [
   { id: 'openrouter', name: 'OpenRouter', hint: 'Starts with sk-or- — openrouter.ai/keys' },
   { id: 'google_places', name: 'Google Maps / Places', hint: 'Google Cloud console → Credentials' },
 ];
+// Keys saved in FlightBridge AI > Settings are shown here too (status only); they are managed there.
+const FB_ONLY = {
+  hostinger_mail: { name: 'Hostinger Mail API token', hint: 'Reads replies for FlightBridge AI' },
+  hostinger_mailbox: { name: 'Hostinger mailbox ID', hint: 'Which mailbox FlightBridge AI reads' },
+};
+const fbStatus = (k) => (k.last_test_ok === true ? { text: 'Working', bg: '#dcfce7', fg: '#166534' }
+  : k.last_test_ok === false ? { text: 'Problem', bg: '#fee2e2', fg: '#b91c1c' }
+  : { text: 'Saved', bg: '#fef9c3', fg: '#854d0e' });
 
 export default function AIIntegrations() {
   const [rows, setRows] = useState([]);
+  const [fbKeys, setFbKeys] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(null); // provider id being edited
@@ -25,16 +34,21 @@ export default function AIIntegrations() {
 
   const load = async () => {
     setLoading(true); setError('');
-    const { data, error: err } = await supabase.rpc('ai_integrations_list');
+    const [{ data, error: err }, fb] = await Promise.all([
+      supabase.rpc('ai_integrations_list'), supabase.rpc('ai_integrations_fb_keys')]);
     if (err) setError(err.message); else setRows(data || []);
+    setFbKeys(fb.error ? [] : fb.data || []);
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
 
   const saved = Object.fromEntries(rows.map((r) => [r.provider, r]));
+  const fb = Object.fromEntries(fbKeys.map((k) => [k.provider, k]));
   const extra = rows.filter((r) => !PROVIDERS.some((p) => p.id === r.provider))
     .map((r) => ({ id: r.provider, name: r.provider, hint: 'Custom provider' }));
-  const list = [...PROVIDERS, ...extra];
+  const fbExtra = fbKeys.filter((k) => !PROVIDERS.some((p) => p.id === k.provider) && !extra.some((x) => x.id === k.provider))
+    .map((k) => ({ id: k.provider, ...(FB_ONLY[k.provider] || { name: k.provider, hint: 'Saved in FlightBridge AI' }) }));
+  const list = [...PROVIDERS, ...extra, ...fbExtra];
 
   const save = async (provider) => {
     if (keyInput.trim().length < 8) { showToast('That key looks too short.', 'error'); return; }
@@ -75,6 +89,8 @@ export default function AIIntegrations() {
         <div className="space-y-2">
           {[...list, ...(editing && !list.some((p) => p.id === editing) ? [{ id: editing, name: editing, hint: 'Custom provider' }] : [])].map((p) => {
             const row = saved[p.id];
+            const fbKey = fb[p.id];
+            const st = fbKey && fbStatus(fbKey);
             const isEditing = editing === p.id;
             return (
               <div key={p.id} className="glass-card p-4">
@@ -93,12 +109,21 @@ export default function AIIntegrations() {
                         <button onClick={() => { setEditing(p.id); setKeyInput(''); }} className="glass-btn px-3 py-1.5">Replace</button>
                         <button onClick={() => remove(p.id)} className="px-3 py-1.5 rounded-lg font-medium" style={{ background: '#fee2e2', color: '#b91c1c' }}>Delete</button>
                       </>
+                    ) : fbKey ? (
+                      <span className="px-2 py-0.5 rounded-md" style={{ background: st.bg, color: st.fg }}>{st.text} · ••••{fbKey.last4}</span>
                     ) : (
                       !isEditing && <button onClick={() => { setEditing(p.id); setKeyInput(''); }} className="glass-btn px-3 py-1.5">Add key</button>
                     )}
                   </div>
                 </div>
                 {row && <div className="text-xs text-glass-muted mt-2">Updated {new Date(row.updated_at).toLocaleString()}{row.updated_by_name ? ` by ${row.updated_by_name}` : ''}</div>}
+                {fbKey && (
+                  <div className="text-xs text-glass-muted mt-2">
+                    {row && <span className="mr-1 px-1.5 py-0.5 rounded" style={{ background: st.bg, color: st.fg }}>FlightBridge: {st.text} · ••••{fbKey.last4}</span>}
+                    Saved in FlightBridge AI → Settings{fbKey.updated_by_name ? ` by ${fbKey.updated_by_name}` : ''}, {new Date(fbKey.updated_at).toLocaleString()} — change or test it there.
+                    {fbKey.last_test_ok === false && fbKey.last_test_message && <div style={{ color: '#b91c1c' }}>{fbKey.last_test_message}</div>}
+                  </div>
+                )}
                 {isEditing && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     <input type="password" autoComplete="off" value={keyInput} onChange={(e) => setKeyInput(e.target.value)} placeholder={`Paste the ${p.name} API key`} className="glass-input flex-1 min-w-[220px] px-3 py-2" autoFocus />
