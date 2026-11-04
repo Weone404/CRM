@@ -13,6 +13,7 @@ import { STUDENT_ROUTES } from './students';
 import { TEAM_ROUTES } from './team';
 import { ATTENDANCE_ROUTES } from './attendance';
 import { DOCS_ROUTES, OUTBOX_ROUTE } from './docs';
+import { FLIGHTBRIDGE_ROUTES } from './flightbridge';
 
 const json = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -144,6 +145,7 @@ const ROUTES = [
   ...TEAM_ROUTES,
   ...ATTENDANCE_ROUTES,
   ...DOCS_ROUTES,
+  ...FLIGHTBRIDGE_ROUTES,
 ];
 
 const PUBLIC_PATHS = /^\/api\/auth\/(login|employee-login|student-login)$/;
@@ -172,9 +174,9 @@ export async function handleApiRequest(method, path, query, rawBody) {
   return detail(501, `Not moved to the new backend yet: ${method} ${path}`);
 }
 
-// FlightBridge stays on the Render API (its engine runs there). Its calls go to Render unchanged,
-// carrying the Supabase session token, which Render verifies (CRM/backend/supabase_jwt.py).
-export const isRenderPassthrough = (path) => path.startsWith('/api/flightbridge/');
+// Nothing goes to the Render API any more: FlightBridge is answered by backend/flightbridge.js too
+// (its research engine runs separately, against the same database).
+export const isRenderPassthrough = () => false;
 
 export async function withSupabaseAuth(init = {}) {
   const { data } = supabase ? await supabase.auth.getSession() : { data: {} };
