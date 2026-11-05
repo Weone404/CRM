@@ -244,20 +244,20 @@ async function generateTemplates(req: Request): Promise<Response> {
   const key = await getSecret("groq_api_key");
   if (!key) throw new HttpError(400, "Save the Groq key in FlightBridge AI > Settings first");
   let first;
-  try { first = await groqJson(key, SYSTEM, prompt(brief), 900 * brief.count + 1500); } catch (e) { throw new HttpError(502, String((e as Error).message)); }
+  try { first = await groqJson(key, SYSTEM, prompt(brief), 1200 * brief.count + 2500); } catch (e) { throw new HttpError(502, String((e as Error).message)); }
   const variants = parseVariants(first.data, brief.count);
   if (!variants.length) throw new HttpError(502, "The AI writer returned nothing usable. Try again.");
   if (variants.length < brief.count) {          // the model sometimes writes fewer than asked: ask once for the rest
     try {
       const n = brief.count - variants.length;
-      variants.push(...parseVariants((await groqJson(key, SYSTEM, morePrompt(brief, variants, n), 900 * n + 1500)).data, n));
+      variants.push(...parseVariants((await groqJson(key, SYSTEM, morePrompt(brief, variants, n), 1200 * n + 2500)).data, n));
     } catch (e) { console.error("more versions failed", String(e)); }
   }
   let checks = await checkVariants(req, variants);
   const bad = variants.map((v, i) => ({ v, i, issues: [...checks[i].errors, ...styleIssues(v, brief)] })).filter((x) => x.issues.length);
   if (bad.length) {
     try {
-      const fixed = parseVariants((await groqJson(key, SYSTEM, repairPrompt(brief, bad), 900 * bad.length + 1500)).data, bad.length);
+      const fixed = parseVariants((await groqJson(key, SYSTEM, repairPrompt(brief, bad), 1200 * bad.length + 2500)).data, bad.length);
       fixed.forEach((f, j) => { variants[bad[j].i] = f; });
       checks = await checkVariants(req, variants);
     } catch (e) { console.error("template repair failed", String(e)); }

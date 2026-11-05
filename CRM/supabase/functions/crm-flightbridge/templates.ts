@@ -135,38 +135,69 @@ export function briefText(b: Brief): string {
     line("Desired next step", b.next_step) + line("Extra instructions", b.instructions);
 }
 
-const MODELS = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
+// Groq production models, best writer first; each has its own free-tier limits, so the next one is tried when one is
+// rate-limited (429), unavailable to this key (403/404; an organisation can switch models off) or answers badly.
+const MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
 
-export async function groqJson(key: string, system: string, user: string, maxTokens = 6000): Promise<{ data: unknown; model: string }> {
-  let last = "";
-  const tries = MODELS.flatMap((m) => [m, m]);          // each model twice: a 429 (free-tier minute limit) often clears in seconds
-  for (let t = 0; t < tries.length; t++) {
-    const model = tries[t];
-    if (t % 2 === 1 && !last.endsWith(": 429")) continue;
-    let r: Response;
-    try {
-      r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST", signal: AbortSignal.timeout(40000),
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model, temperature: 0.7, max_tokens: maxTokens, response_format: { type: "json_object" },
-        ...(model.startsWith("openai/gpt-oss") ? { reasoning_effort: "low" } : {}),
-        messages: [{ role: "system", content: system }, { role: "user", content: user }] }),
-      });
-    } catch { last = `${model}: no answer`; continue; }
-    if (r.ok) {
+// Lenient JSON reading: code fences, text around the object, trailing commas.
+export function looseJson(text: string): unknown {
+  const t = (text || "").replace(/```(?:json)?/gi, "");
+  const i = t.indexOf("{"), j = t.lastIndexOf("}");
+  if (i < 0 || j <= i) throw new Error("no JSON object");
+  const body = t.slice(i, j + 1);
+  try { return JSON.parse(body); } catch { return JSON.parse(body.replace(/,\s*([}\]])/g, "$1")); }
+}
+
+export async function groqJson(key: string, system: string, user: string, maxTokens = 8000): Promise<{ data: unknown; model: string }> {
+  const failed: string[] = [];
+  for (const model of MODELS) {
+    let jsonMode = true, waited = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      let r: Response;
       try {
-        const j = await r.json();
-        return { data: JSON.parse(j.choices[0].message.content), model };
-      } catch { last = `${model}: unreadable answer`; continue; }
-    }
-    last = `${model}: ${r.status}`;
-    if (r.status === 401) throw new Error("The Groq key was refused: check it in Settings");
-    if (r.status === 429 && t % 2 === 0) {
-      const wait = Math.min(8, Number(r.headers.get("retry-after")) || 4);
-      await new Promise((ok) => setTimeout(ok, wait * 1000));
+        r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST", signal: AbortSignal.timeout(45000),
+          headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ model, temperature: 0.6, max_tokens: maxTokens,
+            ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
+            ...(model.startsWith("openai/gpt-oss") ? { reasoning_effort: "low" } : {}),
+            messages: [{ role: "system", content: system }, { role: "user", content: user }] }),
+        });
+      } catch (e) { failed.push(`${model}: no answer (${(e as Error).name})`); break; }
+      if (r.ok) {
+        try {
+          const j = await r.json();
+          return { data: looseJson(j.choices[0].message.content), model };
+        } catch {
+          if (jsonMode) { jsonMode = false; continue; }      // cut short or malformed: once more without JSON mode
+          failed.push(`${model}: unreadable answer`);
+          break;
+        }
+      }
+      let err: Record<string, unknown> = {};
+      try { err = (await r.json())?.error ?? {}; } catch { /* not JSON */ }
+      if (r.status === 401) throw new Error("The Groq key was refused: check it in FlightBridge AI > Settings");
+      // JSON mode rejected the model's output: use what it wrote if it reads as JSON, else ask again without JSON mode
+      if (r.status === 400 && jsonMode && /json/i.test(String(err.message ?? ""))) {
+        try { return { data: looseJson(String(err.failed_generation ?? "")), model }; } catch { /* ask again */ }
+        jsonMode = false;
+        continue;
+      }
+      const wait = Number(r.headers.get("retry-after"));
+      if (r.status === 429 && !waited && (!wait || wait <= 8)) {        // a per-minute limit: wait once and retry
+        waited = true;
+        await new Promise((ok) => setTimeout(ok, (wait || 4) * 1000));
+        continue;
+      }
+      failed.push(`${model}: ${r.status} ${String(err.message ?? "").slice(0, 120)}`.trim());
+      break;
     }
   }
-  throw new Error(`The AI writer is busy or unavailable (${last}). Try again in a minute.`);
+  console.error("groq failed", failed.join(" | "));
+  const limited = failed.length > 0 && failed.every((f) => / 429/.test(f) || / 40[34]/.test(f)) && failed.some((f) => / 429/.test(f));
+  throw new Error(limited
+    ? "Groq's free limit is used up for now. Try again in a few minutes."
+    : `The AI writer could not answer: ${failed.join("; ")}`);
 }
 
 export function prompt(b: Brief): string {
