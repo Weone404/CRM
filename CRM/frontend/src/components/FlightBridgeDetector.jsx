@@ -13,6 +13,7 @@ const SKU_LABEL = {
   text_search_enterprise: ['Website look-ups', 'finding each school’s website'],
   place_details_pro: ['Location look-ups', 'placing older schools on the globe'],
   place_details_enterprise: ['Phone look-ups', 'Google phone numbers'],
+  tavily_search: ['Web searches', 'Tavily, for websites Google didn’t give'],
 };
 const ELIG = {
   eligible_verified: ['Eligible', '#248A3D', 'rgba(52,199,89,0.16)'], eligible_claimed: ['Check needed', '#C93400', 'rgba(255,149,0,0.14)'],

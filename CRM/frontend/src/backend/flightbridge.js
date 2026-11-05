@@ -98,6 +98,8 @@ export const FLIGHTBRIDGE_ROUTES = [
   ['POST', r('/automation/settings'), ({ body }) => rpc('api_fb_autopilot_set', { p_data: body || {} })],
 
   ['GET', r('/integrations'), () => rpc('api_fb_integrations')],
+  ['GET', r('/register-uploads'), () => rpc('api_fb_register_uploads')],
+  ['POST', r('/register-uploads'), ({ body }) => rpc('api_fb_register_upload', { p_data: body || {} })],
   ['POST', r('/integrations/([a-z_]+)/test'), ({ params }) => edge(`/integrations/${params[0]}/test`)],
   ['POST', r('/integrations/([a-z_]+)'), ({ params, body }) => edge(`/integrations/${params[0]}`, body)],
   ['DELETE', r(`/integrations/${ID}`), ({ params }) => rpc('api_fb_integration_delete', { p_name: dec(params[0]) })],

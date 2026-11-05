@@ -5,6 +5,7 @@ import FlightBridgeSchools from './FlightBridgeSchools';
 import FlightBridgeDetector from './FlightBridgeDetector';
 import Icon from './icons';
 import SectionNav from './SectionNav';
+import { countryName } from '../utils/country';
 import { Areas, Automation, Team } from './FlightBridgeOps';
 
 // FlightBridge partnership module (Admin only). This screen records human decisions.
@@ -316,6 +317,7 @@ function Metrics() {
 
 
 const KEY_HELP = {
+  tavily_api_key: { where: 'app.tavily.com > API Keys (free: 1,000 searches a month, no card needed).', used: 'Searches the web for school websites the free address-guessing didn\'t find (paced to 900 a month).' },
   google_places_api_key: { where: 'Google Cloud > APIs & Services > Credentials. Enable "Places API (New)" in the same project.', used: 'Finds each school\'s official website.' },
   groq_api_key: { where: 'console.groq.com > API Keys (free tier).', used: 'Writes a 2-sentence summary of each school and double-checks replies.' },
   gemini_api_key: { where: 'aistudio.google.com > Get API key (free tier).', used: 'Same as Groq - use one of the two.' },
@@ -323,7 +325,7 @@ const KEY_HELP = {
   hostinger_mailbox_resource_id: { where: 'Shown next to the API token in hPanel.', used: 'Which mailbox to read.' },
 };
 const GROUPS = [
-  { title: 'Website search', keys: ['google_places_api_key'] },
+  { title: 'Website search', keys: ['tavily_api_key', 'google_places_api_key'] },
   { title: 'Free AI (optional)', keys: ['groq_api_key', 'gemini_api_key'], provider: true },
   { title: 'Mailbox (replies)', keys: ['hostinger_mail_api_token', 'hostinger_mailbox_resource_id'], inbound: true },
 ];
@@ -366,6 +368,138 @@ function KeyRow({ k, onChanged }) {
         {k.saved && <button className="px-3 py-2 text-sm rounded-lg border border-red-200 bg-white text-red-600 hover:bg-red-50" disabled={busy} onClick={remove}>Remove</button>}
       </div>
       <div className="text-xs text-glass-muted mt-1">Where to get it: {help.where}</div>
+    </div>
+  );
+}
+
+// Official lists ("upload centre"): regulator lists that a person must download or save, because the regulator's site
+// refuses automated downloads. Lists the engine fetches by itself are shown as Automatic; where no list is published
+// online, schools are confirmed one by one on the school page.
+const UPLOAD_STATUS = { pending: ['Waiting for the engine', 'bg-yellow-100 text-yellow-800'], imported: ['Imported', 'bg-green-100 text-green-800'],
+  error: ['Problem', 'bg-red-100 text-red-800'] };
+const MODE = { upload: ['Upload needed', 'bg-orange-100 text-orange-800'], optional: ['Optional', 'bg-indigo-100 text-indigo-800'],
+  auto: ['Automatic', 'bg-green-100 text-green-800'], none: ['No list online', 'bg-gray-100 text-gray-700'] };
+const SAVE_PAGE = 'Save the page: Safari > File > Save As… > Format "Page Source"; Chrome > Ctrl/Cmd+S > "Webpage, HTML Only".';
+const OFFICIAL_LISTS = [
+  { country: 'US', lists: [
+    { kind: 'faa_part141', mode: 'upload', title: 'FAA Part 141 pilot schools', proves: 'US schools on it become Eligible.',
+      link: 'https://www.faa.gov/av-info/facility-dashboard', linkText: 'FAA facility dashboard',
+      steps: ['Open the FAA facility dashboard.', 'Show the Part 141 pilot schools (use the dashboard’s filter if it has one).',
+        'Click Download (bottom bar of the dashboard) > Crosstab > CSV or Excel.', 'Upload the file here. Once a month is enough.'] },
+    { mode: 'none', title: 'SEVP-certified schools (M-1 student visas)', proves: 'Second way a US school can be Eligible.',
+      link: 'https://studyinthestates.dhs.gov/school-search', linkText: 'SEVP school search',
+      steps: ['No download is offered. Search the school there, then press “I checked – it’s approved” on the school.'] },
+  ] },
+  { country: 'CA', lists: [
+    { kind: 'tc_ftu', mode: 'upload', title: 'Transport Canada Flight Training Units', proves: 'Canadian schools on it become Eligible.',
+      link: 'https://wwwapps.tc.gc.ca/Saf-Sec-Sur/2/CAS-SAC/ftaefveas.aspx?lang=eng', linkText: 'Flight Training Units Search',
+      steps: ['Open the Flight Training Units Search.', 'Search by “Flight Training Unit” with the name left empty; Region and Province “All records”; Category “Aeroplane”. Click Search.',
+        SAVE_PAGE, 'Upload the saved .html file. If the results run over several pages, save and upload each page.'] },
+    { kind: 'ircc_dli', mode: 'optional', title: 'IRCC Designated Learning Institutions', proves: 'Second way a Canadian school can be Eligible (study permits).',
+      link: 'https://www.canada.ca/en/immigration-refugees-citizenship/services/study-canada/study-permit/prepare/designated-learning-institutions-list.html',
+      linkText: 'DLI list', steps: ['Open the DLI list and show a province.', SAVE_PAGE, 'Upload it. Only aviation colleges are kept.'] },
+  ] },
+  { country: 'AU', lists: [
+    { mode: 'auto', title: 'CRICOS providers (student visas)', proves: 'Australian schools on it become Eligible.',
+      link: 'https://data.gov.au/data/dataset/cricos', linkText: 'data.gov.au', steps: ['Nothing to do: the engine downloads it every month.'] },
+    { kind: 'casa_ato', mode: 'optional', title: 'CASA Part 141 / 142 flight training operators', proves: 'Second way an Australian school can be Eligible.',
+      link: 'https://www.casa.gov.au/search-centre/flight-training-operators', linkText: 'Find a flight training operator',
+      steps: ['Open CASA’s “Find a flight training operator”.', SAVE_PAGE + ' Do this for each results page.', 'Upload the saved pages.'] },
+  ] },
+  { country: 'GB', lists: [
+    { mode: 'auto', title: 'UK CAA Approved Training Organisations (SD31)', proves: 'UK schools on it are Eligible.',
+      link: 'https://www.caa.co.uk/publication/download/13488', linkText: 'CAA SD31 (PDF)', steps: ['Nothing to do: already loaded from the CAA list.'] },
+  ] },
+  { country: 'NZ', lists: [
+    { mode: 'none', title: 'CAA NZ Part 141 / NZQA', proves: 'New Zealand schools are confirmed one by one.',
+      link: 'https://www.aviation.govt.nz/', linkText: 'CAA New Zealand',
+      steps: ['No downloadable list was found. Check the school on the CAA site, then press “I checked – it’s approved” on the school.'] },
+  ] },
+  { country: 'Other', lists: [
+    { mode: 'none', title: 'Every other country', proves: 'Schools show as “Check needed” once their website is read.',
+      steps: ['Check the school on that country’s aviation authority site, then press “I checked – it’s approved” and paste the page link.'] },
+  ] },
+];
+function toBase64(buf) {
+  const bytes = new Uint8Array(buf); let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+function ListCard({ l, uploads, onUploaded }) {
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(l.mode === 'upload');
+  const [mLabel, mCls] = MODE[l.mode];
+  const mine = uploads.filter((u) => u.kind === l.kind).slice(0, 3);
+  const upload = async (files) => {
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    setBusy(true);
+    let ok = 0;
+    for (const file of list) {
+      if (file.size > 10 * 1024 * 1024) { showToast(`${file.name}: too large (10 MB at most)`, 'error'); continue; }
+      try {
+        await call('/register-uploads', { method: 'POST', body: JSON.stringify({ kind: l.kind, filename: file.name, content_b64: toBase64(await file.arrayBuffer()) }) });
+        ok += 1;
+      } catch (e) { showToast(`${file.name}: ${e.message}`, 'error'); }
+    }
+    setBusy(false);
+    if (ok) { showToast(`${ok} file${ok > 1 ? 's' : ''} uploaded. The engine imports ${ok > 1 ? 'them' : 'it'} on its next cycle (within 15 minutes).`, 'success'); onUploaded(); }
+  };
+  return (
+    <div className="glass-subtle p-3">
+      <button type="button" className="w-full flex flex-wrap items-start justify-between gap-2 text-left" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <span className="min-w-0">
+          <span className="block font-semibold text-sm">{l.title}</span>
+          <span className="block text-xs text-glass-muted">{l.proves}</span>
+        </span>
+        <Badge text={mLabel} style={mCls} />
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2">
+          <ol className="text-sm list-decimal pl-5 space-y-1">{l.steps.map((st, i) => <li key={i}>{st}</li>)}</ol>
+          <div className="flex flex-wrap items-center gap-2">
+            {l.link && <a className="text-sm font-medium text-blue-600 underline" href={l.link} target="_blank" rel="noreferrer noopener">Open {l.linkText}</a>}
+            {l.kind && (
+              <label className={`glass-btn inline-flex items-center gap-2 px-4 py-2 text-sm cursor-pointer ${busy ? 'opacity-60 pointer-events-none' : ''}`}>
+                {busy ? 'Uploading…' : 'Upload file'}
+                <input type="file" multiple accept=".csv,.xlsx,.tsv,.txt,.html,.htm" className="hidden" disabled={busy}
+                  onChange={(e) => { upload(e.target.files); e.target.value = ''; }} />
+              </label>
+            )}
+          </div>
+          {mine.map((u) => {
+            const [label, cls] = UPLOAD_STATUS[u.status] || [u.status, 'bg-gray-100 text-gray-700'];
+            const r = u.result || {};
+            return (
+              <div key={u.id} className="text-xs rounded-lg px-2 py-1.5 bg-white/70">
+                <div className="flex flex-wrap justify-between gap-2"><span className="break-all font-medium">{u.filename}</span><Badge text={label} style={cls} /></div>
+                <div className="text-glass-muted">{new Date(u.uploaded_at).toLocaleString('en-IN')}{u.uploaded_by ? ` · ${u.uploaded_by}` : ''}</div>
+                {u.status === 'imported' && <div>{(r.rows ?? 0).toLocaleString()} schools read · {(r.matched ?? 0).toLocaleString()} matched · {(r.created ?? 0).toLocaleString()} added</div>}
+                {u.status === 'error' && <div className="text-red-700">{r.error}</div>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+function OfficialLists() {
+  const [uploads, setUploads] = useState([]);
+  const load = useCallback(() => call('/register-uploads').then(setUploads, () => {}), []);
+  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
+  return (
+    <div className="glass-card p-4 space-y-3">
+      <div>
+        <h3 className="font-bold">Official lists</h3>
+        <p className="text-sm text-glass-muted">The approval lists that make schools Eligible, country by country. Some regulators block automatic downloads, so those lists are downloaded here by hand; the rest run on their own.</p>
+      </div>
+      {OFFICIAL_LISTS.map((c) => (
+        <div key={c.country}>
+          <div className="text-[12px] font-semibold uppercase tracking-wider text-glass-secondary mb-1.5">{c.country === 'Other' ? 'Other countries' : countryName(c.country)}</div>
+          <div className="space-y-2">{c.lists.map((l) => <ListCard key={l.title} l={l} uploads={uploads} onUploaded={load} />)}</div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -414,6 +548,8 @@ function Settings() {
         </div>
         <div className="text-xs text-glass-muted mt-2">Sending: {data.dry_run || !data.outbound_enabled ? 'off on the server (dry run) — emails can be approved but not sent.' : 'enabled on the server; the kill switch still applies.'}</div>
       </div>
+
+      <OfficialLists />
 
       {GROUPS.map((g) => (
         <div key={g.title} className="glass-card p-4">

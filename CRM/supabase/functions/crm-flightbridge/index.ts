@@ -63,6 +63,7 @@ async function asUser(req: Request, fn: string, args: Record<string, unknown>) {
 const ENV_NAMES: Record<string, string> = {
   google_places_api_key: "GOOGLE_PLACES_API_KEY", groq_api_key: "GROQ_API_KEY", gemini_api_key: "GEMINI_API_KEY",
   hostinger_mail_api_token: "HOSTINGER_MAIL_API_TOKEN", hostinger_mailbox_resource_id: "HOSTINGER_MAILBOX_RESOURCE_ID",
+  tavily_api_key: "TAVILY_API_KEY",
 };
 const master = () => Deno.env.get("FB_SECRETS_KEY") || "";
 
@@ -134,6 +135,14 @@ async function check(name: string, value: string, mailboxToken: string | null): 
     if (name === "gemini_api_key") {
       const r = await get("https://generativelanguage.googleapis.com/v1beta/models", { "x-goog-api-key": value });
       return r.ok ? [true, "Connected to Gemini (free tier)."] : [false, `Gemini refused the key (HTTP ${r.status}).`];
+    }
+    if (name === "tavily_api_key") {     // one basic search = 1 of the 1,000 free monthly credits
+      const r = await fetch("https://api.tavily.com/search", {
+        method: "POST", signal: AbortSignal.timeout(20000),
+        headers: { Authorization: `Bearer ${value}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ query: "flight school", search_depth: "basic", max_results: 1 }),
+      });
+      return r.ok ? [true, "Connected to Tavily (free 1,000 searches a month)."] : [false, `Tavily refused the key (HTTP ${r.status}).`];
     }
     if (name === "hostinger_mail_api_token") {
       const r = await get(`${HOSTINGER}/api/v1/me`, { Authorization: `Bearer ${value}`, Accept: "application/json", "User-Agent": HOSTINGER_UA });
