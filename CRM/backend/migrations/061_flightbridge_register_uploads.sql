@@ -1,6 +1,6 @@
 -- 061: FlightBridge official-list uploads (FAA Part 141, Transport Canada FTUs, IRCC DLIs, CASA) that a person downloads and uploads.
 -- COPY of nikkk07/FlightBridge-AI flightbridge/migrations/008_register_uploads.sql (canonical). Do not edit here;
--- edit upstream and re-copy. sha256 of canonical file: 45c7f5dd821c57428d5bdd71d68ea214b584deb76b380ac20ee5cb00afd85dd2
+-- edit upstream and re-copy. sha256 of canonical file: 7758c1bea9a2d6fd2afa220eca5485ecf27613e28e875be908b038efdb9cce6a
 -- Applied automatically by the FlightBridge engine on start-up (flightbridge db.ensure_schema). Additive; schema 'flightbridge' only.
 
 -- 008: official school lists uploaded by a person in the CRM (FAA Part 141, Transport Canada FTUs, IRCC DLIs, CASA ...).
@@ -21,3 +21,8 @@ CREATE TABLE IF NOT EXISTS flightbridge.register_upload (
 CREATE INDEX IF NOT EXISTS idx_fb_register_upload_pending ON flightbridge.register_upload (uploaded_at) WHERE status = 'pending';
 ALTER TABLE flightbridge.register_upload DROP CONSTRAINT IF EXISTS register_upload_kind_check;
 ALTER TABLE flightbridge.register_upload ADD CONSTRAINT register_upload_kind_check CHECK (kind ~ '^[a-z0-9_]{2,40}$');
+-- Tavily web-search key can be saved like the other keys
+ALTER TABLE flightbridge.integration_secret DROP CONSTRAINT IF EXISTS integration_secret_name_check;
+ALTER TABLE flightbridge.integration_secret ADD CONSTRAINT integration_secret_name_check CHECK (name = ANY (ARRAY[
+  'google_places_api_key', 'groq_api_key', 'gemini_api_key', 'hostinger_mail_api_token', 'hostinger_mailbox_resource_id',
+  'tavily_api_key']));
