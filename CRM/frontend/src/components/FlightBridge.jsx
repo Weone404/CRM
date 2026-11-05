@@ -176,6 +176,165 @@ function ApprovalDetail({ id, onDone, onBack }) {
 }
 
 
+
+// "Write with AI": the person describes the email; the AI writes 3-5 different versions (3 subject lines each, the email
+// and a 5-7 day follow-up) following the outreach writing rules. School facts stay placeholders, filled for each school
+// from verified data when its draft is made. Picking a version saves it as a DRAFT template: an admin still approves it.
+const SAMPLE_SCHOOL = { school_name: 'Sheble Aviation', city: 'Ardmore', state: 'Oklahoma', country: 'the United States', credential: 'FAA Part 141 certification' };
+const PLACEHOLDER_RE = /\{\{\s*([a-z_]+)\s*\}\}/g;
+const fillSample = (t) => (t || '').replace(PLACEHOLDER_RE, (m, k) => SAMPLE_SCHOOL[k] ?? m);
+const PLACEHOLDER_HELP = [['{{school_name}}', 'school name'], ['{{city}}', 'town'], ['{{state}}', 'state / province'],
+  ['{{country}}', 'country'], ['{{credential}}', 'its official approval, e.g. “FAA Part 141 certification”']];
+const ABOUT_DEFAULT = 'We One Aviation is based in Dwarka, Delhi, and was founded in 2009. We teach DGCA ground subjects (theory) in classroom and online batches and provide pilot-career counselling to Indian students. We are looking for flying-school partners for our students’ practical flight training.';
+const BRIEF_FIELDS = [
+  ['sender_name', 'Your name', 'e.g. Nikhil Bisht'], ['sender_title', 'Your title', 'e.g. Partnerships Lead'],
+  ['organisation', 'Organisation', 'We One Aviation'], ['sender_email', 'Email in the signature', 'e.g. info@weoneaviation.com'],
+  ['sender_phone', 'Phone in the signature', 'e.g. +91 93556 11996'],
+];
+
+function VariantCard({ v, n, preview, onEdit, onSaved }) {
+  const [pick, setPick] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [showFollow, setShowFollow] = useState(false);
+  const show = (t) => (preview ? fillSample(t) : t);
+  const problems = [...(v.check?.errors || []), ...(v.style || [])];
+  const save = async () => {
+    setBusy(true);
+    try {
+      const a = await call('/templates', { method: 'POST', body: JSON.stringify({ kind: 'initial', subject: v.subjects[pick], body: v.body }) });
+      let msg = `Saved as First email v${a.version}`;
+      if (v.followup_body) {
+        const f = await call('/templates', { method: 'POST', body: JSON.stringify({ kind: 'followup_1', subject: v.followup_subject || v.subjects[pick], body: v.followup_body }) });
+        msg += ` and Follow-up 1 v${f.version}`;
+      }
+      showToast(`${msg}. Review and approve them below.`, 'success');
+      onSaved();
+    } catch (e) { showToast(e.message, 'error'); } finally { setBusy(false); }
+  };
+  return (
+    <div className="glass-subtle p-3 space-y-2">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="font-semibold text-sm">{n}. {v.label}</div>
+          {v.approach && <div className="text-xs text-glass-muted">{v.approach}</div>}
+        </div>
+        <Badge text={problems.length ? 'Needs a fix' : 'Passes checks'} style={problems.length ? 'bg-orange-100 text-orange-800' : 'bg-green-100 text-green-800'} />
+      </div>
+      <fieldset className="space-y-1">
+        <legend className="text-xs font-medium text-glass-secondary">Subject line</legend>
+        {v.subjects.map((sub, i) => (
+          <label key={i} className="flex items-start gap-2 text-sm cursor-pointer">
+            <input type="radio" name={`fb-ai-subj-${n}`} className="mt-1" checked={pick === i} onChange={() => setPick(i)} />
+            <span>{show(sub)}</span>
+          </label>
+        ))}
+      </fieldset>
+      <div className="text-sm whitespace-pre-wrap rounded-lg p-3" style={{ background: 'rgba(255,255,255,0.55)' }}>{show(v.body)}</div>
+      {v.followup_body && (
+        <div>
+          <button type="button" className="text-xs font-medium text-blue-600" onClick={() => setShowFollow((x) => !x)} aria-expanded={showFollow}>
+            {showFollow ? 'Hide' : 'Show'} the follow-up (sent 5–7 days later if there is no reply)
+          </button>
+          {showFollow && (
+            <div className="mt-1 text-sm whitespace-pre-wrap rounded-lg p-3" style={{ background: 'rgba(255,255,255,0.4)' }}>
+              <div className="font-medium mb-1">{show(v.followup_subject)}</div>{show(v.followup_body)}
+            </div>
+          )}
+        </div>
+      )}
+      {problems.length > 0 && <Reasons list={problems} />}
+      {(v.check?.warnings || []).length > 0 && <div className="text-xs text-orange-700">{v.check.warnings.join(' ')}</div>}
+      <div className="flex flex-wrap gap-2">
+        <button disabled={busy} onClick={save} className="glass-btn px-4 py-2 text-sm">{busy ? 'Saving…' : 'Use this version'}</button>
+        <button type="button" onClick={() => onEdit(v.subjects[pick], v.body)} className="glass-btn px-4 py-2 text-sm" style={{ background: 'rgba(118,118,128,0.18)', color: 'inherit' }}>Edit first</button>
+      </div>
+    </div>
+  );
+}
+
+function AiWriter({ onSaved, onEdit }) {
+  const [b, setB] = useState({ organisation: 'We One Aviation', about: ABOUT_DEFAULT, count: '3' });
+  const [busy, setBusy] = useState(false);
+  const [out, setOut] = useState(null);
+  const [preview, setPreview] = useState(true);
+  const [open, setOpen] = useState(true);
+  useEffect(() => {
+    call('/templates/brief').then((x) => {
+      if (x && typeof x === 'object') setB((p) => ({ ...p, ...Object.fromEntries(Object.entries(x).filter(([k, v]) => v != null && v !== '' && k !== 'count')) }));
+    }).catch(() => {});
+  }, []);
+  const set = (k) => (e) => setB((p) => ({ ...p, [k]: e.target.value }));
+  const ready = ((b.reason || '') + (b.instructions || '')).trim().length >= 10;
+  const generate = async () => {
+    setBusy(true); setOut(null);
+    try { setOut(await call('/templates/generate', { method: 'POST', body: JSON.stringify({ ...b, count: Number(b.count) }) })); }
+    catch (e) { showToast(e.message, 'error'); } finally { setBusy(false); }
+  };
+  return (
+    <div className="glass-card p-4 space-y-3">
+      <button type="button" className="w-full flex items-center justify-between gap-2 text-left" onClick={() => setOpen((x) => !x)} aria-expanded={open}>
+        <span>
+          <span className="block font-semibold">Write with AI</span>
+          <span className="block text-xs text-glass-muted">Describe the email; get 3–5 different versions with subject lines and a follow-up. Pick one, then approve it below.</span>
+        </span>
+        <span className="text-glass-muted text-sm">{open ? 'Hide' : 'Show'}</span>
+      </button>
+      {open && (
+        <>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {BRIEF_FIELDS.map(([k, label, ph]) => (
+              <label key={k} className="text-xs font-medium text-glass-secondary">{label}
+                <input className="glass-input w-full px-3 py-2 text-sm mt-1" value={b[k] || ''} placeholder={ph} onChange={set(k)} maxLength={160} />
+              </label>
+            ))}
+            <label className="text-xs font-medium text-glass-secondary">Versions to write
+              <select className="glass-input w-full px-3 py-2 text-sm mt-1" value={b.count} onChange={set('count')}>
+                {['3', '4', '5'].map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+          </div>
+          <label className="block text-xs font-medium text-glass-secondary">About your organisation (only these facts are used)
+            <textarea className="glass-input w-full px-3 py-2 text-sm mt-1" rows={3} maxLength={2000} value={b.about || ''} onChange={set('about')} />
+          </label>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <label className="text-xs font-medium text-glass-secondary">Why you are writing
+              <textarea className="glass-input w-full px-3 py-2 text-sm mt-1" rows={3} maxLength={1500} value={b.reason || ''} placeholder="e.g. Our students finish DGCA theory with us and need a flying school abroad for their CPL." onChange={set('reason')} />
+            </label>
+            <label className="text-xs font-medium text-glass-secondary">What the school gains
+              <textarea className="glass-input w-full px-3 py-2 text-sm mt-1" rows={3} maxLength={1500} value={b.value || ''} placeholder="e.g. Students who arrive with theory done and documents ready." onChange={set('value')} />
+            </label>
+            <label className="text-xs font-medium text-glass-secondary">Next step you want
+              <textarea className="glass-input w-full px-3 py-2 text-sm mt-1" rows={3} maxLength={300} value={b.next_step || ''} placeholder="e.g. A 15-minute call with the admissions team." onChange={set('next_step')} />
+            </label>
+          </div>
+          <label className="block text-xs font-medium text-glass-secondary">Your instructions (anything else: tone, length, what to stress or avoid)
+            <textarea id="fb-ai-prompt" className="glass-input w-full px-3 py-2 text-sm mt-1" rows={3} maxLength={3000} value={b.instructions || ''} placeholder="e.g. Keep it under 150 words. Mention that we can share student profiles before they apply." onChange={set('instructions')} />
+          </label>
+          <div className="text-xs text-glass-muted">
+            Filled in for each school when its email is drafted, from verified data only:{' '}
+            {PLACEHOLDER_HELP.map(([ph, what], i) => <span key={ph}>{i > 0 && ' · '}<code>{ph}</code> {what}</span>)}.
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <button disabled={busy || !ready} onClick={generate} className="glass-btn px-4 py-2">{busy ? 'Writing… (about 20–40 seconds)' : out ? 'Write new versions' : 'Write versions'}</button>
+            {!ready && <span className="text-xs text-glass-muted">Say why you are writing, or add instructions.</span>}
+            {out && (
+              <label className="text-sm flex items-center gap-2">
+                <input type="checkbox" checked={preview} onChange={(e) => setPreview(e.target.checked)} /> Preview with a real school (Sheble Aviation, Ardmore)
+              </label>
+            )}
+          </div>
+          {out && (
+            <div className="space-y-2">
+              {out.variants.map((v, i) => <VariantCard key={`${i}-${v.label}`} v={v} n={i + 1} preview={preview} onEdit={onEdit} onSaved={onSaved} />)}
+              <div className="text-xs text-glass-muted">Written by {out.model} on Groq. Nothing is sent: a saved version waits for approval, and every email still goes to Approvals first.</div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 const KIND_LABEL = { initial: 'First email', followup_1: 'Follow-up 1', followup_2: 'Follow-up 2', followup_3: 'Follow-up 3' };
 
 function Templates() {
@@ -203,17 +362,23 @@ function Templates() {
     catch (e) { showToast(e.message, 'error'); }
   };
 
+  const editDraft = (subj, text) => {
+    setKind('initial'); setSubject(subj); setBody(text); setResult(null);
+    setTimeout(() => document.getElementById('fb-tpl-subject')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+  };
+
   return (
     <div className="space-y-4">
+      <AiWriter onSaved={() => { setKind('initial'); setResult(null); load(); }} onEdit={editDraft} />
       <div className="glass-card p-4 space-y-3">
         <div className="flex flex-wrap gap-2 items-center justify-between">
-          <div className="font-semibold">Paste your outreach email</div>
+          <div className="font-semibold">Paste or edit your outreach email</div>
           <select id="fb-tpl-kind" className="glass-input px-2 py-1 text-sm" value={kind} onChange={(e) => { setKind(e.target.value); setResult(null); }}>
             {Object.entries(KIND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
         </div>
         <input id="fb-tpl-subject" className="glass-input w-full px-3 py-2" maxLength={150} placeholder="Subject, e.g. Student referral partnership with {{school_name}}" value={subject} onChange={(e) => setSubject(e.target.value)} />
-        <textarea id="fb-tpl-body" className="glass-input w-full px-3 py-2 font-mono text-sm" rows={12} placeholder={'Paste the email body here.\n\nYou may use {{school_name}}, {{city}} and {{country}}.\nDo not add an unsubscribe line or signature divider: the legal footer is added automatically.'} value={body} onChange={(e) => setBody(e.target.value)} />
+        <textarea id="fb-tpl-body" className="glass-input w-full px-3 py-2 font-mono text-sm" rows={12} placeholder={'Paste the email body here.\n\nYou may use {{school_name}}, {{city}}, {{state}}, {{country}} and {{credential}}.\nDo not add an unsubscribe line or signature divider: the legal footer is added automatically.'} value={body} onChange={(e) => setBody(e.target.value)} />
         <div className="flex flex-wrap gap-2 items-center">
           <button disabled={busy || !subject.trim() || body.trim().length < 20} onClick={save} className="glass-btn px-4 py-2">Save and check</button>
           <span className="text-xs text-glass-muted">Saving creates a new version. Only an approved version is used for drafts.</span>

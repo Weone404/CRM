@@ -3,6 +3,7 @@
 //   POST /crm-flightbridge/integrations/{name}        save + test an API key   (signed-in FlightBridge admin)
 //   POST /crm-flightbridge/integrations/{name}/test   test the saved key       (signed-in FlightBridge admin)
 //   POST /crm-flightbridge/areas                      add an area by name; Google finds the coordinates (admin)
+//   POST /crm-flightbridge/templates/generate         "Write with AI": 3-5 checked email-template versions (admin)
 //   POST /crm-flightbridge/webhooks/hostinger         Hostinger mailbox webhook (Authorization: Bearer <secret>)
 //
 // Edge Function secrets:
@@ -15,6 +16,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import { fernetDecrypt, fernetEncrypt, last4 } from "./fernet.ts";
+import { type Brief, groqJson, morePrompt, parseVariants, prompt, repairPrompt, styleIssues, SYSTEM, type Variant } from "./templates.ts";
 
 const URL_ = Deno.env.get("SUPABASE_URL")!;
 const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -215,6 +217,54 @@ async function addArea(req: Request): Promise<Response> {
   return json(req, 200, out);
 }
 
+// "Write with AI": permission, daily limit and the remembered brief are handled in the database (as the user); the
+// Groq key is read here; every version is checked with the template rules, and broken ones are sent back once.
+async function checkVariants(req: Request, vs: Variant[]): Promise<{ ok: boolean; errors: string[]; warnings: string[] }[]> {
+  const items: { subject: string; body: string }[] = [];
+  for (const v of vs) {
+    for (const s of v.subjects) items.push({ subject: s, body: v.body });
+    items.push({ subject: v.followup_subject || v.subjects[0], body: v.followup_body || v.body });
+  }
+  const res = await asUser(req, "api_fb_template_check_many", { p_items: items }) as { ok: boolean; errors: string[]; warnings: string[] }[];
+  let k = 0;
+  return vs.map((v) => {
+    const parts = res.slice(k, k + v.subjects.length + 1);
+    k += v.subjects.length + 1;
+    const errors = [...new Set(parts.flatMap((p) => p.errors))];
+    const warnings = [...new Set(parts.flatMap((p) => p.warnings))];
+    if (!v.followup_body) errors.push("no follow-up was written");
+    return { ok: errors.length === 0, errors, warnings };
+  });
+}
+
+async function generateTemplates(req: Request): Promise<Response> {
+  let body: Record<string, unknown>;
+  try { body = await req.json(); } catch { throw new HttpError(422, "Invalid JSON"); }
+  const brief = await asUser(req, "api_fb_template_generate_start", { p_data: body }) as Brief;
+  const key = await getSecret("groq_api_key");
+  if (!key) throw new HttpError(400, "Save the Groq key in FlightBridge AI > Settings first");
+  let first;
+  try { first = await groqJson(key, SYSTEM, prompt(brief), 900 * brief.count + 1500); } catch (e) { throw new HttpError(502, String((e as Error).message)); }
+  const variants = parseVariants(first.data, brief.count);
+  if (!variants.length) throw new HttpError(502, "The AI writer returned nothing usable. Try again.");
+  if (variants.length < brief.count) {          // the model sometimes writes fewer than asked: ask once for the rest
+    try {
+      const n = brief.count - variants.length;
+      variants.push(...parseVariants((await groqJson(key, SYSTEM, morePrompt(brief, variants, n), 900 * n + 1500)).data, n));
+    } catch (e) { console.error("more versions failed", String(e)); }
+  }
+  let checks = await checkVariants(req, variants);
+  const bad = variants.map((v, i) => ({ v, i, issues: [...checks[i].errors, ...styleIssues(v, brief)] })).filter((x) => x.issues.length);
+  if (bad.length) {
+    try {
+      const fixed = parseVariants((await groqJson(key, SYSTEM, repairPrompt(brief, bad), 900 * bad.length + 1500)).data, bad.length);
+      fixed.forEach((f, j) => { variants[bad[j].i] = f; });
+      checks = await checkVariants(req, variants);
+    } catch (e) { console.error("template repair failed", String(e)); }
+  }
+  return json(req, 200, { model: first.model, variants: variants.map((v, i) => ({ ...v, check: checks[i], style: styleIssues(v, brief) })) });
+}
+
 function safeEqual(a: string, b: string): boolean {
   const x = new TextEncoder().encode(a), y = new TextEncoder().encode(b);
   let diff = x.length ^ y.length;
@@ -246,6 +296,7 @@ Deno.serve(async (req) => {
     if ((m = /^\/integrations\/([a-z_]+)\/test$/.exec(path))) return await testKey(req, m[1]);
     if ((m = /^\/integrations\/([a-z_]+)$/.exec(path))) return await saveKey(req, m[1]);
     if (path === "/areas") return await addArea(req);
+    if (path === "/templates/generate") return await generateTemplates(req);
     if (path === "/webhooks/hostinger") return await hostingerWebhook(req);
     return json(req, 404, { detail: "Not found" });
   } catch (e) {

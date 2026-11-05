@@ -6,7 +6,7 @@ FlightBridge content gate re-checks the exact email at send time and is authorit
 """
 import re
 
-ALLOWED_VARS = {"school_name", "city", "country"}
+ALLOWED_VARS = {"school_name", "city", "state", "country", "credential"}
 VAR_RE = re.compile(r"\{\{\s*([a-zA-Z_]+)\s*\}\}")
 FOOTER_MARKERS = re.compile(r"(unsubscribe|^\s*--\s*$|\bRef:\s*FB-)", re.I | re.M)
 BANNED_CLAIMS = [
