@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../api';
 import { showToast } from '../utils/toast';
 import { countryName } from '../utils/country';
@@ -172,20 +172,31 @@ export default function FlightBridgeSchools() {
   const [q, setQ] = useState('');
   const [openId, setOpenId] = useState(null);
   const loadTree = useCallback(() => call('/regions').then(setRegions, (e) => showToast(e.message, 'error')), []);
-  const loadList = useCallback(() => {
-    const p = new URLSearchParams({ limit: '1000' });
+  // Counts come from the server for the whole filter; the list loads one section at a time (up to 1,000 rows),
+  // and search runs on the server so it finds schools beyond the first 1,000.
+  const [counts, setCounts] = useState(undefined);        // undefined = loading, null = not available
+  const [qs, setQs] = useState('');
+  useEffect(() => { const t = setTimeout(() => setQs(q.trim()), 300); return () => clearTimeout(t); }, [q]);
+  const params = useCallback((extra = {}) => {
+    const p = new URLSearchParams(extra);
     if (sel.country) p.set('country', sel.country);
     if (sel.region && sel.area === undefined) p.set('region', sel.region);
     if (sel.area !== undefined) { p.set('area_id', String(sel.area)); if (sel.area === 0) p.set('region', sel.region); }
-    return call(`/schools?${p}`).then(setList, (e) => showToast(e.message, 'error'));
-  }, [sel]);
+    if (qs) p.set('q', qs);
+    return p;
+  }, [sel, qs]);
+  const loadCounts = useCallback(() => call(`/school-counts?${params()}`).then(setCounts, () => setCounts(null)), [params]);
+  const active = section || SECTIONS.find(([k]) => counts?.[k])?.[0] || 'eligible_verified';
+  const countsReady = counts !== undefined;
+  const loadList = useCallback(() => (countsReady ? call(`/schools?${params({ limit: '1000', eligibility: active })}`)
+    .then(setList, (e) => showToast(e.message, 'error')) : Promise.resolve()), [params, active, countsReady]);
   useEffect(() => { loadTree(); }, [loadTree]);
   useEffect(() => { const k = (e) => e.key === 'Escape' && setOpenId(null); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, []);
-  useEffect(() => { setList(null); setSection(null); loadList(); }, [loadList]);
+  useEffect(() => { setSection(null); setCounts(undefined); loadCounts(); }, [loadCounts]);
+  useEffect(() => { setList(null); loadList(); }, [loadList]);
 
-  const counts = useMemo(() => { const c = {}; (list || []).forEach((s) => { c[s.eligibility || 'unknown'] = (c[s.eligibility || 'unknown'] || 0) + 1; }); return c; }, [list]);
-  const active = section || SECTIONS.find(([k]) => counts[k])?.[0] || 'eligible_verified';
-  const rows = (list || []).filter((s) => (s.eligibility || 'unknown') === active && (!q || `${s.name} ${s.website_domain || ''}`.toLowerCase().includes(q.toLowerCase())));
+  const rows = list || [];
+  const shownTotal = counts?.[active] ?? rows.length;
   const title = sel.areaName || (sel.region === '__none__' ? 'Region not stated' : sel.region || (sel.country ? cname(sel.country) : 'All schools'));
   const searchArea = async () => {
     try { const r = await call('/automation/run', { method: 'POST', body: JSON.stringify({ kind: 'search_area', area_id: sel.area }) }); showToast(r.message, 'success'); }
@@ -208,10 +219,15 @@ export default function FlightBridgeSchools() {
         </div>
         <div className="flex gap-2 overflow-x-auto whitespace-nowrap">
           {SECTIONS.map(([k, label]) => (
-            <button key={k} onClick={() => setSection(k)} className={`glass-tab-btn ${active === k ? 'active' : ''}`}>{label} ({counts[k] || 0})</button>
+            <button key={k} onClick={() => setSection(k)} className={`glass-tab-btn ${active === k ? 'active' : ''}`}>{label} ({(counts?.[k] ?? 0).toLocaleString()})</button>
           ))}
         </div>
         <div className="text-xs text-gray-500">{SECTIONS.find(([k]) => k === active)?.[3]}</div>
+        {list !== null && shownTotal > rows.length && (
+          <div className="text-xs rounded-lg px-3 py-2" style={{ background: 'rgba(0,122,255,0.08)', color: 'rgba(0,0,0,0.6)' }}>
+            Showing the first {rows.length.toLocaleString()} of {shownTotal.toLocaleString()}. Pick a country or state on the left, or search, to see the rest.
+          </div>
+        )}
         {list === null ? <div className="text-gray-500 text-sm">Loading…</div> : rows.length === 0 ? <div className="glass-card p-6 text-center text-gray-500 text-sm">Nothing here.</div> : (
           <div>
             <div className="glass-card overflow-x-auto">
@@ -231,7 +247,7 @@ export default function FlightBridgeSchools() {
             {openId && (
               <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={() => setOpenId(null)}>
                 <div className="w-full max-w-xl h-full overflow-y-auto bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
-                  <Detail id={openId} onChanged={() => { loadList(); loadTree(); }} onClose={() => setOpenId(null)} />
+                  <Detail id={openId} onChanged={() => { loadList(); loadCounts(); loadTree(); }} onClose={() => setOpenId(null)} />
                 </div>
               </div>
             )}

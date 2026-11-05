@@ -40,14 +40,17 @@ function withLimit(query, fn, key, fallback, extra = {}) {
   return rpc(fn, { ...extra, [key]: lim.value });
 }
 
-function schools(query) {
+function schoolFilters(query) {
   const f = {};
   for (const k of ['country', 'status', 'q', 'region', 'eligibility', 'kind', 'area_id', 'limit']) {
     const v = query?.get(k);
     if (v !== null && v !== undefined && v !== '') f[k] = v;
   }
-  return rpc('api_fb_schools', { p_filters: f });
+  return f;
 }
+const schools = (query) => rpc('api_fb_schools', { p_filters: schoolFilters(query) });
+// True counts per eligibility section for the same filters (the list itself is capped at 1,000 rows).
+const schoolCounts = (query) => rpc('api_fb_school_counts', { p_filters: schoolFilters(query) });
 
 const hasCoords = (b) => typeof b?.lat === 'number' && typeof b?.lng === 'number';
 
@@ -82,6 +85,7 @@ export const FLIGHTBRIDGE_ROUTES = [
   ['POST', r(`/team/${ID}/role`), ({ params, body }) => rpc('api_fb_team_role', { p_id: dec(params[0]), p_data: body || {} })],
 
   ['GET', r('/schools'), ({ query }) => schools(query)],
+  ['GET', r('/school-counts'), ({ query }) => schoolCounts(query)],
   ['GET', r(`/schools/${ID}`), ({ params }) => rpc('api_fb_school', { p_id: dec(params[0]) })],
   ['POST', r(`/schools/${ID}/review`), ({ params, body }) => rpc('api_fb_school_review', { p_id: dec(params[0]), p_data: body || {} })],
   ['POST', r(`/schools/${ID}/regulatory/(\\d+)/verify`), ({ params }) =>
