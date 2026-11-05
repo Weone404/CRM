@@ -2,6 +2,7 @@
 //
 //   POST /crm-flightbridge/integrations/{name}        save + test an API key   (signed-in FlightBridge admin)
 //   POST /crm-flightbridge/integrations/{name}/test   test the saved key       (signed-in FlightBridge admin)
+//                                                     (hiox_mail_password: IMAP + SMTP login to the HIOX India mailbox)
 //   POST /crm-flightbridge/areas                      add an area by name; Google finds the coordinates (admin)
 //   POST /crm-flightbridge/templates/generate         "Write with AI": 3-5 checked email-template versions (admin)
 //   POST /crm-flightbridge/webhooks/hostinger         Hostinger mailbox webhook (Authorization: Bearer <secret>)
@@ -16,6 +17,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import { fernetDecrypt, fernetEncrypt, last4 } from "./fernet.ts";
+import { checkMailbox } from "./mailcheck.ts";
 import { type Brief, groqJson, morePrompt, parseVariants, prompt, repairPrompt, styleIssues, SYSTEM, type Variant } from "./templates.ts";
 
 const URL_ = Deno.env.get("SUPABASE_URL")!;
@@ -65,7 +67,7 @@ async function asUser(req: Request, fn: string, args: Record<string, unknown>) {
 const ENV_NAMES: Record<string, string> = {
   google_places_api_key: "GOOGLE_PLACES_API_KEY", groq_api_key: "GROQ_API_KEY", gemini_api_key: "GEMINI_API_KEY",
   hostinger_mail_api_token: "HOSTINGER_MAIL_API_TOKEN", hostinger_mailbox_resource_id: "HOSTINGER_MAILBOX_RESOURCE_ID",
-  tavily_api_key: "TAVILY_API_KEY",
+  tavily_api_key: "TAVILY_API_KEY", hiox_mail_password: "HIOX_MAIL_PASSWORD",
 };
 const master = () => Deno.env.get("FB_SECRETS_KEY") || "";
 
@@ -145,6 +147,11 @@ async function check(name: string, value: string, mailboxToken: string | null): 
         body: JSON.stringify({ query: "flight school", search_depth: "basic", max_results: 1 }),
       });
       return r.ok ? [true, "Connected to Tavily (free 1,000 searches a month)."] : [false, `Tavily refused the key (HTTP ${r.status}).`];
+    }
+    if (name === "hiox_mail_password") {          // HIOX India mailbox: address and server come from Settings
+      const { data } = await admin.rpc("svc_fb_mail_settings");
+      const m = (data ?? {}) as Record<string, string>;
+      return await checkMailbox(m.hiox_mail_host || "host2.dnsinweb.com", m.hiox_mail_user || "partnership@weoneaviation.in", value);
     }
     if (name === "hostinger_mail_api_token") {
       const r = await get(`${HOSTINGER}/api/v1/me`, { Authorization: `Bearer ${value}`, Accept: "application/json", "User-Agent": HOSTINGER_UA });

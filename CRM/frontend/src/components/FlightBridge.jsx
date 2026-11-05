@@ -488,12 +488,77 @@ const KEY_HELP = {
   gemini_api_key: { where: 'aistudio.google.com > Get API key (free tier).', used: 'Same as Groq - use one of the two.' },
   hostinger_mail_api_token: { where: 'hPanel > Emails > your mailbox > API access.', used: 'Reads replies from schools.' },
   hostinger_mailbox_resource_id: { where: 'Shown next to the API token in hPanel.', used: 'Which mailbox to read.' },
+  hiox_mail_password: { where: 'The password of this mailbox (HIOX India control panel > Email Accounts). It is checked by logging in; nothing is sent.',
+    used: 'Lets FlightBridge send outreach from this address and read the replies.', placeholder: 'Mailbox password' },
 };
 const GROUPS = [
   { title: 'Website search', keys: ['tavily_api_key', 'google_places_api_key'] },
   { title: 'Free AI (optional)', keys: ['groq_api_key', 'gemini_api_key'], provider: true },
-  { title: 'Mailbox (replies)', keys: ['hostinger_mail_api_token', 'hostinger_mailbox_resource_id'], inbound: true },
 ];
+const HOSTINGER_KEYS = ['hostinger_mail_api_token', 'hostinger_mailbox_resource_id'];
+const keyOk = (k) => !!k && (k.from_server_env || k.last_test_ok === true);
+
+// Email: the mailboxes FlightBridge can send from (HIOX India over SMTP/IMAP, Hostinger over its Mail API). Once a mailbox
+// is connected (its login test passed) it can be chosen to send outreach; replies are read from the same mailbox.
+function Mailboxes({ s, keyMap, saveSettings, onChanged }) {
+  const [user, setUser] = useState(s.hiox_mail_user || '');
+  const [host, setHost] = useState(s.hiox_mail_host || '');
+  useEffect(() => { setUser(s.hiox_mail_user || ''); setHost(s.hiox_mail_host || ''); }, [s.hiox_mail_user, s.hiox_mail_host]);
+  const hiox = keyMap.hiox_mail_password;
+  const options = [
+    { id: 'hiox', address: s.hiox_mail_user, provider: 'HIOX India', ok: keyOk(hiox) },
+    { id: 'hostinger', address: 'info@weoneaviation.com', provider: 'Hostinger', ok: HOSTINGER_KEYS.every((n) => keyOk(keyMap[n])) },
+  ];
+  const anyOk = options.some((o) => o.ok);
+  const changed = user.trim().toLowerCase() !== (s.hiox_mail_user || '') || host.trim().toLowerCase() !== (s.hiox_mail_host || '');
+  return (
+    <div className="glass-card p-4 space-y-4">
+      <div>
+        <h3 className="font-bold">Email</h3>
+        <p className="text-sm text-glass-muted">The mailbox outreach is sent from. Replies are read from the same mailbox.</p>
+      </div>
+      {anyOk ? (
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-semibold mb-1">Send emails from</legend>
+          {options.map((o) => (
+            <label key={o.id} className={`flex items-center gap-3 p-3 rounded-xl border ${o.ok ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'} ${s.send_from === o.id && o.ok ? 'border-blue-500 bg-blue-50/60' : 'border-gray-200 bg-white/40'}`}>
+              <input type="radio" name="fb-send-from" disabled={!o.ok} checked={s.send_from === o.id}
+                onChange={() => saveSettings({ send_from: o.id, inbound_source: o.id })} />
+              <span className="min-w-0">
+                <span className="block font-medium text-sm break-all">{o.address}</span>
+                <span className="block text-xs text-glass-muted">{o.provider} · {o.ok ? 'Connected' : 'Not connected'}</span>
+              </span>
+            </label>
+          ))}
+          <div className="text-xs text-glass-muted">Nothing is sent while dry run is on, and every email still waits in Approvals.</div>
+        </fieldset>
+      ) : <div className="text-sm text-orange-700">Connect a mailbox below; then you can choose which email sends.</div>}
+
+      <div className="border-t pt-3" style={{ borderColor: 'rgba(0,0,0,0.08)' }}>
+        <div className="font-semibold text-sm">HIOX India mailbox</div>
+        <div className="grid gap-2 sm:grid-cols-2 mt-2">
+          <label className="text-xs font-medium text-glass-secondary">Email address
+            <input className="glass-input w-full px-3 py-2 text-sm mt-1" value={user} autoComplete="off" onChange={(e) => setUser(e.target.value)} />
+          </label>
+          <label className="text-xs font-medium text-glass-secondary">Mail server
+            <input className="glass-input w-full px-3 py-2 text-sm mt-1" value={host} autoComplete="off" spellCheck={false} onChange={(e) => setHost(e.target.value)} />
+          </label>
+        </div>
+        {changed && (
+          <button className="glass-btn px-3 py-2 text-sm mt-2"
+            onClick={() => saveSettings({ hiox_mail_user: user.trim(), hiox_mail_host: host.trim() })}>Save address and server</button>
+        )}
+        <div className="text-xs text-glass-muted mt-1">Server for weoneaviation.in mail (from its MX record): host2.dnsinweb.com · IMAP 993 and SMTP 465, both encrypted. After changing the address or server, press Test.</div>
+        {hiox && <KeyRow k={hiox} onChanged={onChanged} />}
+      </div>
+
+      <div className="border-t pt-3" style={{ borderColor: 'rgba(0,0,0,0.08)' }}>
+        <div className="font-semibold text-sm">Hostinger mailbox</div>
+        {HOSTINGER_KEYS.map((n) => keyMap[n] && <KeyRow key={n} k={keyMap[n]} onChanged={onChanged} />)}
+      </div>
+    </div>
+  );
+}
 
 function KeyRow({ k, onChanged }) {
   const [value, setValue] = useState('');
@@ -527,7 +592,7 @@ function KeyRow({ k, onChanged }) {
       {k.last_test_ok === false && k.last_test_message && <div className="text-xs text-red-700 mt-1">{k.last_test_message}</div>}
       <div className="flex flex-wrap gap-2 mt-2">
         <input type="password" autoComplete="off" spellCheck={false} className="glass-input flex-1 min-w-[220px] px-3 py-2 text-sm"
-          placeholder={k.saved ? 'Paste a new key to replace it' : 'Paste the key here'} value={value} onChange={(e) => setValue(e.target.value)} />
+          placeholder={k.saved ? `Enter a new ${help.placeholder ? 'password' : 'key'} to replace it` : (help.placeholder || 'Paste the key here')} value={value} onChange={(e) => setValue(e.target.value)} />
         <button className="glass-btn px-3 py-2 text-sm" disabled={busy || !value.trim()} onClick={save}>{busy ? 'Checking…' : 'Save & test'}</button>
         {k.saved && <button className="px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50" disabled={busy} onClick={test}>Test</button>}
         {k.saved && <button className="px-3 py-2 text-sm rounded-lg border border-red-200 bg-white text-red-600 hover:bg-red-50" disabled={busy} onClick={remove}>Remove</button>}
@@ -729,13 +794,11 @@ function Settings() {
                 </select>
               </label>
             )}
-            {g.inbound && (
-              <label className="text-sm flex items-center gap-2"><input type="checkbox" checked={s.inbound_source === 'hostinger'} onChange={(e) => saveSettings({ inbound_source: e.target.checked ? 'hostinger' : 'none' })} /> Read replies from this mailbox</label>
-            )}
           </div>
           {g.keys.map((name) => keyMap[name] && <KeyRow key={name} k={keyMap[name]} onChanged={load} />)}
         </div>
       ))}
+      <Mailboxes s={s} keyMap={keyMap} saveSettings={saveSettings} onChanged={load} />
       <p className="text-xs text-glass-muted">Keys are encrypted before they are stored and are never shown again — only the last 4 characters. Only admins can see this page.</p>
     </div>
   );
