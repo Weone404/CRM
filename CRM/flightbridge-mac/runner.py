@@ -2,6 +2,8 @@
 
   * full cycle every 15 minutes: finds websites, reads them, checks eligibility, scores, drafts emails for approval
   * "Run now" / "Research this school" / "Search this area" from the CRM are picked up within ~30 seconds
+  * in between, the 24x7 Verify worker (engine 1.5.0+): takes every undecided school to Eligible or Not Qualified,
+    sharing its queue with the CRM server
   * one cycle at a time across every runner (the engine's own lock, flightbridge.engine_lease), so it is safe
     while Render is still on; whichever runner holds the lock does the cycle
   * paused from FlightBridge AI > Settings ("Run automation"), or with FLIGHTBRIDGE_ENGINE=off in the .env file
@@ -67,6 +69,10 @@ def main() -> None:
     from flightbridge import automation, secrets
     from flightbridge.settings import Settings
     from flightbridge.worker import run_once
+    try:
+        from flightbridge.worker import verify_step
+    except ImportError:               # engine older than 1.5.0
+        verify_step = None
 
     s = Settings.from_env()
     if not s.database_url or "PASTE_" in s.database_url:
@@ -88,6 +94,12 @@ def main() -> None:
                 elif automation.queued_jobs(s.database_url):
                     out = run_once(s, trigger="queue")
                     log.info("run-now: %s", {k: out.get(k) for k in ("run_id", "skipped") if k in out})
+                elif verify_step is not None:
+                    out = verify_step(s)
+                    if not out.get("idle"):
+                        log.info("verify: %s", {k: out.get(k) for k in ("schools", "eligible_verified", "unqualified",
+                                                                       "eligible_claimed", "unknown", "errors")})
+                        continue              # more schools waiting: next step straight away
         except Exception:
             log.exception("FlightBridge cycle failed; retrying shortly")
         time.sleep(POLL_SECONDS)

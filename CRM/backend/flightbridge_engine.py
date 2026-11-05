@@ -3,6 +3,8 @@
   * full cycle every 15 minutes (first one ~2 minutes after start-up)
   * "Run now" requests from the app are picked up within ~30 seconds
   * one cycle at a time across every backend instance (the engine's own lock in flightbridge.engine_lease)
+  * Verify worker step every minute (engine 1.5.0+, flightbridge/verify.py): takes undecided schools to Eligible or
+    Not Qualified; shares its queue with the Mac Mini (each school claimed by one runner at a time)
   * switched off from FlightBridge Settings ("Run automation on the CRM server"), or with FLIGHTBRIDGE_ENGINE=off
   * never raises into the scheduler: if the package, the schema or the database is missing it logs and waits
 
@@ -17,6 +19,8 @@ log = logging.getLogger("flightbridge.engine")
 CYCLE_MINUTES = 15
 QUEUE_POLL_SECONDS = 30
 _running = threading.Lock()   # the DB lock is per process; this stops two threads of one process overlapping
+_verifying = threading.Lock()
+VERIFY_SECONDS = 60
 
 
 def _settings():
@@ -79,6 +83,30 @@ def ensure_schema():
         log.exception("FlightBridge schema update failed; the app keeps running and retries on the next cycle")
 
 
+def verify_step():
+    """One Verify step (about a minute); repeats straight away while schools are waiting, up to ~4 minutes."""
+    if not _verifying.acquire(blocking=False):
+        return
+    try:
+        import time
+        os.environ.setdefault("FB_RUNNER", "crm-server")
+        s = _settings()
+        if not s.database_url or not _enabled(s.database_url):
+            return
+        from flightbridge import worker
+        if not hasattr(worker, "verify_step"):
+            return                    # engine older than 1.5.0
+        end = time.time() + 240
+        while time.time() < end and not worker.verify_step(s).get("idle"):
+            pass
+    except ImportError:
+        pass
+    except Exception:
+        log.exception("FlightBridge verify step failed; the next one retries")
+    finally:
+        _verifying.release()
+
+
 def register(scheduler) -> None:
     """Add the FlightBridge jobs to the CRM's existing scheduler. Safe to call once at start-up."""
     if scheduler is None or os.environ.get("FLIGHTBRIDGE_ENGINE", "").lower() == "off":
@@ -88,4 +116,7 @@ def register(scheduler) -> None:
                       max_instances=1, coalesce=True, next_run_time=datetime.now() + timedelta(minutes=2))
     scheduler.add_job(poll_queue, "interval", seconds=QUEUE_POLL_SECONDS, id="flightbridge_queue", replace_existing=True,
                       max_instances=1, coalesce=True)
-    log.info("FlightBridge engine registered (cycle every %s min, Run-now poll every %ss)", CYCLE_MINUTES, QUEUE_POLL_SECONDS)
+    scheduler.add_job(verify_step, "interval", seconds=VERIFY_SECONDS, id="flightbridge_verify", replace_existing=True,
+                      max_instances=1, coalesce=True, next_run_time=datetime.now() + timedelta(minutes=3))
+    log.info("FlightBridge engine registered (cycle every %s min, Run-now poll every %ss, Verify every %ss)",
+             CYCLE_MINUTES, QUEUE_POLL_SECONDS, VERIFY_SECONDS)

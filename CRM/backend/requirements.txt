@@ -16,5 +16,5 @@ boto3==1.35.49
 Pillow==12.3.0
 pillow-heif==0.21.0
 # FlightBridge AI engine (pinned commit; update the hash to upgrade)
-flightbridge @ https://github.com/nikkk07/FlightBridge-AI/archive/70c2d37cb6a00c5b46cbbaf74b3189b103886f21.zip
+flightbridge @ https://github.com/nikkk07/FlightBridge-AI/archive/252c70ed7e3752c2dda4bb7f0ae7fdccef809b1c.zip
 openpyxl==3.1.5
