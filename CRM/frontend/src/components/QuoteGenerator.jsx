@@ -126,7 +126,7 @@ export default function QuoteGenerator({ lead, onClose }) {
 
         {selectedCourse && (
           <>
-            <div className="mb-4 p-4 glass-subtle rounded-lg" style={{ backgroundColor: '#eff6ff' }}>
+            <div className="mb-4 p-4 glass-subtle rounded-lg" style={{ backgroundColor: 'rgba(0,122,255,0.08)' }}>
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm font-semibold text-gray-700">Total Course Fee</span>
                 <span className="text-xl font-bold text-blue-900">₹{baseFee.toLocaleString()}</span>
@@ -162,7 +162,7 @@ export default function QuoteGenerator({ lead, onClose }) {
             </div>
 
             {discount > 0 && (
-              <div className="mb-4 p-4 glass-subtle rounded-lg" style={{ backgroundColor: '#f0fdf4' }}>
+              <div className="mb-4 p-4 glass-subtle rounded-lg" style={{ backgroundColor: 'rgba(52,199,89,0.08)' }}>
                 <div className="flex justify-between items-center">
                   <span className="text-sm font-semibold text-gray-700">Discounted Price</span>
                   <span className="text-xl font-bold text-green-900">₹{discountedPrice.toLocaleString()}</span>
@@ -170,7 +170,7 @@ export default function QuoteGenerator({ lead, onClose }) {
               </div>
             )}
 
-            <div className="mb-4 p-4 glass-subtle rounded-lg" style={{ backgroundColor: '#faf5ff' }}>
+            <div className="mb-4 p-4 glass-subtle rounded-lg" style={{ backgroundColor: 'rgba(175,82,222,0.08)' }}>
               <div className="flex justify-between items-center">
                 <span className="text-sm font-semibold text-gray-700">Final Amount</span>
                 <span className="text-2xl font-bold text-purple-900">₹{discountedPrice.toLocaleString()}</span>
@@ -238,7 +238,7 @@ export default function QuoteGenerator({ lead, onClose }) {
                   </div>
                 </div>
 
-                <div className="mb-4 p-4 glass-subtle rounded-lg" style={{ backgroundColor: '#f3f4f6' }}>
+                <div className="mb-4 p-4 glass-subtle rounded-lg" style={{ backgroundColor: 'rgba(118,118,128,0.12)' }}>
                   <h3 className="text-sm font-semibold mb-2">Payment Breakdown</h3>
                   <div className="space-y-1 text-sm">
                     <div className="flex justify-between">

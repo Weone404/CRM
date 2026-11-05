@@ -45,7 +45,7 @@ export default function LeadDetail({ lead, onClose, onContact }) {
   ].filter(([, v]) => v !== null && v !== undefined && v !== '') : [];
 
   const dispoBtn = (val, label, activeCls, icon) => (
-    <button onClick={() => setDisposition(val)} className={`py-3 px-3 rounded-lg border-2 transition font-semibold ${disposition === val ? activeCls : 'glass-subtle text-glass-secondary hover:text-glass-primary'}`} style={disposition === val ? {} : { borderColor: '#d2d2d7' }}>{icon} {label}</button>
+    <button onClick={() => setDisposition(val)} className={`py-3 px-3 rounded-lg border-2 transition font-semibold ${disposition === val ? activeCls : 'glass-subtle text-glass-secondary hover:text-glass-primary'}`} style={disposition === val ? {} : { borderColor: 'rgba(60,60,67,0.22)' }}>{icon} {label}</button>
   );
 
   return (
@@ -84,12 +84,12 @@ export default function LeadDetail({ lead, onClose, onContact }) {
             <div><span className="font-semibold">Status:</span> {lead.status}{lead.first_contacted_at && <span className="ml-2 text-green-600">✓ Contacted</span>}</div>
           </div>
           {/* Course-fee quotes only: a charter quote is priced per trip. */}
-          {!isCharter && <div className="mb-4"><button onClick={() => setShowQuoteGen(true)} className="glass-btn w-full py-3" style={{ background: '#7c3aed' }}>📄 Generate Quote</button></div>}
+          {!isCharter && <div className="mb-4"><button onClick={() => setShowQuoteGen(true)} className="glass-btn w-full py-3" style={{ background: '#AF52DE' }}>📄 Generate Quote</button></div>}
           <div className="mb-4">
             <h3 className="font-semibold mb-3 text-lg text-glass-primary">Contact Lead</h3>
             <div className="flex gap-3 mb-4">
-              <a href={`tel:${lead.phone}`} className="glass-btn flex-1 py-3 text-center" style={{ background: '#22c55e' }}>📞 Call</a>
-              <a href={waLink} target="_blank" rel="noopener noreferrer" className="glass-btn flex-1 py-3 text-center" style={{ background: '#16a34a' }}>💬 WhatsApp</a>
+              <a href={`tel:${lead.phone}`} className="glass-btn flex-1 py-3 text-center" style={{ background: '#34C759' }}>📞 Call</a>
+              <a href={waLink} target="_blank" rel="noopener noreferrer" className="glass-btn flex-1 py-3 text-center" style={{ background: '#248A3D' }}>💬 WhatsApp</a>
             </div>
           </div>
           <div className="mb-4">
@@ -99,7 +99,7 @@ export default function LeadDetail({ lead, onClose, onContact }) {
               {dispoBtn('Not interested', 'Not Interested', 'border-gray-600 bg-gray-50 text-gray-700', '✗')}
               {dispoBtn('Not reachable', 'Not Reachable', 'border-yellow-600 bg-yellow-50 text-yellow-700', '📵')}
               {dispoBtn('Callback', 'Callback', 'border-purple-600 bg-purple-50 text-purple-700', '🔄')}
-              <button onClick={() => { setDisposition('Closed'); setClosureOutcome(''); }} className={`py-3 px-3 rounded-lg border-2 transition font-semibold col-span-2 ${disposition === 'Closed' ? 'border-slate-800 bg-slate-50 text-slate-800' : 'glass-subtle text-glass-secondary hover:text-glass-primary'}`} style={disposition === 'Closed' ? {} : { borderColor: '#d2d2d7' }}>🔒 Closed</button>
+              <button onClick={() => { setDisposition('Closed'); setClosureOutcome(''); }} className={`py-3 px-3 rounded-lg border-2 transition font-semibold col-span-2 ${disposition === 'Closed' ? 'border-slate-800 bg-slate-50 text-slate-800' : 'glass-subtle text-glass-secondary hover:text-glass-primary'}`} style={disposition === 'Closed' ? {} : { borderColor: 'rgba(60,60,67,0.22)' }}>🔒 Closed</button>
             </div>
           </div>
           {disposition === 'Interested' && !isCharter && (
@@ -107,7 +107,7 @@ export default function LeadDetail({ lead, onClose, onContact }) {
               <label className="block text-sm font-semibold mb-2 text-glass-primary">Course Track *</label>
               <div className="flex flex-wrap gap-2">
                 {['CPL', 'PPL', 'Flying'].map(t => (
-                  <button key={t} onClick={() => setTrack(t)} className={`flex-1 min-w-[90px] py-3 px-3 rounded-lg border-2 transition font-semibold ${track === t ? 'border-green-600 bg-green-100 text-green-700' : 'glass-subtle text-glass-secondary'}`} style={track === t ? {} : { borderColor: '#d2d2d7' }}>{t}</button>
+                  <button key={t} onClick={() => setTrack(t)} className={`flex-1 min-w-[90px] py-3 px-3 rounded-lg border-2 transition font-semibold ${track === t ? 'border-green-600 bg-green-100 text-green-700' : 'glass-subtle text-glass-secondary'}`} style={track === t ? {} : { borderColor: 'rgba(60,60,67,0.22)' }}>{t}</button>
                 ))}
               </div>
             </div>
@@ -116,8 +116,8 @@ export default function LeadDetail({ lead, onClose, onContact }) {
             <div className="mb-4 p-3 glass-subtle">
               <label className="block text-sm font-semibold mb-2 text-glass-primary">Closure Outcome *</label>
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => setClosureOutcome(closure.positive.value)} className={`py-3 px-3 rounded-lg border-2 transition font-semibold ${closureOutcome === closure.positive.value ? 'border-green-600 bg-green-50 text-green-700' : 'glass-subtle text-glass-secondary'}`} style={closureOutcome === closure.positive.value ? {} : { borderColor: '#d2d2d7' }}>✓ {closure.positive.label}</button>
-                <button onClick={() => setClosureOutcome(closure.negative.value)} className={`py-3 px-3 rounded-lg border-2 transition font-semibold ${closureOutcome === closure.negative.value ? 'border-red-600 bg-red-50 text-red-700' : 'glass-subtle text-glass-secondary'}`} style={closureOutcome === closure.negative.value ? {} : { borderColor: '#d2d2d7' }}>✗ {closure.negative.label}</button>
+                <button onClick={() => setClosureOutcome(closure.positive.value)} className={`py-3 px-3 rounded-lg border-2 transition font-semibold ${closureOutcome === closure.positive.value ? 'border-green-600 bg-green-50 text-green-700' : 'glass-subtle text-glass-secondary'}`} style={closureOutcome === closure.positive.value ? {} : { borderColor: 'rgba(60,60,67,0.22)' }}>✓ {closure.positive.label}</button>
+                <button onClick={() => setClosureOutcome(closure.negative.value)} className={`py-3 px-3 rounded-lg border-2 transition font-semibold ${closureOutcome === closure.negative.value ? 'border-red-600 bg-red-50 text-red-700' : 'glass-subtle text-glass-secondary'}`} style={closureOutcome === closure.negative.value ? {} : { borderColor: 'rgba(60,60,67,0.22)' }}>✗ {closure.negative.label}</button>
               </div>
             </div>
           )}

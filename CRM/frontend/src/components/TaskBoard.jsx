@@ -80,9 +80,9 @@ export default function TaskBoard() {
           const employeeTasks = getEmployeeTasks(emp.id); const pendingCount = getPendingCount(emp.id);
           return (
             <div key={emp.id} className="glass-card overflow-hidden">
-              <div className="p-6" style={{ background: 'linear-gradient(135deg, #eef2ff, #f5f3ff)', borderBottom: '1px solid #e5e5ea' }}>
+              <div className="p-6" style={{ background: 'linear-gradient(135deg, rgba(88,86,214,0.10), rgba(88,86,214,0.08))', borderBottom: '1px solid rgba(60,60,67,0.12)' }}>
                 <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold text-white" style={{ background: '#6366f1', boxShadow: '0 4px 12px rgba(99,102,241,0.30)' }}>{emp.name.charAt(0).toUpperCase()}</div>
+                  <div className="w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold text-white" style={{ background: '#5856D6', boxShadow: '0 4px 12px rgba(99,102,241,0.30)' }}>{emp.name.charAt(0).toUpperCase()}</div>
                   <div className="flex-1 min-w-0"><h3 className="font-semibold text-glass-primary text-lg truncate">{emp.name}</h3><p className="text-sm text-glass-secondary truncate">{emp.job_role || 'Employee'}</p></div>
                 </div>
                 <div className="mt-4 inline-flex items-center gap-2 px-3 py-1.5 glass-subtle">
@@ -105,7 +105,7 @@ export default function TaskBoard() {
                           </div>
                         </div>
                         {confirmDeleteId === task.id && (
-                          <div className="flex items-center gap-2 mb-2 text-xs rounded-lg px-2 py-1.5" style={{ background: '#fef2f2', border: '1px solid #fca5a5' }}>
+                          <div className="flex items-center gap-2 mb-2 text-xs rounded-lg px-2 py-1.5" style={{ background: 'rgba(255,59,48,0.08)', border: '1px solid rgba(255,59,48,0.35)' }}>
                             <span className="text-red-700 font-medium flex-1">Delete this task?</span>
                             <button onClick={() => handleDeleteTask(task.id)} className="px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 font-medium">Delete</button>
                             <button onClick={() => setConfirmDeleteId(null)} className="px-2 py-1 glass-subtle text-glass-secondary font-medium">Cancel</button>
@@ -137,7 +137,7 @@ export default function TaskBoard() {
               <div><label className="block text-sm font-medium text-glass-secondary mb-1">Task Title *</label><input type="text" value={formData.title || ''} onChange={(e) => setFormData({...formData, title: e.target.value})} className="glass-input w-full px-3 py-2" placeholder="e.g., Follow up with lead" required /></div>
               <div><label className="block text-sm font-medium text-glass-secondary mb-1">Description</label><textarea value={formData.description || ''} onChange={(e) => setFormData({...formData, description: e.target.value})} className="glass-input w-full px-3 py-2" rows={3} placeholder="Task details..." /></div>
               <div><label className="block text-sm font-medium text-glass-secondary mb-1">Due Date</label><input type="date" value={formData.due_date || ''} onChange={(e) => setFormData({...formData, due_date: e.target.value})} className="glass-input w-full px-3 py-2" /></div>
-              <div className="flex gap-3 pt-4"><button type="submit" disabled={submitting} className="glass-btn flex-1 px-4 py-2">{submitting ? 'Adding...' : 'Add Task'}</button><button type="button" disabled={submitting} onClick={() => { setShowAddTask(false); setFormData({}); }} className="px-4 py-2 rounded-lg font-medium" style={{ background: '#f3f4f6', color: '#424245' }}>Cancel</button></div>
+              <div className="flex gap-3 pt-4"><button type="submit" disabled={submitting} className="glass-btn flex-1 px-4 py-2">{submitting ? 'Adding...' : 'Add Task'}</button><button type="button" disabled={submitting} onClick={() => { setShowAddTask(false); setFormData({}); }} className="px-4 py-2 rounded-lg font-medium" style={{ background: 'rgba(118,118,128,0.12)', color: 'rgba(0,0,0,0.6)' }}>Cancel</button></div>
             </form>
           </div>
         </div>,

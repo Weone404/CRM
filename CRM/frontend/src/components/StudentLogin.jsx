@@ -27,19 +27,19 @@ export default function StudentLogin({ onLogin, onBack }) {
   return (
     <AuthBackdrop>
       <div className="glass-strong p-8 w-full max-w-md animate-glass-in">
-        <div className="flex justify-center mb-3" style={{ color: '#0071e3' }}><Icon name="students" size={40} strokeWidth={1.6} /></div>
-        <h1 className="text-2xl font-bold mb-1 text-center tracking-tight" style={{ color: '#1d1d1f' }}>Student Portal</h1>
-        <p className="text-sm mb-7 text-center" style={{ color: '#6e6e73' }}>We One Aviation · Sign in to continue</p>
+        <div className="flex justify-center mb-3" style={{ color: '#007AFF' }}><Icon name="students" size={40} strokeWidth={1.6} /></div>
+        <h1 className="text-2xl font-bold mb-1 text-center tracking-tight" style={{ color: 'rgba(0,0,0,0.92)' }}>Student Portal</h1>
+        <p className="text-sm mb-7 text-center" style={{ color: 'rgba(0,0,0,0.6)' }}>We One Aviation · Sign in to continue</p>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div><label className="block text-sm font-medium mb-1.5" style={{ color: '#424245' }}>Mobile Number</label><input type="tel" inputMode="numeric" value={mobile} onChange={(e) => setMobile(e.target.value.replace(/[^\d+\s()-]/g, '').slice(0, 18))} className="glass-input w-full px-4 py-2.5 tracking-widest" placeholder="10-digit mobile number" autoComplete="username" required autoFocus /></div>
-          <div><label className="block text-sm font-medium mb-1.5" style={{ color: '#424245' }}>{USE_SUPABASE ? 'Password' : 'PIN'}</label>{USE_SUPABASE
+          <div><label className="block text-sm font-medium mb-1.5" style={{ color: 'rgba(0,0,0,0.6)' }}>Mobile Number</label><input type="tel" inputMode="numeric" value={mobile} onChange={(e) => setMobile(e.target.value.replace(/[^\d+\s()-]/g, '').slice(0, 18))} className="glass-input w-full px-4 py-2.5 tracking-widest" placeholder="10-digit mobile number" autoComplete="username" required autoFocus /></div>
+          <div><label className="block text-sm font-medium mb-1.5" style={{ color: 'rgba(0,0,0,0.6)' }}>{USE_SUPABASE ? 'Password' : 'PIN'}</label>{USE_SUPABASE
             ? <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} className="glass-input w-full px-4 py-2.5" placeholder="Your password (first time: your mobile number)" autoComplete="current-password" required />
             : <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))} className="glass-input w-full px-4 py-2.5 tracking-widest" placeholder="4-digit PIN" maxLength={4} autoComplete="current-password" required />}</div>
-          {error && <div className="rounded-lg px-4 py-3 text-sm" style={{ background: '#fef2f2', border: '1px solid #fca5a5', color: '#991b1b' }}>{error}</div>}
+          {error && <div className="rounded-lg px-4 py-3 text-sm" style={{ background: 'rgba(255,59,48,0.08)', border: '1px solid rgba(255,59,48,0.35)', color: '#D70015' }}>{error}</div>}
           <button type="submit" disabled={loading} className="glass-btn w-full py-2.5">{loading ? 'Signing in… (server may take up to a minute to wake)' : 'Sign in'}</button>
         </form>
-        <div className="mt-6 pt-6 text-center" style={{ borderTop: '1px solid #e5e5ea' }}>
-          <button onClick={onBack} className="text-sm" style={{ color: '#6e6e73' }}>Back to login</button>
+        <div className="mt-6 pt-6 text-center" style={{ borderTop: '1px solid rgba(60,60,67,0.12)' }}>
+          <button onClick={onBack} className="text-sm" style={{ color: 'rgba(0,0,0,0.6)' }}>Back to login</button>
         </div>
       </div>
     </AuthBackdrop>

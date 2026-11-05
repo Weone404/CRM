@@ -25,8 +25,8 @@ export default function Outbox({ onClose }) {
               </div>
               {msg.pdf_path && <div className="mb-3 p-2 glass-subtle"><a href={USE_SUPABASE ? msg.pdf_share_url : `${API_URL}/api/quotes/${msg.id}/pdf`} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline text-sm font-semibold">📄 View Quote PDF</a><p className="text-xs text-orange-600 mt-1">⚠️ Review PDF for PLACEHOLDER values before sending</p></div>}
               <div className="flex gap-2">
-                {msg.status === 'pending' && <button onClick={() => handleApprove(msg.id)} className="glass-btn flex-1 py-2" style={{ background: '#22c55e' }}>✓ Approve for Sending</button>}
-                {msg.status === 'approved' && (<><a href={getWhatsAppLink(msg)} target="_blank" rel="noopener noreferrer" className="glass-btn flex-1 py-2 text-center" style={{ background: '#16a34a' }}>💬 Send via WhatsApp</a><button onClick={() => handleMarkSent(msg.id)} className="glass-btn px-4 py-2 text-sm">Mark as Sent</button></>)}
+                {msg.status === 'pending' && <button onClick={() => handleApprove(msg.id)} className="glass-btn flex-1 py-2" style={{ background: '#34C759' }}>✓ Approve for Sending</button>}
+                {msg.status === 'approved' && (<><a href={getWhatsAppLink(msg)} target="_blank" rel="noopener noreferrer" className="glass-btn flex-1 py-2 text-center" style={{ background: '#248A3D' }}>💬 Send via WhatsApp</a><button onClick={() => handleMarkSent(msg.id)} className="glass-btn px-4 py-2 text-sm">Mark as Sent</button></>)}
               </div>
             </div>
           ))}

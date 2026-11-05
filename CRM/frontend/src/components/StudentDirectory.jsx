@@ -534,7 +534,7 @@ function EditStudent({ student, onClose, onSaved }) {
 
         {error && (
           <div className="mb-4 p-3 rounded-lg text-sm break-words"
-            style={{ background: '#fef2f2', border: '1px solid #fca5a5', color: '#991b1b' }}>
+            style={{ background: 'rgba(255,59,48,0.08)', border: '1px solid rgba(255,59,48,0.35)', color: '#D70015' }}>
             {error}
           </div>
         )}
@@ -563,7 +563,7 @@ function EditStudent({ student, onClose, onSaved }) {
           <div>
             <label className="block text-xs text-glass-muted mb-1">Mobile *</label>
             <input className={input} type="tel" value={form.mobile} onChange={(e) => set('mobile', e.target.value)} required />
-            <p className="text-xs mt-1" style={{ color: '#b45309' }}>
+            <p className="text-xs mt-1" style={{ color: '#C93400' }}>
               ⚠ Changing this changes the student's login number.
             </p>
           </div>

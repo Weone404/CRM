@@ -15,13 +15,13 @@ const SKU_LABEL = {
   place_details_enterprise: ['Phone look-ups', 'Google phone numbers'],
 };
 const ELIG = {
-  eligible_verified: ['Eligible', '#047857', '#d1fae5'], eligible_claimed: ['Check needed', '#b45309', '#fef3c7'],
-  unqualified: ['Unqualified', '#b91c1c', '#fee2e2'], unknown: ['Not checked yet', '#475569', '#f1f5f9'],
+  eligible_verified: ['Eligible', '#248A3D', 'rgba(52,199,89,0.16)'], eligible_claimed: ['Check needed', '#C93400', 'rgba(255,149,0,0.14)'],
+  unqualified: ['Unqualified', '#D70015', 'rgba(255,59,48,0.12)'], unknown: ['Not checked yet', 'rgba(0,0,0,0.6)', 'rgba(118,118,128,0.12)'],
 };
-const LEGEND = [['#16a34a', 'Eligible'], ['#d97706', 'Check needed'], ['#0891b2', 'Other schools'], ['#e11d48', 'Square being searched'],
-  ['#7c3aed', 'Path between squares']];
-const HUD = { text: '#e2e8f0', sub: '#94a3b8', accent: '#67e8f9', scan: '#fb7185', glass: 'rgba(2,6,23,0.62)', edge: 'rgba(165,243,252,0.28)' };
-const C = { ink: '#0f172a', sub: '#475569', faint: '#94a3b8', line: '#e2e8f0', card: '#ffffff', soft: '#f8fafc', accent: '#0e7490', scan: '#e11d48' };
+const LEGEND = [['#248A3D', 'Eligible'], ['#FF9500', 'Check needed'], ['#32ADE6', 'Other schools'], ['#FF3B30', 'Square being searched'],
+  ['#AF52DE', 'Path between squares']];
+const HUD = { text: 'rgba(255,255,255,0.92)', sub: 'rgba(255,255,255,0.6)', accent: '#67e8f9', scan: '#fb7185', glass: 'rgba(2,6,23,0.62)', edge: 'rgba(165,243,252,0.28)' };
+const C = { ink: 'rgba(0,0,0,0.92)', sub: 'rgba(0,0,0,0.6)', faint: '#8E8E93', line: 'rgba(60,60,67,0.12)', card: '#ffffff', soft: 'rgba(255,255,255,0.6)', accent: '#008299', scan: '#FF3B30' };
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
 async function load() {
@@ -55,10 +55,10 @@ function Stat({ label, value, sub, color = C.ink }) {
   );
 }
 
-function Bar({ value, max, color = '#0891b2' }) {
+function Bar({ value, max, color = '#32ADE6' }) {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
   return (
-    <div className="h-2 rounded-full overflow-hidden" style={{ background: '#e2e8f0' }} role="progressbar"
+    <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(60,60,67,0.12)' }} role="progressbar"
       aria-valuenow={value} aria-valuemin={0} aria-valuemax={max}>
       <div className="h-full rounded-full transition-[width] duration-700" style={{ width: `${pct}%`, background: color }} />
     </div>
@@ -103,11 +103,20 @@ export default function FlightBridgeDetector() {
   const totalsRef = useRef({});
   const reduced = useMemo(() => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches, []);
 
-  const refresh = useCallback(() => load().then((x) => { setD(x); setErr(''); }, (e) => setErr(e.message)), []);
+  // A single failed refresh (phone asleep, weak signal) is ignored; an error shows only if nothing has loaded yet
+  // or three refreshes in a row fail.
+  const fails = useRef(0);
+  const loaded = useRef(false);
+  const refresh = useCallback(() => load().then((x) => { fails.current = 0; loaded.current = true; setD(x); setErr(''); }, (e) => {
+    fails.current += 1;
+    if (!loaded.current || fails.current >= 3) setErr(/load failed|failed to fetch|abort|network/i.test(e.message) ? 'No connection. Retrying every 20 seconds.' : e.message);
+  }), []);
   useEffect(() => {
     refresh();
     const t = setInterval(() => { if (!document.hidden) refresh(); }, 20000);
-    return () => clearInterval(t);
+    const onVis = () => { if (!document.hidden) refresh(); };          // catch up as soon as the phone wakes
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVis); };
   }, [refresh]);
 
   const points = useMemo(() => d?.points || [], [d]);
@@ -139,14 +148,13 @@ export default function FlightBridgeDetector() {
   const locked = fc && (focus.phase === 'scan' || focus.phase === 'lock');
 
   return (
-    <section className="rounded-2xl overflow-hidden" aria-label="School Detector"
-      style={{ background: C.card, border: `1px solid ${C.line}`, color: C.ink, boxShadow: '0 1px 3px rgba(15,23,42,0.06)' }}>
+    <section className="glass-card overflow-hidden" aria-label="School Detector" style={{ color: C.ink }}>
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-5 pt-4">
         <div className="min-w-0">
           <h3 className="text-lg font-bold flex items-center gap-2">
             <span className="relative flex h-2.5 w-2.5" aria-hidden="true">
               {engineOk && !sweepOff && !reduced && <span className="absolute inline-flex h-full w-full rounded-full opacity-60 animate-ping" style={{ background: C.scan }} />}
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5" style={{ background: engineOk ? C.scan : '#94a3b8' }} />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5" style={{ background: engineOk ? C.scan : '#8E8E93' }} />
             </span>
             School Detector
           </h3>
@@ -154,19 +162,19 @@ export default function FlightBridgeDetector() {
             Searching every country for flying schools{active ? <> · now in <b style={{ color: C.ink }}>{countryName(active.country)}</b></> : ''}
           </p>
         </div>
-        <div className="text-xs px-2.5 py-1 rounded-md" style={{ fontFamily: MONO, background: engineOk ? '#ecfeff' : '#fef2f2', color: engineOk ? '#155e75' : '#b91c1c', border: `1px solid ${engineOk ? '#a5f3fc' : '#fecaca'}` }}>
+        <div className="text-xs px-2.5 py-1 rounded-md" style={{ fontFamily: MONO, background: engineOk ? 'rgba(48,176,199,0.10)' : 'rgba(255,59,48,0.08)', color: engineOk ? '#008299' : '#D70015', border: `1px solid ${engineOk ? '#a5f3fc' : 'rgba(255,59,48,0.3)'}` }}>
           {engineAge === null ? 'engine not reporting' : engineOk ? `engine online · ${d.engine.runner || 'runner'}` : `engine last seen ${timeAgo(d.engine.at)}`}
         </div>
       </div>
 
-      {err && <div className="mx-4 sm:mx-5 mt-3 text-sm rounded-lg p-3" style={{ background: '#fef2f2', color: '#b91c1c' }}>Couldn’t load: {err}</div>}
-      {sweepOff && <div className="mx-4 sm:mx-5 mt-3 text-sm rounded-lg p-3" style={{ background: '#fffbeb', color: '#92400e' }}>The world search is switched off in Automation settings.</div>}
+      {err && <div className="mx-4 sm:mx-5 mt-3 text-sm rounded-lg p-3" style={{ background: 'rgba(255,59,48,0.08)', color: '#D70015' }}>{err}</div>}
+      {sweepOff && <div className="mx-4 sm:mx-5 mt-3 text-sm rounded-lg p-3" style={{ background: 'rgba(255,149,0,0.08)', color: '#C93400' }}>The world search is switched off in Automation settings.</div>}
 
       <div className="grid gap-4 p-4 sm:p-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         {/* ---------------- globe stage */}
         <div className="min-w-0">
           <div className="relative rounded-xl overflow-hidden h-[380px] sm:h-[480px] lg:h-[600px]"
-            style={{ border: '1px solid #0f172a', background: 'radial-gradient(circle at 50% 45%, #0d1b33 0%, #050b18 55%, #01030a 100%)' }}>
+            style={{ border: '1px solid rgba(0,0,0,0.92)', background: 'radial-gradient(circle at 50% 45%, #0d1b33 0%, #050b18 55%, #01030a 100%)' }}>
             <div className="absolute inset-0 pointer-events-none fb-stars" aria-hidden="true" />
             <Suspense fallback={<div className="absolute inset-0 grid place-items-center text-sm" style={{ color: HUD.sub }}>Loading Earth…</div>}>
               <Globe3D points={points} recent={recent} cells={cells} onFocus={onFocus} />
@@ -228,12 +236,12 @@ export default function FlightBridgeDetector() {
         <div className="space-y-4 min-w-0">
           <div className="grid grid-cols-2 gap-3">
             <Stat label="Schools in CRM" value={(tot.all_schools ?? 0).toLocaleString()} />
-            <Stat label="New in 24 hours" value={(tot.new_24h ?? 0).toLocaleString()} color="#047857" />
+            <Stat label="New in 24 hours" value={(tot.new_24h ?? 0).toLocaleString()} color="#248A3D" />
             <Stat label="Found by world search" value={(tot.schools_found ?? 0).toLocaleString()} sub={`${(tot.schools_new ?? 0).toLocaleString()} were new`} />
             <Stat label="Countries finished" value={`${tot.countries_done ?? 0} / ${tot.countries ?? 0}`} />
           </div>
 
-          <div className="rounded-xl p-3 space-y-2" style={{ background: '#fff1f2', border: '1px solid #fecdd3' }}>
+          <div className="rounded-xl p-3 space-y-2" style={{ background: 'rgba(255,59,48,0.08)', border: '1px solid rgba(255,59,48,0.25)' }}>
             <Label color={C.scan}>Searching now</Label>
             {active ? (
               <>
@@ -263,7 +271,7 @@ export default function FlightBridgeDetector() {
                     <span className="min-w-0"><b className="font-semibold">{label}</b> <span style={{ color: C.sub }}>· {hint}</span></span>
                     <span className="tnum shrink-0" style={{ color: C.sub, fontFamily: MONO }}>{v.used.toLocaleString()} / {v.cap.toLocaleString()}</span>
                   </div>
-                  <Bar value={v.used} max={v.cap} color={pct > 0.9 ? '#dc2626' : pct > 0.7 ? '#d97706' : '#0891b2'} />
+                  <Bar value={v.used} max={v.cap} color={pct > 0.9 ? '#FF3B30' : pct > 0.7 ? '#FF9500' : '#32ADE6'} />
                 </div>
               );
             })}
@@ -281,7 +289,7 @@ export default function FlightBridgeDetector() {
                 return (
                   <li key={r.org_id} className="flex items-center gap-2 text-sm rounded-lg px-2 py-1.5" style={{ background: C.card, border: `1px solid ${C.line}` }}>
                     <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded"
-                      style={{ background: r.is_new ? '#d1fae5' : '#f1f5f9', color: r.is_new ? '#047857' : '#475569' }}>{r.is_new ? 'NEW' : 'SEEN'}</span>
+                      style={{ background: r.is_new ? 'rgba(52,199,89,0.16)' : 'rgba(118,118,128,0.12)', color: r.is_new ? '#248A3D' : 'rgba(0,0,0,0.6)' }}>{r.is_new ? 'NEW' : 'SEEN'}</span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-medium">{r.name}</span>
                       <span className="block text-xs" style={{ color: C.sub }}>{countryName(r.country)} · {timeAgo(r.at)}</span>
@@ -306,11 +314,11 @@ export default function FlightBridgeDetector() {
                 <li key={c.country} className="text-sm">
                   <div className="flex justify-between gap-2">
                     <span className="truncate"><span className="text-xs mr-1.5" style={{ color: C.faint, fontFamily: MONO }}>{String(c.priority).padStart(3, '0')}</span>{countryName(c.country)}</span>
-                    <span className="shrink-0 text-xs" style={{ color: c.state === 'done' ? '#047857' : c.state === 'scanning' ? C.scan : C.faint }}>
+                    <span className="shrink-0 text-xs" style={{ color: c.state === 'done' ? '#248A3D' : c.state === 'scanning' ? C.scan : C.faint }}>
                       {c.state === 'done' ? `done · ${c.schools_found.toLocaleString()} schools` : c.state === 'scanning' ? `${c.schools_found.toLocaleString()} schools so far` : 'waiting'}
                     </span>
                   </div>
-                  {c.state !== 'queued' && <div className="mt-1"><Bar value={c.squares_done} max={c.squares_total} color={c.state === 'done' ? '#059669' : C.scan} /></div>}
+                  {c.state !== 'queued' && <div className="mt-1"><Bar value={c.squares_done} max={c.squares_total} color={c.state === 'done' ? '#34C759' : C.scan} /></div>}
                 </li>
               ))}
             </ul>

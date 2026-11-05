@@ -165,7 +165,7 @@ export default function AttendanceCalendar({
 
       {/* Unmapped notice — do NOT render as absent every day */}
       {!loading && !mapped && (
-        <div className="mb-4 p-3 glass-subtle rounded text-sm text-amber-800" style={{ backgroundColor: '#fffbeb' }}>
+        <div className="mb-4 p-3 glass-subtle rounded text-sm text-amber-800" style={{ backgroundColor: 'rgba(255,149,0,0.08)' }}>
           🔗 This employee is not linked to a biometric device id, so no attendance
           can be shown. Link them under <span className="font-semibold">Attendance → Device People</span>.
         </div>
@@ -327,7 +327,7 @@ export default function AttendanceCalendar({
             <button
               onClick={() => setPickerDate(null)}
               className="mt-4 w-full px-4 py-2 rounded-lg font-medium"
-              style={{ background: '#f3f4f6', color: '#424245' }}
+              style={{ background: 'rgba(118,118,128,0.12)', color: 'rgba(0,0,0,0.6)' }}
             >
               Cancel
             </button>

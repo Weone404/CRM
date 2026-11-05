@@ -112,7 +112,7 @@ function Detail({ id, onChanged, onClose }) {
             </>
           )}
           {s.eligibility !== 'eligible_verified' && !s.eligibility_rule && s.org_kind !== 'ground_school' && (
-            <div className="w-full space-y-2 rounded-lg p-2" style={{ background: '#fffbeb', border: '1px solid #fde68a' }}>
+            <div className="w-full space-y-2 rounded-lg p-2" style={{ background: 'rgba(255,149,0,0.08)', border: '1px solid rgba(255,149,0,0.3)' }}>
               <div className="text-xs text-gray-700">No approval register for {cname(s.country)} yet. Check this school on {cname(s.country)}’s civil aviation authority website, then paste that page here.</div>
               <div className="flex flex-wrap gap-2">
                 <input className="glass-input px-2 py-1 text-xs flex-1 min-w-[200px]" placeholder="Link to the authority page you checked" value={src} onChange={(e) => setSrc(e.target.value)} />

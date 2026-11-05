@@ -206,13 +206,13 @@ export default function App() {
   const go = (id) => { setActiveTab(id); setShowMore(false); window.scrollTo({ top: 0 }); };
 
   return (
-    <div className="min-h-screen pb-24 md:pb-0" style={{ background: "#f5f5f7" }}>
+    <div className="min-h-screen pb-24 md:pb-0">
       {/* Top bar + tabs stay together at the top while scrolling */}
-      <header className="sticky top-0 z-40">
-      <nav className="glass-nav text-white px-3 sm:px-6 py-2.5 flex justify-between items-center gap-2 relative">
-        <h1 className="text-base sm:text-xl font-bold tracking-tight flex items-center gap-2 min-w-0">
-          <Icon name="plane" size={20} />
-          <span className="truncate">We One Aviation <span className="font-normal text-sky-200">· CRM</span></span>
+      <header className="sticky top-0 z-40 glass-nav">
+      <nav className="px-3 sm:px-6 py-2.5 flex justify-between items-center gap-2 relative">
+        <h1 className="text-base sm:text-xl font-bold tracking-tight flex items-center gap-2 min-w-0 text-glass-primary">
+          <span className="inline-flex items-center justify-center h-8 w-8 rounded-[10px] text-white shrink-0" style={{ background: 'linear-gradient(160deg, #3D9BFF, #007AFF)', boxShadow: '0 2px 6px rgba(0,122,255,0.3), inset 0 1px 0 rgba(255,255,255,0.35)' }}><Icon name="plane" size={17} /></span>
+          <span className="truncate">We One Aviation <span className="font-normal text-glass-secondary">· CRM</span></span>
         </h1>
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {canAccessLeads && (
@@ -220,14 +220,14 @@ export default function App() {
               <Icon name="outbox" size={16} /><span className="hidden sm:inline">Outbox</span>
             </button>
           )}
-          <span className="hidden lg:inline text-sm text-slate-200 px-1">{employee.name}</span>
+          <span className="hidden lg:inline text-sm text-glass-secondary px-1">{employee.name}</span>
           <button onClick={() => setShowChangePassword(true)} className="glass-btn-ghost px-2.5 py-2 text-sm hidden md:inline-flex items-center min-h-[40px]" title="Change password" aria-label="Change password"><Icon name="lock" size={16} /></button>
           <button onClick={handleLogout} className="glass-btn-ghost px-3 py-2 text-sm hidden md:inline-flex items-center gap-1.5 min-h-[40px]"><Icon name="logout" size={16} />Logout</button>
         </div>
       </nav>
 
       {/* Tabs: tablet and desktop */}
-      <div className="glass-tabs hidden md:block overflow-x-auto whitespace-nowrap relative" role="tablist" aria-label="Sections">
+      <div className="hidden md:block overflow-x-auto whitespace-nowrap relative px-2 sm:px-4 pb-1" role="tablist" aria-label="Sections">
         {tabs.map((t) => (
           <button key={t.id} role="tab" aria-selected={activeTab === t.id} onClick={() => go(t.id)}
             className={`glass-tab-btn inline-flex items-center gap-2 ${activeTab === t.id ? 'active' : ''}`}>
@@ -238,7 +238,7 @@ export default function App() {
       </header>
 
       {/* Tabs: phones (bottom bar) */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 glass-tabs border-t" style={{ borderColor: 'var(--hairline)', paddingBottom: 'env(safe-area-inset-bottom)' }} aria-label="Sections">
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 glass-nav" style={{ borderBottom: 'none', borderTop: '1px solid var(--glass-edge)', paddingBottom: 'env(safe-area-inset-bottom)' }} aria-label="Sections">
         <div className="grid" style={{ gridTemplateColumns: `repeat(${barTabs.length + 1}, minmax(0, 1fr))` }}>
           {barTabs.map((t) => (
             <button key={t.id} onClick={() => go(t.id)} aria-current={activeTab === t.id ? 'page' : undefined}
@@ -255,7 +255,7 @@ export default function App() {
 
       {showMore && createPortal(
         <div className="md:hidden fixed inset-0 z-50 glass-overlay flex items-end" onClick={() => setShowMore(false)}>
-          <div className="w-full bg-white rounded-t-3xl p-4 pb-6 animate-glass-in" style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }} role="dialog" aria-label="More" onClick={(e) => e.stopPropagation()}>
+          <div className="w-full glass-strong rounded-b-none p-4 pb-6 animate-glass-in" style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }} role="dialog" aria-label="More" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-2">
               <div className="font-semibold text-glass-primary">{employee.name}</div>
               <button onClick={() => setShowMore(false)} className="p-2 rounded-full text-glass-muted min-h-[44px] min-w-[44px] inline-flex items-center justify-center" aria-label="Close"><Icon name="close" size={20} /></button>
@@ -278,10 +278,10 @@ export default function App() {
       {/* Main Content */}
       <div className="p-4 sm:p-6 max-w-7xl mx-auto">
         {activeTab === 'leads' && canAccessLeads && leadsError && (
-          <div className="glass-card p-6 text-center animate-glass-in" style={{ borderColor: '#fca5a5' }}>
+          <div className="glass-card p-6 text-center animate-glass-in" style={{ borderColor: 'rgba(255,59,48,0.35)' }}>
             <div className="text-lg font-semibold text-red-800 mb-1 inline-flex items-center gap-2"><Icon name="alert" size={18} />Couldn't load leads</div>
             <p className="text-sm text-red-700 mb-4">{leadsError}</p>
-            <button onClick={syncNow} className="glass-btn px-4 py-2" style={{ background: '#ef4444' }}>Retry</button>
+            <button onClick={syncNow} className="glass-btn px-4 py-2" style={{ background: '#FF3B30' }}>Retry</button>
           </div>
         )}
 
@@ -294,14 +294,14 @@ export default function App() {
           <>
             {/* Aviation / Charter switch. Each segment has its own counts,
                 follow-ups, filters and Add Query form. */}
-            <div className="grid grid-cols-2 gap-2 mb-4 p-1 rounded-xl" style={{ background: 'rgba(0,0,0,0.05)' }} role="tablist" aria-label="Lead segment">
+            <div className="grid grid-cols-2 gap-1 mb-4 p-1 rounded-xl" style={{ background: 'rgba(118,118,128,0.12)' }} role="tablist" aria-label="Lead segment">
               {SEGMENTS.map(s => {
                 const list = leads.filter(l => segmentOf(l) === s.id);
                 const active = segment === s.id;
                 const fresh = untouched(list);
                 return (
                   <button key={s.id} role="tab" aria-selected={active} onClick={() => setSegment(s.id)}
-                    className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-sm sm:text-base font-semibold transition ${active ? 'bg-indigo-600 text-white shadow' : 'text-glass-secondary hover:text-glass-primary hover:bg-white/60'}`}>
+                    className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-sm sm:text-base font-semibold transition ${active ? 'bg-white text-glass-primary shadow-[0_3px_8px_rgba(0,0,0,0.12),0_3px_1px_rgba(0,0,0,0.04)]' : 'text-glass-secondary hover:text-glass-primary hover:bg-white/50'}`}>
                     <span aria-hidden="true">{s.icon}</span>{s.label}
                     <span className="text-xs font-medium opacity-80">({list.length})</span>
                     {fresh > 0 && <span className="ml-1 min-w-[1.25rem] px-1.5 rounded-full bg-orange-500 text-white text-xs leading-5">{fresh}</span>}
@@ -315,7 +315,7 @@ export default function App() {
               <div className="glass-stat p-4"><div className="text-sm text-glass-secondary">Pending Follow-ups</div><div className="text-2xl font-bold text-blue-600">{segmentFollowups.length}</div></div>
             </div>
             {segmentFollowups.length > 0 && (
-              <div className="glass-card p-4 mb-4" style={{ background: '#fffbe6', borderColor: '#fde047' }}>
+              <div className="glass-card p-4 mb-4" style={{ background: 'rgba(255,149,0,0.10)', borderColor: 'rgba(255,204,0,0.45)' }}>
                 <h3 className="font-semibold mb-2 text-glass-primary inline-flex items-center gap-2"><Icon name="clock" size={16} />Follow-ups due</h3>
                 <div className="space-y-2">
                   {segmentFollowups.slice(0, 3).map(f => (
@@ -331,7 +331,7 @@ export default function App() {
               <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
                 <h2 className="text-lg font-semibold text-glass-primary">{segment === 'charter' ? 'Charter Leads' : 'Aviation Leads'}</h2>
                 <div className="flex gap-2">
-                  <button onClick={() => setShowAddQuery(true)} className="glass-btn px-4 py-2 inline-flex items-center gap-1.5 min-h-[40px]" style={{ background: '#16a34a' }}><Icon name="plus" size={16} />{segment === 'charter' ? 'Add Enquiry' : 'Add Query'}</button>
+                  <button onClick={() => setShowAddQuery(true)} className="glass-btn px-4 py-2 inline-flex items-center gap-1.5 min-h-[40px]" style={{ background: '#248A3D' }}><Icon name="plus" size={16} />{segment === 'charter' ? 'Add Enquiry' : 'Add Query'}</button>
                   <button onClick={syncNow} className="glass-btn px-4 py-2 inline-flex items-center gap-1.5 min-h-[40px]"><Icon name="refresh" size={16} />Sync</button>
                 </div>
               </div>
@@ -370,14 +370,14 @@ export default function App() {
         <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="glass-strong max-w-md w-full p-6 my-8 max-h-[90vh] overflow-y-auto animate-glass-in">
             <h2 className="text-xl font-bold mb-4 text-glass-primary">Change Password</h2>
-            {passwordError && <div className="mb-4 p-3 rounded-lg text-sm" style={{ background: '#fef2f2', border: '1px solid #fca5a5', color: '#991b1b' }}>{passwordError}</div>}
+            {passwordError && <div className="mb-4 p-3 rounded-lg text-sm" style={{ background: 'rgba(255,59,48,0.08)', border: '1px solid rgba(255,59,48,0.35)', color: '#D70015' }}>{passwordError}</div>}
             <form onSubmit={handleChangePassword} className="space-y-4">
               <div><label className="block text-sm font-medium text-glass-secondary mb-1">Current Password</label><input type="password" value={passwordForm.old_password} onChange={(e) => setPasswordForm({...passwordForm, old_password: e.target.value})} className="glass-input w-full px-3 py-2" required autoComplete="current-password" /></div>
               <div><label className="block text-sm font-medium text-glass-secondary mb-1">New Password</label><input type="password" value={passwordForm.new_password} onChange={(e) => setPasswordForm({...passwordForm, new_password: e.target.value})} className="glass-input w-full px-3 py-2" required minLength={6} autoComplete="new-password" /><p className="text-xs text-glass-muted mt-1">Minimum 6 characters</p></div>
               <div><label className="block text-sm font-medium text-glass-secondary mb-1">Confirm New Password</label><input type="password" value={passwordForm.confirm_password} onChange={(e) => setPasswordForm({...passwordForm, confirm_password: e.target.value})} className="glass-input w-full px-3 py-2" required minLength={6} autoComplete="new-password" /></div>
               <div className="flex gap-3 pt-4">
                 <button type="submit" className="glass-btn flex-1 px-4 py-2">Change Password</button>
-                <button type="button" onClick={() => { setShowChangePassword(false); setPasswordForm({ old_password: '', new_password: '', confirm_password: '' }); setPasswordError(''); }} className="px-4 py-2 rounded-lg font-medium transition" style={{ background: '#f3f4f6', color: '#424245' }}>Cancel</button>
+                <button type="button" onClick={() => { setShowChangePassword(false); setPasswordForm({ old_password: '', new_password: '', confirm_password: '' }); setPasswordError(''); }} className="px-4 py-2 rounded-lg font-medium transition" style={{ background: 'rgba(118,118,128,0.12)', color: 'rgba(0,0,0,0.6)' }}>Cancel</button>
               </div>
             </form>
           </div>

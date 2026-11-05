@@ -29,21 +29,21 @@ export default function EmployeeLogin({ onLogin }) {
     <AuthBackdrop>
       <div className="glass-strong p-8 max-w-md w-full animate-glass-in">
         <div className="text-center mb-8">
-          <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: '#0071e3', boxShadow: '0 4px 12px rgba(0,113,227,0.30)' }}>
+          <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: '#007AFF', boxShadow: '0 4px 12px rgba(0,113,227,0.30)' }}>
             <span className="text-white"><Icon name="profile" size={34} /></span>
           </div>
-          <h1 className="text-2xl font-bold" style={{ color: '#1d1d1f' }}>Employee Portal</h1>
-          <p className="text-sm mt-2" style={{ color: '#6e6e73' }}>Sign in to access your workspace</p>
+          <h1 className="text-2xl font-bold" style={{ color: 'rgba(0,0,0,0.92)' }}>Employee Portal</h1>
+          <p className="text-sm mt-2" style={{ color: 'rgba(0,0,0,0.6)' }}>Sign in to access your workspace</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div><label className="block text-sm font-medium mb-2" style={{ color: '#424245' }}>{USE_SUPABASE ? 'Login ID, phone or email' : 'Login ID'}</label><input type="text" value={loginId} onChange={(e) => setLoginId(e.target.value)} className="glass-input w-full px-4 py-3" placeholder="Enter your login ID" required autoFocus /></div>
-          <div><label className="block text-sm font-medium mb-2" style={{ color: '#424245' }}>{USE_SUPABASE ? 'Password' : 'PIN (if set)'}</label>{USE_SUPABASE
+          <div><label className="block text-sm font-medium mb-2" style={{ color: 'rgba(0,0,0,0.6)' }}>{USE_SUPABASE ? 'Login ID, phone or email' : 'Login ID'}</label><input type="text" value={loginId} onChange={(e) => setLoginId(e.target.value)} className="glass-input w-full px-4 py-3" placeholder="Enter your login ID" required autoFocus /></div>
+          <div><label className="block text-sm font-medium mb-2" style={{ color: 'rgba(0,0,0,0.6)' }}>{USE_SUPABASE ? 'Password' : 'PIN (if set)'}</label>{USE_SUPABASE
             ? <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} className="glass-input w-full px-4 py-3" placeholder="Your password (first time: your mobile number)" autoComplete="current-password" required />
             : <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} className="glass-input w-full px-4 py-3" placeholder="4-digit PIN (optional)" maxLength={4} pattern="[0-9]*" />}</div>
           <button type="submit" disabled={loading} className="glass-btn w-full py-3">{loading ? 'Signing In...' : 'Sign In'}</button>
         </form>
-        <div className="mt-6 pt-6 text-center" style={{ borderTop: '1px solid #e5e5ea' }}>
-          <button onClick={() => window.location.reload()} className="text-sm" style={{ color: '#6e6e73' }}>Back to admin login</button>
+        <div className="mt-6 pt-6 text-center" style={{ borderTop: '1px solid rgba(60,60,67,0.12)' }}>
+          <button onClick={() => window.location.reload()} className="text-sm" style={{ color: 'rgba(0,0,0,0.6)' }}>Back to admin login</button>
         </div>
       </div>
     </AuthBackdrop>

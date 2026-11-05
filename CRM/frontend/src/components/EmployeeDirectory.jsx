@@ -41,11 +41,11 @@ export default function EmployeeDirectory() {
         <div className="glass-table overflow-x-auto">
           <table className="w-full">
             <thead><tr><th>Employee ID</th><th>Name</th><th>Job Role</th><th>Date of Joining</th><th>Status</th><th className="text-right">Actions</th></tr></thead>
-            <tbody className="divide-y" style={{ borderColor: '#d2d2d7' }}>
+            <tbody className="divide-y" style={{ borderColor: 'rgba(60,60,67,0.22)' }}>
               {filteredEmployees.map(emp => (
                 <tr key={emp.id}>
                   <td className="text-glass-primary">{emp.employee_id || '-'}</td>
-                  <td><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-full flex items-center justify-center font-semibold text-sm text-white" style={{ background: '#6366f1' }}>{emp.name.charAt(0).toUpperCase()}</div><div className="font-medium text-glass-primary">{emp.name}</div></div></td>
+                  <td><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-full flex items-center justify-center font-semibold text-sm text-white" style={{ background: '#5856D6' }}>{emp.name.charAt(0).toUpperCase()}</div><div className="font-medium text-glass-primary">{emp.name}</div></div></td>
                   <td className="text-glass-primary">{emp.job_role || '-'}</td>
                   <td className="text-glass-primary">{emp.joining_date ? formatDate(emp.joining_date) : '-'}</td>
                   <td><span className={`glass-badge ${STATUS_COLORS[emp.status] || 'bg-gray-100 text-gray-800'}`}>{emp.status === 'active' ? 'Active' : 'Non-Active'}</span></td>
@@ -60,7 +60,7 @@ export default function EmployeeDirectory() {
       {selectedEmployee && createPortal(
         <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="glass-strong max-w-4xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto animate-glass-in">
-            <div className="flex justify-between items-start mb-6"><div className="flex items-center gap-4"><div className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold text-white" style={{ background: '#6366f1', boxShadow: '0 4px 12px rgba(99,102,241,0.30)' }}>{selectedEmployee.name.charAt(0).toUpperCase()}</div><div><h2 className="text-2xl font-bold text-glass-primary">{selectedEmployee.name}</h2><p className="text-glass-secondary">{selectedEmployee.job_role || 'Employee'}</p></div></div><button onClick={() => setSelectedEmployee(null)} className="text-glass-muted hover:text-glass-primary text-2xl">×</button></div>
+            <div className="flex justify-between items-start mb-6"><div className="flex items-center gap-4"><div className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold text-white" style={{ background: '#5856D6', boxShadow: '0 4px 12px rgba(99,102,241,0.30)' }}>{selectedEmployee.name.charAt(0).toUpperCase()}</div><div><h2 className="text-2xl font-bold text-glass-primary">{selectedEmployee.name}</h2><p className="text-glass-secondary">{selectedEmployee.job_role || 'Employee'}</p></div></div><button onClick={() => setSelectedEmployee(null)} className="text-glass-muted hover:text-glass-primary text-2xl">×</button></div>
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div><label className="text-sm font-medium text-glass-muted">Employee ID</label><div className="mt-1 text-glass-primary font-medium">{selectedEmployee.employee_id || '-'}</div></div>
@@ -77,12 +77,12 @@ export default function EmployeeDirectory() {
                 <div><label className="text-sm font-medium text-glass-muted">Job Role</label><div className="mt-1 text-glass-primary font-medium">{selectedEmployee.job_role || '-'}</div></div>
                 <div className="md:col-span-2"><label className="text-sm font-medium text-glass-muted">Address</label><div className="mt-1 text-glass-primary font-medium">{selectedEmployee.address || '-'}</div></div>
               </div>
-              <div className="border-t pt-6" style={{ borderColor: '#d2d2d7' }}>
-                {selectedEmployee.paid_leave_quota > 0 && <div className="mb-4 p-3 glass-subtle" style={{ background: '#eff6ff' }}><div className="flex justify-between items-center"><span className="text-sm font-semibold text-blue-900">Paid Leave Status (This Month)</span><span className="text-lg font-bold text-blue-600">{selectedEmployee.paid_leave_remaining || 0} / {selectedEmployee.paid_leave_quota} remaining</span></div><p className="text-xs text-blue-700 mt-1">Used: {selectedEmployee.paid_leave_used || 0} days this month (resets monthly)</p></div>}
+              <div className="border-t pt-6" style={{ borderColor: 'rgba(60,60,67,0.22)' }}>
+                {selectedEmployee.paid_leave_quota > 0 && <div className="mb-4 p-3 glass-subtle" style={{ background: 'rgba(0,122,255,0.08)' }}><div className="flex justify-between items-center"><span className="text-sm font-semibold text-blue-900">Paid Leave Status (This Month)</span><span className="text-lg font-bold text-blue-600">{selectedEmployee.paid_leave_remaining || 0} / {selectedEmployee.paid_leave_quota} remaining</span></div><p className="text-xs text-blue-700 mt-1">Used: {selectedEmployee.paid_leave_used || 0} days this month (resets monthly)</p></div>}
                 <AttendanceCalendar employeeId={selectedEmployee.id} employeeName={selectedEmployee.name} month={currentMonth} setMonth={setCurrentMonth} leaveDays={selectedEmployee.leave_days} leaveCounts={selectedEmployee.leave_counts} paidLeaveQuota={selectedEmployee.paid_leave_quota || 0} paidLeaveRemaining={selectedEmployee.paid_leave_remaining || 0} onMarkLeave={markLeaveDay} onUnmarkLeave={unmarkLeaveDay} />
               </div>
             </div>
-            <div className="mt-6 flex gap-3"><button onClick={() => { setFormData(selectedEmployee); setSelectedEmployee(null); setShowForm(true); }} className="glass-btn px-4 py-2">Edit Employee</button>{USE_SUPABASE && <button onClick={() => resetPassword(selectedEmployee)} className="px-4 py-2 rounded-lg font-medium" style={{ background: '#fef3c7', color: '#92400e' }}>Reset Password</button>}<button onClick={() => setSelectedEmployee(null)} className="px-4 py-2 rounded-lg font-medium" style={{ background: '#f3f4f6', color: '#424245' }}>Close</button></div>
+            <div className="mt-6 flex gap-3"><button onClick={() => { setFormData(selectedEmployee); setSelectedEmployee(null); setShowForm(true); }} className="glass-btn px-4 py-2">Edit Employee</button>{USE_SUPABASE && <button onClick={() => resetPassword(selectedEmployee)} className="px-4 py-2 rounded-lg font-medium" style={{ background: 'rgba(255,149,0,0.14)', color: '#C93400' }}>Reset Password</button>}<button onClick={() => setSelectedEmployee(null)} className="px-4 py-2 rounded-lg font-medium" style={{ background: 'rgba(118,118,128,0.12)', color: 'rgba(0,0,0,0.6)' }}>Close</button></div>
           </div>
         </div>,
         document.body
@@ -111,7 +111,7 @@ export default function EmployeeDirectory() {
                 {USE_SUPABASE ? (<div className="text-xs text-glass-muted self-end pb-2">First password is their mobile number. They can change it in My Profile.</div>) : (<div><label className="block text-xs font-medium text-glass-muted mb-1">Login PIN (optional, 4 digits)</label><input type="text" inputMode="numeric" pattern="\d{4}" maxLength={4} placeholder="e.g. 1234" value={formData.login_pin || ''} onChange={(e) => setFormData({...formData, login_pin: e.target.value.replace(/\D/g, '').slice(0, 4)})} className="glass-input w-full px-3 py-2" /></div>)}
               </div>
               <textarea placeholder="Address" value={formData.address || ''} onChange={(e) => setFormData({...formData, address: e.target.value})} className="glass-input w-full px-3 py-2" rows={2} />
-              <div className="flex gap-3 pt-4"><button type="submit" className="glass-btn px-6 py-2">{formData.id ? 'Update' : 'Create'} Employee</button><button type="button" onClick={() => { setShowForm(false); setFormData({}); setLoginIdManual(false); }} className="px-6 py-2 rounded-lg font-medium" style={{ background: '#f3f4f6', color: '#424245' }}>Cancel</button></div>
+              <div className="flex gap-3 pt-4"><button type="submit" className="glass-btn px-6 py-2">{formData.id ? 'Update' : 'Create'} Employee</button><button type="button" onClick={() => { setShowForm(false); setFormData({}); setLoginIdManual(false); }} className="px-6 py-2 rounded-lg font-medium" style={{ background: 'rgba(118,118,128,0.12)', color: 'rgba(0,0,0,0.6)' }}>Cancel</button></div>
             </form>
           </div>
         </div>,

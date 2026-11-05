@@ -24,40 +24,39 @@ export default function Login({ onLogin, onSwitchToEmployee, onSwitchToStudent }
   };
 
   return (
-    <div className="relative min-h-screen overflow-hidden flex items-center justify-center p-4 sm:p-8"
-      style={{ background: 'radial-gradient(110% 80% at 70% 30%, #0b2540 0%, #050b16 55%, #02060d 100%)' }}>
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center lg:justify-start lg:pl-[6vw] opacity-60 lg:opacity-90">
+    <div className="relative min-h-screen overflow-hidden flex items-center justify-center p-4 sm:p-8">
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center lg:justify-start lg:pl-[6vw] opacity-90">
         <div className="w-[130vw] h-[130vw] max-w-[760px] max-h-[760px] sm:w-[90vw] sm:h-[90vw] lg:w-[46vw] lg:h-[46vw]">
           <Suspense fallback={null}><Globe3D ambient /></Suspense>
         </div>
       </div>
       <div className="relative w-full max-w-5xl grid lg:grid-cols-2 gap-8 items-center">
-        <div className="hidden lg:block text-white pr-6">
-          <div className="inline-flex items-center gap-2 text-sm font-medium px-3 py-1 rounded-full mb-4" style={{ background: 'rgba(34,211,238,0.12)', color: '#67e8f9', border: '1px solid rgba(34,211,238,0.25)' }}>
-            <span className="h-2 w-2 rounded-full" style={{ background: '#22d3ee', boxShadow: '0 0 8px #22d3ee' }} />Live
+        <div className="hidden lg:block glass-strong p-7 mr-6 self-end mb-8 max-w-lg">
+          <div className="inline-flex items-center gap-2 text-sm font-semibold px-3 py-1 mb-4 rounded-full" style={{ color: '#248A3D', background: 'rgba(52,199,89,0.14)' }}>
+            <span className="h-2 w-2 rounded-full" style={{ background: '#34C759' }} />Live
           </div>
-          <h2 className="text-4xl font-bold tracking-tight leading-tight">Every student, every lead,<br />every flying school.</h2>
-          <p className="mt-3 text-lg" style={{ color: '#94a3b8' }}>One place for the We One Aviation team.</p>
+          <h2 className="text-4xl font-bold tracking-tight leading-tight" style={{ color: 'rgba(0,0,0,0.92)' }}>Every student, every lead,<br />every flying school.</h2>
+          <p className="mt-3 text-lg" style={{ color: 'rgba(0,0,0,0.6)' }}>One place for the We One Aviation team.</p>
         </div>
         <div className="glass-strong p-6 sm:p-8 w-full max-w-md mx-auto lg:ml-auto animate-glass-in">
-          <div className="flex justify-center mb-3" style={{ color: '#0071e3' }}><Icon name="plane" size={40} strokeWidth={1.6} /></div>
-          <h1 className="text-2xl font-bold mb-1 text-center tracking-tight" style={{ color: '#1d1d1f' }}>We One Aviation</h1>
-          <p className="text-base mb-6 text-center" style={{ color: '#6e6e73' }}>CRM · Sign in to continue</p>
+          <div className="flex justify-center mb-3" style={{ color: '#007AFF' }}><Icon name="plane" size={40} strokeWidth={1.6} /></div>
+          <h1 className="text-2xl font-bold mb-1 text-center tracking-tight" style={{ color: 'rgba(0,0,0,0.92)' }}>We One Aviation</h1>
+          <p className="text-base mb-6 text-center" style={{ color: 'rgba(0,0,0,0.6)' }}>CRM · Sign in to continue</p>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label htmlFor="login-id" className="block text-sm font-medium mb-1.5" style={{ color: '#424245' }}>{USE_SUPABASE ? 'Login ID, phone or email' : 'Login ID'}</label>
+              <label htmlFor="login-id" className="block text-sm font-medium mb-1.5" style={{ color: 'rgba(0,0,0,0.6)' }}>{USE_SUPABASE ? 'Login ID, phone or email' : 'Login ID'}</label>
               <input id="login-id" type="text" value={loginId} onChange={(e) => setLoginId(e.target.value)} className="glass-input w-full px-4 py-3 text-base" placeholder={USE_SUPABASE ? "Login ID, phone or email" : "Your login ID"} autoComplete="username" required autoFocus />
             </div>
             <div>
-              <label htmlFor="login-pw" className="block text-sm font-medium mb-1.5" style={{ color: '#424245' }}>Password</label>
+              <label htmlFor="login-pw" className="block text-sm font-medium mb-1.5" style={{ color: 'rgba(0,0,0,0.6)' }}>Password</label>
               <input id="login-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="glass-input w-full px-4 py-3 text-base" autoComplete="current-password" required />
             </div>
-            {error && <div role="alert" className="rounded-lg px-4 py-3 text-sm" style={{ background: '#fef2f2', border: '1px solid #fca5a5', color: '#991b1b' }}>{error}</div>}
+            {error && <div role="alert" className="rounded-lg px-4 py-3 text-sm" style={{ background: 'rgba(255,59,48,0.08)', border: '1px solid rgba(255,59,48,0.35)', color: '#D70015' }}>{error}</div>}
             <button type="submit" disabled={loading} className="glass-btn w-full py-3 text-base">{loading ? (USE_SUPABASE ? 'Signing in…' : 'Signing in… (server may take up to a minute to wake)') : 'Sign in'}</button>
           </form>
-          <div className="mt-6 pt-5 grid grid-cols-2 gap-2" style={{ borderTop: '1px solid #e5e5ea' }}>
-            <button onClick={onSwitchToEmployee} className="text-sm font-medium rounded-lg min-h-[44px] hover:bg-[var(--accent-light)]" style={{ color: '#0071e3' }}>Employee login</button>
-            <button onClick={onSwitchToStudent} className="text-sm font-medium rounded-lg min-h-[44px] hover:bg-[var(--accent-light)]" style={{ color: '#0071e3' }}>Student login</button>
+          <div className="mt-6 pt-5 grid grid-cols-2 gap-2" style={{ borderTop: '1px solid rgba(60,60,67,0.12)' }}>
+            <button onClick={onSwitchToEmployee} className="text-sm font-medium rounded-lg min-h-[44px] hover:bg-[var(--accent-light)]" style={{ color: '#007AFF' }}>Employee login</button>
+            <button onClick={onSwitchToStudent} className="text-sm font-medium rounded-lg min-h-[44px] hover:bg-[var(--accent-light)]" style={{ color: '#007AFF' }}>Student login</button>
           </div>
         </div>
       </div>

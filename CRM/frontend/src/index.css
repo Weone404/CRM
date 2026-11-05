@@ -3,73 +3,87 @@
 @tailwind utilities;
 
 /* ═══════════════════════════════════════════════════════════════
-   Apple Liquid Glass Design System — v4
+   Apple Liquid Glass Design System — v6 (light)
    -----------------------------------------------------------------
-   Philosophy (from Apple HIG + Liquid Glass references):
-   • Glass is an ACCENT, never a coating. Solid #fff for content;
-     translucency + specular highlights only on overlapping chrome
-     (nav, tabs, modals, overlay, primary CTAs).
-   • Restraint as luxury: whitespace + hierarchy before borders/fills.
-   • One blue accent, grayscale hierarchy, hairline dividers.
-   PERFORMANCE:
-   • No SVG feDisplacementMap on repeating elements (tables/cards/rows)
-     — references warn of jank past 5–6 refraction layers.
-   • Transitions target specific GPU-friendly props (transform/opacity/
-     box-shadow), never `all`.
-   • Hover lift gated to pointer devices; blur reduced on mobile GPUs;
-     motion fully disabled under prefers-reduced-motion.
+   Colour: Apple Human Interface Guidelines, light mode.
+     Surfaces   #FFFFFF / #F2F2F7 / #E5E5EA (primary / secondary / tertiary)
+     Labels     black at 92 % / 60 % / 30 % / 18 % (primary / secondary / tertiary / quaternary)
+     Tint       system blue #007AFF; red #FF3B30, green #34C759, orange #FF9500, indigo #5856D6, gray #8E8E93
+     Tailwind colour classes are mapped onto these in tailwind.config.js.
+   Glass (the layered recipe):
+     1 colourful canvas behind (a soft Apple-style colour wallpaper, fixed)
+     2 saturation boost 190 %   3 blur 20 px   4 white tint 30–35 %   5 specular edge: white 40 %, 1 px
+     shadow: 4 % diffuse + 2 % micro
+     Chrome that content scrolls under (top bar, tab bar, sheets, pop-ups) uses the full recipe.
+     Content cards sit straight on the wallpaper, which is already smooth, so they use the same tint and edge
+     without a live blur — it looks identical and keeps long lists fast on phones.
+   Shape: continuous corners (squircle where the browser supports it), 16–20 px cards, 24–28 px pills.
+   Performance: blur only on a few chrome layers, each promoted to its own GPU layer; -webkit- prefixes for Safari.
    ═══════════════════════════════════════════════════════════════ */
 
 :root {
-  /* Surfaces — mostly solid, not translucent */
-  --surface-base: #f5f5f7;           /* Apple's signature cool grey */
-  --surface-elevated: #ffffff;        /* Pure white for content cards */
-  --surface-raised: #fafafa;
-  --surface-sunken: #eeeef0;
-  --surface-overlay: rgba(0,0,0,0.38);
+  /* HIG surfaces */
+  --bg-primary: #FFFFFF;
+  --bg-secondary: #F2F2F7;
+  --bg-tertiary: #E5E5EA;
 
-  /* Glass chrome — translucent accents only */
-  --glass-tint: rgba(255,255,255,0.72);
-  --glass-tint-strong: rgba(255,255,255,0.85);
-  --glass-dark: rgba(22,22,24,0.72);
-  --glass-blur: 20px;                 /* referenced 8–20px, 12–20 ideal */
-  --glass-saturate: 180%;
-  /* Specular rim: bright top edge, faint bottom — the "liquid" tell */
-  --specular: inset 0 1px 0 rgba(255,255,255,0.75),
-              inset 0 -1px 0 rgba(255,255,255,0.10);
-  --specular-accent: inset 0 1px 0 rgba(255,255,255,0.28);
+  /* HIG labels: one base colour, weight carried by opacity */
+  --label: rgba(0, 0, 0, 0.92);
+  --label-2: rgba(0, 0, 0, 0.60);
+  --label-3: rgba(0, 0, 0, 0.30);
+  --label-4: rgba(0, 0, 0, 0.18);
 
-  /* Accent — Apple system blue */
-  --accent: #0071e3;
-  --accent-hover: #0058b0;
-  --accent-light: #e8f1ff;
+  /* HIG tints and semantic colours */
+  --accent: #007AFF;
+  --accent-hover: #0062CC;
+  --accent-light: rgba(0, 122, 255, 0.12);
+  --red: #FF3B30;
+  --green: #34C759;
+  --orange: #FF9500;
+  --indigo: #5856D6;
+  --gray: #8E8E93;
 
-  /* Text — solid, high-contrast */
-  --text-primary: #1d1d1f;
-  --text-secondary: #424245;
-  --text-tertiary: #6e6e73;
-  --text-quaternary: #86868b;
-  --text-on-accent: #ffffff;
-  --text-on-dark: #f5f5f7;
+  /* Glass recipe */
+  --glass-tint: rgba(255, 255, 255, 0.34);
+  --glass-tint-thick: rgba(255, 255, 255, 0.72);
+  --glass-blur: 20px;
+  --glass-saturate: 190%;
+  --glass-edge: rgba(255, 255, 255, 0.40);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+  --specular: inset 0 1px 0 rgba(255, 255, 255, 0.70);
 
-  /* Borders — hairlines */
-  --border-default: #d2d2d7;
-  --border-subtle: #e5e5ea;
-  --border-strong: #a1a1a6;
-  --hairline: rgba(0,0,0,0.07);
+  /* Content material: same tint family, a little thicker so dense tables stay easy to read */
+  --card: rgba(255, 255, 255, 0.62);
+  --card-solid: #FFFFFF;
 
-  /* Shadows — soft, layered, low-alpha */
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.03);
-  --shadow-md: 0 2px 8px rgba(0,0,0,0.05), 0 6px 20px rgba(0,0,0,0.06);
-  --shadow-lg: 0 4px 16px rgba(0,0,0,0.06), 0 18px 50px rgba(0,0,0,0.12);
+  /* Older names kept so every existing class still resolves */
+  --surface-base: var(--bg-secondary);
+  --surface-elevated: var(--bg-primary);
+  --surface-raised: #FAFAFC;
+  --surface-sunken: rgba(118, 118, 128, 0.12);      /* Apple tertiary fill */
+  --surface-overlay: rgba(0, 0, 0, 0.22);
+  --glass-dark: rgba(28, 28, 30, 0.55);
+  --text-primary: var(--label);
+  --text-secondary: var(--label-2);
+  --text-tertiary: var(--label-2);
+  --text-quaternary: var(--label-3);
+  --text-on-accent: #FFFFFF;
+  --text-on-dark: #FFFFFF;
+  --border-default: rgba(60, 60, 67, 0.22);
+  --border-subtle: rgba(60, 60, 67, 0.12);
+  --border-strong: rgba(60, 60, 67, 0.36);
+  --hairline: rgba(60, 60, 67, 0.12);
 
-  /* Radii — squircle-ish */
-  --radius-sm: 10px;
-  --radius-md: 14px;
-  --radius-lg: 18px;
-  --radius-xl: 24px;
+  --shadow-sm: var(--glass-shadow);
+  --shadow-md: 0 10px 36px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.03);
+  --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.04);
 
-  /* Motion — spring-like, interruptible */
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 26px;
+  --radius-pill: 999px;
+
   --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -77,9 +91,6 @@
 * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
 
 html {
-  /* Fluid root: the whole rem-based UI scales smoothly with the viewport —
-     ~15px on phones (tighter, more fits), 16px on tablet/desktop (unchanged). */
-  /* 16px everywhere: easy to read on phones too (was 14-16px fluid). */
   font-size: 16px;
   scroll-behavior: smooth;
   -webkit-text-size-adjust: 100%;
@@ -87,26 +98,42 @@ html {
 
 html, body {
   margin: 0; padding: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
+  /* Sharpest text the engine offers over glass (sub-pixel where the OS still supports it) */
+  -webkit-font-smoothing: subpixel-antialiased;
+  -moz-osx-font-smoothing: auto;
   text-rendering: optimizeLegibility;
-  background: var(--surface-base);
-  color: var(--text-primary);
+  color: var(--label);
   line-height: 1.5;
 }
+/* The canvas colour lives on <html>; <body> stays transparent so the wallpaper layer below shows through */
+html { background: var(--bg-secondary); }
+body { background: transparent; }
 
-/* No sideways page scroll. 'clip' (not 'hidden') on body so it does not become a scroll box,
-   which would stop the sticky top bar and tab bar from sticking. */
+/* Layer 1: the colourful canvas behind every glass panel. Fixed, on its own layer, never repainted on scroll. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(55% 45% at 6% 0%, rgba(0, 122, 255, 0.26) 0%, rgba(0, 122, 255, 0) 70%),
+    radial-gradient(45% 40% at 100% 6%, rgba(175, 82, 222, 0.20) 0%, rgba(175, 82, 222, 0) 70%),
+    radial-gradient(50% 45% at 92% 100%, rgba(48, 176, 199, 0.24) 0%, rgba(48, 176, 199, 0) 70%),
+    radial-gradient(45% 40% at 0% 96%, rgba(255, 45, 85, 0.12) 0%, rgba(255, 45, 85, 0) 70%),
+    radial-gradient(40% 35% at 50% 50%, rgba(88, 86, 214, 0.08) 0%, rgba(88, 86, 214, 0) 70%),
+    var(--bg-secondary);
+  transform: translateZ(0);
+}
+
 html { overflow-x: hidden; }
 body { overflow-x: clip; }
 
 #root { min-height: 100vh; position: relative; }
 
-/* Media never overflows its container on small screens */
 img, svg, video, canvas { max-width: 100%; height: auto; }
 
-/* Apple polish: tight tracking on titles, tabular figures for data */
 h1, h2, h3 { letter-spacing: -0.021em; }
 h4, h5 { letter-spacing: -0.012em; }
 .tnum, .glass-stat, .glass-table td, .glass-table th {
@@ -114,114 +141,109 @@ h4, h5 { letter-spacing: -0.012em; }
   font-feature-settings: "tnum" 1;
 }
 
-/* Accessible, on-brand focus ring for keyboard users */
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 @layer components {
-  /* ── Navigation: dark Liquid Glass with specular rim ── */
-  .glass-nav {
-    background: var(--glass-dark);
-    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-    border-bottom: 1px solid rgba(255,255,255,0.10);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.10);
-  }
-
-  /* ── Tab bar: light Liquid Glass ── */
-  .glass-tabs {
+  /* ── Chrome glass: the full five-layer recipe ── */
+  .glass-chrome, .glass-nav, .glass-tabs {
     background: var(--glass-tint);
-    backdrop-filter: blur(18px) saturate(var(--glass-saturate));
-    -webkit-backdrop-filter: blur(18px) saturate(var(--glass-saturate));
-    border-bottom: 1px solid var(--hairline);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    box-shadow: var(--glass-shadow), var(--specular);
+    transform: translateZ(0);
+    will-change: backdrop-filter;
   }
+  .glass-chrome { border: 1px solid var(--glass-edge); }
+  .glass-nav { border-bottom: 1px solid var(--glass-edge); color: var(--label); }
+  .glass-tabs { border-bottom: 1px solid var(--hairline); }
 
-  /* ── Cards: solid white content surface (glass would "read dirty") ── */
+  /* ── Content cards ── */
   .glass-card {
-    background: var(--surface-elevated);
-    border: 1px solid var(--border-subtle);
-    box-shadow: var(--shadow-sm);
+    background: var(--card);
+    border: 1px solid var(--glass-edge);
+    box-shadow: var(--glass-shadow), var(--specular);
     border-radius: var(--radius-lg);
-    transition: transform 0.28s var(--spring), box-shadow 0.28s var(--ease), border-color 0.28s var(--ease);
+    transition: transform 0.35s var(--spring), box-shadow 0.25s var(--ease);
     contain: layout paint;
   }
 
-  /* ── Strong surface: modals (solid + specular rim) ── */
+  /* ── Pop-ups and sheets: thick glass over the dimmed page ── */
   .glass-strong {
-    background: var(--surface-elevated);
-    border: 1px solid var(--border-subtle);
+    background: var(--glass-tint-thick);
+    -webkit-backdrop-filter: blur(25px) saturate(var(--glass-saturate));
+    backdrop-filter: blur(25px) saturate(var(--glass-saturate));
+    border: 1px solid rgba(255, 255, 255, 0.6);
     box-shadow: var(--shadow-lg), var(--specular);
     border-radius: var(--radius-xl);
   }
 
-  /* ── Subtle: inner recessed elements ── */
+  /* ── Nested areas inside cards (HIG tertiary) ── */
   .glass-subtle {
     background: var(--surface-sunken);
-    border: 1px solid var(--border-subtle);
+    border: 1px solid transparent;
     border-radius: var(--radius-md);
   }
 
-  /* ── Stat cards ── */
+  /* ── Stat tiles ── */
   .glass-stat {
-    background: var(--surface-elevated);
-    border: 1px solid var(--border-subtle);
-    box-shadow: var(--shadow-sm);
-    border-radius: var(--radius-md);
-    transition: transform 0.28s var(--spring), box-shadow 0.28s var(--ease), border-color 0.28s var(--ease);
+    background: var(--card);
+    border: 1px solid var(--glass-edge);
+    box-shadow: var(--glass-shadow), var(--specular);
+    border-radius: var(--radius-lg);
+    transition: transform 0.35s var(--spring), box-shadow 0.25s var(--ease);
     contain: layout paint;
   }
 
-  /* ── Inputs: clean, solid ── */
+  /* ── Fields and search bars (HIG tertiary background) ── */
   .glass-input {
-    background: var(--surface-elevated);
-    border: 1px solid var(--border-default);
+    background: rgba(255, 255, 255, 0.78);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
-    color: var(--text-primary);
-    transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+    color: var(--label);
+    transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease), background 0.15s var(--ease);
   }
-  .glass-input::placeholder { color: var(--text-quaternary); }
+  .glass-input::placeholder { color: var(--label-3); }
   .glass-input:focus {
+    background: #FFFFFF;
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.14);
+    box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.18);
     outline: none;
   }
 
-  /* ── Primary button: accent with specular top highlight ── */
+  /* ── Primary button: system blue capsule ── */
   .glass-btn {
     background: var(--accent);
     border: none;
-    box-shadow: var(--shadow-sm), var(--specular-accent);
-    border-radius: var(--radius-sm);
-    color: var(--text-on-accent);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    border-radius: var(--radius-pill);
+    color: #FFFFFF;
     font-weight: 600;
-    transition: transform 0.15s var(--spring), background 0.15s var(--ease), box-shadow 0.15s var(--ease);
+    transition: transform 0.2s var(--spring), filter 0.15s var(--ease), box-shadow 0.15s var(--ease);
   }
-  .glass-btn:hover { background: var(--accent-hover); box-shadow: var(--shadow-md), var(--specular-accent); }
-  .glass-btn:active { transform: scale(0.97); box-shadow: none; }
-  .glass-btn:disabled { background: #c7c7cc; box-shadow: none; cursor: not-allowed; }
+  .glass-btn:hover { filter: brightness(0.92); box-shadow: 0 4px 14px rgba(0, 122, 255, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.25); }
+  .glass-btn:active { transform: scale(0.96); }
+  .glass-btn:disabled { background: rgba(120, 120, 128, 0.32) !important; color: rgba(0, 0, 0, 0.3); box-shadow: none; cursor: not-allowed; filter: none; }
 
-  /* ── Ghost button for the dark glass nav ── */
+  /* ── Secondary button on glass (top bar etc.) ── */
   .glass-btn-ghost {
-    background: rgba(255,255,255,0.14);
-    border: 1px solid rgba(255,255,255,0.20);
-    border-radius: var(--radius-sm);
-    color: var(--text-on-dark);
+    background: rgba(255, 255, 255, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    border-radius: var(--radius-pill);
+    color: var(--label);
     font-weight: 500;
-    -webkit-backdrop-filter: blur(6px);
-    backdrop-filter: blur(6px);
-    transition: background 0.15s var(--ease), transform 0.15s var(--spring);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+    transition: background 0.15s var(--ease), transform 0.2s var(--spring);
   }
-  .glass-btn-ghost:hover { background: rgba(255,255,255,0.24); }
-  .glass-btn-ghost:active { transform: scale(0.97); }
+  .glass-btn-ghost:hover { background: rgba(255, 255, 255, 0.78); }
+  .glass-btn-ghost:active { transform: scale(0.96); }
 
-  /* ── Badge ── */
   .glass-badge {
     border: 1px solid transparent;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     font-weight: 600;
     font-size: 0.75rem;
     padding: 0.25rem 0.75rem;
@@ -230,24 +252,24 @@ h4, h5 { letter-spacing: -0.012em; }
     gap: 0.35rem;
   }
 
-  /* ── Overlay: frosted modal backdrop ── */
+  /* ── Dimmed backdrop behind pop-ups ── */
   .glass-overlay {
     background: var(--surface-overlay);
-    backdrop-filter: blur(6px) saturate(120%);
-    -webkit-backdrop-filter: blur(6px) saturate(120%);
+    -webkit-backdrop-filter: blur(8px) saturate(140%);
+    backdrop-filter: blur(8px) saturate(140%);
   }
 
-  /* ── Table ── */
+  /* ── Tables ── */
   .glass-table {
-    background: var(--surface-elevated);
-    border: 1px solid var(--border-subtle);
+    background: var(--card);
+    border: 1px solid var(--glass-edge);
     border-radius: var(--radius-md);
     overflow: hidden;
-    box-shadow: var(--shadow-sm);
+    box-shadow: var(--glass-shadow);
   }
-  .glass-table thead { background: var(--surface-sunken); }
+  .glass-table thead { background: rgba(118, 118, 128, 0.08); }
   .glass-table th {
-    color: var(--text-tertiary);
+    color: var(--label-2);
     font-weight: 600;
     text-transform: uppercase;
     font-size: 0.70rem;
@@ -259,172 +281,104 @@ h4, h5 { letter-spacing: -0.012em; }
   .glass-table td {
     padding: 1rem 1.5rem;
     border-bottom: 1px solid var(--hairline);
-    color: var(--text-primary);
+    color: var(--label);
   }
   .glass-table tbody tr { transition: background 0.12s var(--ease); }
   .glass-table tbody tr:last-child td { border-bottom: none; }
   .glass-table tbody tr:hover { background: var(--accent-light); }
 
-  /* ── Tab buttons ── */
+  /* ── Section tabs: pill segments on glass ── */
   .glass-tab-btn {
-    padding: 0.75rem 1.5rem;
+    margin: 0.4rem 0.15rem;
+    padding: 0.5rem 1rem;
     font-size: 0.875rem;
     font-weight: 500;
     border: none;
-    border-bottom: 2px solid transparent;
-    transition: color 0.2s var(--ease), border-color 0.2s var(--ease);
-    color: var(--text-tertiary);
+    border-radius: var(--radius-pill);
+    transition: color 0.2s var(--ease), background 0.2s var(--ease), box-shadow 0.2s var(--ease);
+    color: var(--label-2);
     background: transparent;
     cursor: pointer;
     white-space: nowrap;
   }
-  .glass-tab-btn:hover { color: var(--text-primary); }
+  .glass-tab-btn:hover { color: var(--label); background: rgba(255, 255, 255, 0.45); }
   .glass-tab-btn.active {
     color: var(--accent);
     font-weight: 600;
-    border-bottom-color: var(--accent);
+    background: rgba(255, 255, 255, 0.85);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), inset 0 0 0 1px rgba(255, 255, 255, 0.9);
   }
 
-  /* ── Optional true Liquid Glass accent (hero/CTA only, NOT lists) ──
-     Reserve for 1–2 non-repeating elements to stay within the
-     5–6 refraction-layer performance budget. Degrades to blur on
-     Safari/Firefox automatically. */
   .liquid-glass {
     position: relative;
     isolation: isolate;
     border-radius: var(--radius-xl);
-    background: rgba(255,255,255,0.14);
-    -webkit-backdrop-filter: blur(12px) saturate(160%) brightness(1.04);
-    backdrop-filter: blur(12px) saturate(160%) brightness(1.04);
-    box-shadow: var(--shadow-md), var(--specular);
+    background: var(--glass-tint);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    border: 1px solid var(--glass-edge);
+    box-shadow: var(--glass-shadow), var(--specular);
   }
 }
 
-/* ── Text colors ── */
-.text-glass-primary { color: var(--text-primary); }
-.text-glass-secondary { color: var(--text-secondary); }
-.text-glass-muted { color: var(--text-tertiary); }
-.text-glass-light { color: var(--text-on-dark); }
-.text-glass-light-secondary { color: rgba(245, 245, 247, 0.75); }
+/* Continuous (squircle) corners where the browser supports them; normal round corners elsewhere */
+@supports (corner-shape: squircle) {
+  .glass-card, .glass-stat, .glass-strong, .glass-table, .glass-subtle, .glass-chrome, .liquid-glass,
+  .rounded-xl, .rounded-2xl, .rounded-3xl, .rounded-lg { corner-shape: squircle; }
+}
 
-/* ── Hover lift: pointer devices only (mobile perf + no sticky hover) ── */
+/* ── Text colours ── */
+.text-glass-primary { color: var(--label); }
+.text-glass-secondary { color: var(--label-2); }
+.text-glass-muted { color: var(--label-2); }
+.text-glass-light { color: #FFFFFF; }
+.text-glass-light-secondary { color: rgba(255, 255, 255, 0.7); }
+
+/* ── Hover lift: pointer devices only ── */
 @media (hover: hover) and (pointer: fine) {
-  .glass-card:hover {
-    box-shadow: var(--shadow-md);
-    border-color: var(--border-default);
-    transform: translateY(-2px);
-  }
-  .glass-stat:hover {
-    box-shadow: var(--shadow-md);
-    border-color: var(--border-default);
-    transform: translateY(-3px);
-  }
+  .glass-card:hover { box-shadow: var(--shadow-md), var(--specular); }
+  .glass-stat:hover { box-shadow: var(--shadow-md), var(--specular); transform: translateY(-2px); }
 }
 
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #c7c7cc; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #a1a1a6; }
+::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.18); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.3); }
 
-/* ── Toast ── */
 #toast-container > div {
-  border-radius: var(--radius-sm) !important;
+  border-radius: var(--radius-md) !important;
   box-shadow: var(--shadow-lg) !important;
 }
 
-/* ── Motion: materialize with blur+scale+opacity, spring settle ── */
+/* ── Motion: materialise with a spring ── */
 @keyframes glassFadeIn {
   from { opacity: 0; transform: translateY(8px) scale(0.985); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
-.animate-glass-in { animation: glassFadeIn 0.32s var(--spring); }
+.animate-glass-in { animation: glassFadeIn 0.36s var(--spring); }
 
-/* ── Select / date ── */
-select.glass-input option { background: #fff; color: var(--text-primary); }
+select.glass-input option { background: #fff; color: #000; }
 input[type="date"].glass-input,
 input[type="month"].glass-input,
 input[type="datetime-local"].glass-input { color-scheme: light; }
 
-/* ═══ Responsive: lighter blur on mobile GPUs, tighter data padding ═══ */
 @media (max-width: 640px) {
-  :root { --glass-blur: 12px; }
-  .glass-tabs { backdrop-filter: blur(12px) saturate(150%); -webkit-backdrop-filter: blur(12px) saturate(150%); }
+  :root { --glass-blur: 16px; }
   .glass-table th { padding: 0.6rem 0.9rem; }
   .glass-table td { padding: 0.75rem 0.9rem; }
-  /* iOS zooms the page when focusing an input <16px — force 16px on phones
-     so focusing a field never triggers a jarring zoom-jump. */
   input, select, textarea { font-size: 16px; }
 }
 
-/* Touch screens: every button, tab and field is at least 44px tall (finger-sized). */
 @media (pointer: coarse) {
   .glass-btn, .glass-tab-btn, .glass-btn-ghost, select.glass-input, input.glass-input:not([type="checkbox"]):not([type="radio"]) { min-height: 44px; }
 }
 
-/* Tablet: slightly roomier data padding than phone, tighter than desktop */
 @media (min-width: 641px) and (max-width: 1024px) {
   .glass-table th { padding: 0.7rem 1.1rem; }
   .glass-table td { padding: 0.85rem 1.1rem; }
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   Authentic Liquid Glass — refraction + specular (v5 enhancement)
-   -----------------------------------------------------------------
-   The v4 system used frosted blur only. This layer adds true Apple
-   "Liquid Glass" refraction (SVG feDisplacementMap, defs in index.html)
-   and a brighter specular rim to the TRANSLUCENT CHROME only:
-   nav, tab bar, and modal overlay. Content cards stay solid white.
-
-   Safari-safe by construction: refraction lives on an isolated ::before
-   whose backdrop-filter uses url(#…). Chromium renders the displacement;
-   Safari/Firefox can't parse url() in backdrop-filter, drop the pseudo's
-   filter entirely (the pseudo is purely decorative), and keep the
-   element's own frosted blur untouched. No JS, no layout, no CLS.
-
-   Perf budget: at most nav + tabs refract at once (2 layers); the overlay
-   adds a 3rd only while a modal is open — well under the ~5–6 layer ceiling.
-   Refraction is STATIC (no animated turbulence) so it costs nothing on
-   scroll and needs no reduced-motion handling.
-   ═══════════════════════════════════════════════════════════════ */
-.glass-nav, .glass-tabs { isolation: isolate; }
-
-.glass-nav::before,
-.glass-tabs::before,
-.glass-overlay::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;                       /* above the element's own tint, below its content */
-  border-radius: inherit;
-  pointer-events: none;
-  /* Chromium: refract the already-frosted backdrop. Other engines ignore this
-     whole declaration (invalid url() function) and simply show no pseudo. */
-  backdrop-filter: url(#liquid-glass-refraction);
-}
-.glass-overlay::before { backdrop-filter: url(#liquid-glass-refraction-sm); }
-
-/* Brighter, two-stop specular rim — the "wet edge" that reads as liquid glass. */
-.glass-nav {
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.18),
-              inset 0 -1px 0 rgba(255,255,255,0.04);
-}
-.glass-tabs {
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.7),
-              inset 0 -1px 0 rgba(0,0,0,0.02);
-}
-.glass-strong { box-shadow: var(--shadow-lg), var(--specular); }
-
-/* ── WCAG AA contrast fixes (v5) ──────────────────────────────────
-   Measured pairs that fell just short of AA on the light surfaces:
-   • table headers  #6e6e73 on #eeeef0 = 4.38:1  → #636368 = 5.16:1 ✓
-   • input placeholder #86868b on #fff = 3.62:1  → tertiary = 5.07:1 ✓
-   Everything else already grades AA/AAA. */
-.glass-table th { color: #636368; }
-.glass-input::placeholder { color: var(--text-tertiary); }
-
-/* Opt-in specular sweep, matching liquidglass-tailwind's .glass-shine gradient.
-   Use on non-repeating, overflow-safe accents (hero CTA, a single feature card). */
 .glass-shine { position: relative; overflow: hidden; }
 .glass-shine::after {
   content: "";
@@ -432,12 +386,9 @@ input[type="datetime-local"].glass-input { color-scheme: light; }
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  background: linear-gradient(135deg,
-    rgba(255,255,255,0.25) 0%, transparent 40%,
-    transparent 60%, rgba(255,255,255,0.05) 100%);
+  background: linear-gradient(135deg, rgba(255,255,255,0.35) 0%, transparent 40%, transparent 60%, rgba(255,255,255,0.08) 100%);
 }
 
-/* ═══ Accessibility: honour reduced-motion — kill transforms/anims ═══ */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -448,28 +399,15 @@ input[type="datetime-local"].glass-input { color-scheme: light; }
   .glass-card:hover, .glass-stat:hover { transform: none; }
 }
 
-/* ═══ Accessibility: honour reduced-transparency — drop glass for opacity ═══
-   (New in v5 — the previous system had no reduced-transparency path.) Users who
-   ask the OS to reduce transparency get solid, high-contrast chrome instead of
-   frosted glass, with the refraction pseudo removed entirely. */
+/* Reduce transparency (system setting): solid surfaces instead of glass */
 @media (prefers-reduced-transparency: reduce) {
-  .glass-nav::before, .glass-tabs::before, .glass-overlay::before { display: none; }
-  .glass-nav {
-    background: #1d1d1f;
-    backdrop-filter: none; -webkit-backdrop-filter: none;
+  body::before { background: var(--bg-secondary); }
+  .glass-chrome, .glass-nav, .glass-tabs, .glass-strong, .liquid-glass {
+    background: #FFFFFF;
+    -webkit-backdrop-filter: none; backdrop-filter: none;
   }
-  .glass-tabs {
-    background: var(--surface-base);
-    backdrop-filter: none; -webkit-backdrop-filter: none;
-  }
-  .glass-overlay {
-    background: rgba(0,0,0,0.55);
-    backdrop-filter: none; -webkit-backdrop-filter: none;
-  }
-  .liquid-glass {
-    background: var(--surface-elevated);
-    backdrop-filter: none; -webkit-backdrop-filter: none;
-  }
+  .glass-card, .glass-stat, .glass-table { background: #FFFFFF; }
+  .glass-overlay { background: rgba(0, 0, 0, 0.45); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
 
 /* ═══════════════════════════════════════════════════════════════

@@ -38,7 +38,7 @@ export default function LeadList({ leads, onSelectLead, segment = 'aviation' }) 
 
   const tab = (key, label, activeClass) => (
     (isCharter && TRACK_TABS.has(key)) ? null :
-    <button key={key} onClick={() => setFilter(key)} className={`px-3 py-1 rounded text-sm font-medium transition ${filter === key ? activeClass : 'glass-subtle text-glass-secondary hover:text-glass-primary'}`}>{label}</button>
+    <button key={key} onClick={() => setFilter(key)} className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition ${filter === key ? activeClass : 'glass-subtle text-glass-secondary hover:text-glass-primary'}`}>{label}</button>
   );
 
   const badgeClass = (lead) => {
@@ -68,8 +68,8 @@ export default function LeadList({ leads, onSelectLead, segment = 'aviation' }) 
 
       {filter === 'closed' && (
         <div className="flex gap-2 mb-4 flex-wrap">
-          <button onClick={() => setClosedSub('positive')} className={`px-3 py-1 rounded text-sm font-medium transition ${closedSub === 'positive' ? 'bg-green-600 text-white' : 'glass-subtle text-green-800'}`}>{closure.positive.plural} ({closedWith(closure.positive.value).length})</button>
-          <button onClick={() => setClosedSub('negative')} className={`px-3 py-1 rounded text-sm font-medium transition ${closedSub === 'negative' ? 'bg-red-600 text-white' : 'glass-subtle text-red-800'}`}>{closure.negative.plural} ({closedWith(closure.negative.value).length})</button>
+          <button onClick={() => setClosedSub('positive')} className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition ${closedSub === 'positive' ? 'bg-green-600 text-white' : 'glass-subtle text-green-800'}`}>{closure.positive.plural} ({closedWith(closure.positive.value).length})</button>
+          <button onClick={() => setClosedSub('negative')} className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition ${closedSub === 'negative' ? 'bg-red-600 text-white' : 'glass-subtle text-red-800'}`}>{closure.negative.plural} ({closedWith(closure.negative.value).length})</button>
         </div>
       )}
 

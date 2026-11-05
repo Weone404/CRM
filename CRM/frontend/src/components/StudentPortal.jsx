@@ -26,7 +26,7 @@ export default function StudentPortal({ onLogout }) {
   const fullName = student ? [student.first_name, student.middle_name, student.last_name].filter(Boolean).join(' ') : '';
 
   return (
-    <div className="min-h-screen" style={{ background: '#f5f5f7' }}>
+    <div className="min-h-screen" style={{ background: '#F2F2F7' }}>
       <nav className="glass-nav text-white px-4 sm:px-6 py-3 flex justify-between items-center sticky top-0 z-40">
         <h1 className="text-lg sm:text-xl font-bold tracking-tight">🎓 We One Aviation <span className="font-normal text-indigo-200">· Student Portal</span></h1>
         <div className="flex items-center gap-3"><span className="hidden sm:inline text-sm text-indigo-100">👤 {fullName}</span><button onClick={onLogout} className="glass-btn-ghost px-3 py-1.5 text-sm">Logout</button></div>
@@ -56,13 +56,13 @@ export default function StudentPortal({ onLogout }) {
             </div>
             <div className="glass-card p-4 sm:p-6 animate-glass-in">
               <h3 className="text-lg font-semibold mb-3 text-glass-primary">My Documents</h3>
-              <div className="divide-y rounded-lg" style={{ borderColor: '#d2d2d7' }}>
+              <div className="divide-y rounded-lg" style={{ borderColor: 'rgba(60,60,67,0.22)' }}>
                 {docs.doc_types.map((t) => { const doc = docs.documents[t]; return (
-                  <div key={t} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3" style={{ borderBottom: '1px solid #e5e5ea' }}>
+                  <div key={t} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3" style={{ borderBottom: '1px solid rgba(60,60,67,0.12)' }}>
                     <div className="flex items-center gap-2"><span className={doc ? 'text-green-600' : 'text-glass-muted'}>{doc ? '✓' : '○'}</span><span className="font-medium text-glass-primary">{DOC_LABELS[t] || t}</span>{doc && <span className="text-xs text-glass-muted truncate max-w-[160px]">{doc.original_filename}</span>}</div>
                     <div className="flex gap-2 flex-wrap">
-                      {doc && <button onClick={() => view(doc.id)} className="px-3 py-1 text-sm glass-btn" style={{ background: '#3b82f6' }}>View</button>}
-                      <label className={`px-3 py-1 text-sm rounded cursor-pointer font-medium transition ${doc ? 'glass-subtle text-glass-secondary' : 'glass-btn'}`} style={doc ? {} : { background: '#22c55e' }}>{busy === t ? 'Uploading…' : doc ? 'Replace' : 'Upload'}<input type="file" accept={ACCEPT} className="hidden" disabled={busy === t} onChange={(e) => { upload(t, e.target.files[0]); e.target.value = ''; }} /></label>
+                      {doc && <button onClick={() => view(doc.id)} className="px-3 py-1 text-sm glass-btn" style={{ background: '#007AFF' }}>View</button>}
+                      <label className={`px-3 py-1 text-sm rounded cursor-pointer font-medium transition ${doc ? 'glass-subtle text-glass-secondary' : 'glass-btn'}`} style={doc ? {} : { background: '#34C759' }}>{busy === t ? 'Uploading…' : doc ? 'Replace' : 'Upload'}<input type="file" accept={ACCEPT} className="hidden" disabled={busy === t} onChange={(e) => { upload(t, e.target.files[0]); e.target.value = ''; }} /></label>
                     </div>
                   </div>); })}
               </div>

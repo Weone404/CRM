@@ -56,7 +56,7 @@ export default function Connections() {
   };
 
   const btn = 'px-3 py-1.5 rounded-lg font-medium text-sm';
-  const grey = { background: '#f3f4f6', color: '#424245' };
+  const grey = { background: 'rgba(118,118,128,0.12)', color: 'rgba(0,0,0,0.6)' };
 
   return (
     <div className="mt-8">
@@ -97,7 +97,7 @@ export default function Connections() {
                     {!full && <button className={btn} style={grey} onClick={() => token(c.id)}>Show</button>}
                     {full && <button className={btn} style={grey} onClick={() => setShown((s) => { const n = { ...s }; delete n[c.id]; return n; })}>Hide</button>}
                     <button className={btn} style={grey} onClick={async () => { const t = await token(c.id); if (t) copy(t, 'Token'); }}>Copy token</button>
-                    <button className={btn} style={{ background: '#fee2e2', color: '#b91c1c' }} disabled={busy === c.id} onClick={() => rotate(c)}>
+                    <button className={btn} style={{ background: 'rgba(255,59,48,0.12)', color: '#D70015' }} disabled={busy === c.id} onClick={() => rotate(c)}>
                       {busy === c.id ? 'Making…' : 'New token'}
                     </button>
                   </div>

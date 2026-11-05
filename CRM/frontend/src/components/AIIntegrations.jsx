@@ -18,9 +18,9 @@ const FB_ONLY = {
   hostinger_mail: { name: 'Hostinger Mail API token', hint: 'Reads replies for FlightBridge AI' },
   hostinger_mailbox: { name: 'Hostinger mailbox ID', hint: 'Which mailbox FlightBridge AI reads' },
 };
-const fbStatus = (k) => (k.last_test_ok === true ? { text: 'Working', bg: '#dcfce7', fg: '#166534' }
-  : k.last_test_ok === false ? { text: 'Problem', bg: '#fee2e2', fg: '#b91c1c' }
-  : { text: 'Saved', bg: '#fef9c3', fg: '#854d0e' });
+const fbStatus = (k) => (k.last_test_ok === true ? { text: 'Working', bg: 'rgba(52,199,89,0.14)', fg: '#248A3D' }
+  : k.last_test_ok === false ? { text: 'Problem', bg: 'rgba(255,59,48,0.12)', fg: '#D70015' }
+  : { text: 'Saved', bg: 'rgba(255,204,0,0.18)', fg: '#A05A00' });
 
 export default function AIIntegrations() {
   const [rows, setRows] = useState([]);
@@ -84,7 +84,7 @@ export default function AIIntegrations() {
           API keys are encrypted in the database. Only the last 4 characters are ever shown, and only Admin can change them.
         </p>
       </div>
-      {error && <div className="glass-card p-3 mb-4 text-sm" style={{ color: '#b91c1c' }}>{error}</div>}
+      {error && <div className="glass-card p-3 mb-4 text-sm" style={{ color: '#D70015' }}>{error}</div>}
       {loading ? <div className="text-sm text-glass-secondary">Loading…</div> : (
         <div className="space-y-2">
           {[...list, ...(editing && !list.some((p) => p.id === editing) ? [{ id: editing, name: editing, hint: 'Custom provider' }] : [])].map((p) => {
@@ -102,12 +102,12 @@ export default function AIIntegrations() {
                   <div className="flex items-center gap-2 text-sm">
                     {row ? (
                       <>
-                        <span className="px-2 py-0.5 rounded-md" style={{ background: row.enabled ? '#dcfce7' : '#f3f4f6', color: row.enabled ? '#166534' : '#6b7280' }}>
+                        <span className="px-2 py-0.5 rounded-md" style={{ background: row.enabled ? 'rgba(52,199,89,0.14)' : 'rgba(118,118,128,0.12)', color: row.enabled ? '#248A3D' : 'rgba(0,0,0,0.6)' }}>
                           {row.enabled ? 'Active' : 'Off'} · ••••{row.last4}
                         </span>
-                        <button onClick={() => toggle(p.id, !row.enabled)} className="px-3 py-1.5 rounded-lg font-medium" style={{ background: '#f3f4f6', color: '#424245' }}>{row.enabled ? 'Turn off' : 'Turn on'}</button>
+                        <button onClick={() => toggle(p.id, !row.enabled)} className="px-3 py-1.5 rounded-lg font-medium" style={{ background: 'rgba(118,118,128,0.12)', color: 'rgba(0,0,0,0.6)' }}>{row.enabled ? 'Turn off' : 'Turn on'}</button>
                         <button onClick={() => { setEditing(p.id); setKeyInput(''); }} className="glass-btn px-3 py-1.5">Replace</button>
-                        <button onClick={() => remove(p.id)} className="px-3 py-1.5 rounded-lg font-medium" style={{ background: '#fee2e2', color: '#b91c1c' }}>Delete</button>
+                        <button onClick={() => remove(p.id)} className="px-3 py-1.5 rounded-lg font-medium" style={{ background: 'rgba(255,59,48,0.12)', color: '#D70015' }}>Delete</button>
                       </>
                     ) : fbKey ? (
                       <span className="px-2 py-0.5 rounded-md" style={{ background: st.bg, color: st.fg }}>{st.text} · ••••{fbKey.last4}</span>
@@ -121,14 +121,14 @@ export default function AIIntegrations() {
                   <div className="text-xs text-glass-muted mt-2">
                     {row && <span className="mr-1 px-1.5 py-0.5 rounded" style={{ background: st.bg, color: st.fg }}>FlightBridge: {st.text} · ••••{fbKey.last4}</span>}
                     Saved in FlightBridge AI → Settings{fbKey.updated_by_name ? ` by ${fbKey.updated_by_name}` : ''}, {new Date(fbKey.updated_at).toLocaleString()} — change or test it there.
-                    {fbKey.last_test_ok === false && fbKey.last_test_message && <div style={{ color: '#b91c1c' }}>{fbKey.last_test_message}</div>}
+                    {fbKey.last_test_ok === false && fbKey.last_test_message && <div style={{ color: '#D70015' }}>{fbKey.last_test_message}</div>}
                   </div>
                 )}
                 {isEditing && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     <input type="password" autoComplete="off" value={keyInput} onChange={(e) => setKeyInput(e.target.value)} placeholder={`Paste the ${p.name} API key`} className="glass-input flex-1 min-w-[220px] px-3 py-2" autoFocus />
-                    <button disabled={busy} onClick={() => save(p.id)} className="glass-btn px-4 py-2" style={{ background: '#22c55e' }}>{busy ? 'Saving…' : 'Save'}</button>
-                    <button onClick={() => { setEditing(null); setKeyInput(''); }} className="px-4 py-2 rounded-lg font-medium" style={{ background: '#f3f4f6', color: '#424245' }}>Cancel</button>
+                    <button disabled={busy} onClick={() => save(p.id)} className="glass-btn px-4 py-2" style={{ background: '#34C759' }}>{busy ? 'Saving…' : 'Save'}</button>
+                    <button onClick={() => { setEditing(null); setKeyInput(''); }} className="px-4 py-2 rounded-lg font-medium" style={{ background: 'rgba(118,118,128,0.12)', color: 'rgba(0,0,0,0.6)' }}>Cancel</button>
                   </div>
                 )}
               </div>

@@ -6,18 +6,18 @@ import { createPortal } from 'react-dom';
 // --dx is the horizontal drift, --spin the final rotation; both read by @keyframes
 // bdConfettiFall in index.css, which is disabled under prefers-reduced-motion.
 const CONFETTI = [
-  { left: '6%',  delay: 0.0, dur: 5.4, dx: '18px',  spin: '210deg', color: '#6366f1', w: 7,  h: 12 },
-  { left: '14%', delay: 0.9, dur: 6.2, dx: '-22px', spin: '-160deg', color: '#0071e3', w: 6,  h: 6, round: true },
-  { left: '23%', delay: 0.3, dur: 5.8, dx: '26px',  spin: '140deg', color: '#f59e0b', w: 8,  h: 11 },
-  { left: '31%', delay: 1.6, dur: 6.6, dx: '-14px', spin: '190deg', color: '#6366f1', w: 5,  h: 9 },
+  { left: '6%',  delay: 0.0, dur: 5.4, dx: '18px',  spin: '210deg', color: '#5856D6', w: 7,  h: 12 },
+  { left: '14%', delay: 0.9, dur: 6.2, dx: '-22px', spin: '-160deg', color: '#007AFF', w: 6,  h: 6, round: true },
+  { left: '23%', delay: 0.3, dur: 5.8, dx: '26px',  spin: '140deg', color: '#FF9500', w: 8,  h: 11 },
+  { left: '31%', delay: 1.6, dur: 6.6, dx: '-14px', spin: '190deg', color: '#5856D6', w: 5,  h: 9 },
   { left: '41%', delay: 0.6, dur: 5.2, dx: '20px',  spin: '-220deg', color: '#f472b6', w: 7,  h: 7, round: true },
-  { left: '49%', delay: 2.1, dur: 6.0, dx: '-26px', spin: '150deg', color: '#0071e3', w: 6,  h: 12 },
-  { left: '57%', delay: 0.2, dur: 6.4, dx: '16px',  spin: '-180deg', color: '#f59e0b', w: 6,  h: 6, round: true },
-  { left: '65%', delay: 1.2, dur: 5.6, dx: '-18px', spin: '200deg', color: '#6366f1', w: 8,  h: 11 },
+  { left: '49%', delay: 2.1, dur: 6.0, dx: '-26px', spin: '150deg', color: '#007AFF', w: 6,  h: 12 },
+  { left: '57%', delay: 0.2, dur: 6.4, dx: '16px',  spin: '-180deg', color: '#FF9500', w: 6,  h: 6, round: true },
+  { left: '65%', delay: 1.2, dur: 5.6, dx: '-18px', spin: '200deg', color: '#5856D6', w: 8,  h: 11 },
   { left: '74%', delay: 0.5, dur: 6.8, dx: '24px',  spin: '-140deg', color: '#f472b6', w: 5,  h: 10 },
-  { left: '82%', delay: 1.8, dur: 5.9, dx: '-20px', spin: '170deg', color: '#0071e3', w: 7,  h: 7, round: true },
-  { left: '90%', delay: 0.8, dur: 6.3, dx: '14px',  spin: '-200deg', color: '#f59e0b', w: 6,  h: 11 },
-  { left: '96%', delay: 2.4, dur: 5.5, dx: '-24px', spin: '160deg', color: '#6366f1', w: 5,  h: 9 },
+  { left: '82%', delay: 1.8, dur: 5.9, dx: '-20px', spin: '170deg', color: '#007AFF', w: 7,  h: 7, round: true },
+  { left: '90%', delay: 0.8, dur: 6.3, dx: '14px',  spin: '-200deg', color: '#FF9500', w: 6,  h: 11 },
+  { left: '96%', delay: 2.4, dur: 5.5, dx: '-24px', spin: '160deg', color: '#5856D6', w: 5,  h: 9 },
 ];
 
 const firstName = (name) => (name || '').trim().split(/\s+/)[0] || 'there';
@@ -129,7 +129,7 @@ export default function BirthdayPopup({ people, onClose }) {
           <div className="text-center">
             <div
               className="w-20 h-20 mx-auto rounded-full flex items-center justify-center text-3xl font-bold text-white"
-              style={{ background: '#6366f1', boxShadow: '0 4px 12px rgba(99,102,241,0.30)' }}
+              style={{ background: '#5856D6', boxShadow: '0 4px 12px rgba(99,102,241,0.30)' }}
             >
               {initialOf(list[0].name)}
             </div>
@@ -149,7 +149,7 @@ export default function BirthdayPopup({ people, onClose }) {
                 <li key={`${p.type}-${p.id}`} className="flex items-center gap-3 py-3">
                   <div
                     className="w-11 h-11 shrink-0 rounded-full flex items-center justify-center font-semibold text-white"
-                    style={{ background: '#6366f1', boxShadow: '0 3px 10px rgba(99,102,241,0.25)' }}
+                    style={{ background: '#5856D6', boxShadow: '0 3px 10px rgba(99,102,241,0.25)' }}
                   >
                     {initialOf(p.name)}
                   </div>

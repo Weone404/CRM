@@ -180,7 +180,7 @@ function DayView() {
       </div>
 
       {error && (
-        <div className="glass-subtle rounded-xl p-4 text-sm text-red-700" style={{ backgroundColor: '#fef2f2' }}>{error}</div>
+        <div className="glass-subtle rounded-xl p-4 text-sm text-red-700" style={{ backgroundColor: 'rgba(255,59,48,0.08)' }}>{error}</div>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -421,7 +421,7 @@ function MonthView() {
       </div>
 
       {error && (
-        <div className="glass-subtle rounded-xl p-4 text-sm text-red-700" style={{ backgroundColor: '#fef2f2' }}>{error}</div>
+        <div className="glass-subtle rounded-xl p-4 text-sm text-red-700" style={{ backgroundColor: 'rgba(255,59,48,0.08)' }}>{error}</div>
       )}
 
       <div className="glass-table overflow-hidden">
@@ -547,7 +547,7 @@ function DevicePeople() {
       </div>
 
       {error && (
-        <div className="glass-subtle rounded-xl p-4 text-sm text-red-700" style={{ backgroundColor: '#fef2f2' }}>{error}</div>
+        <div className="glass-subtle rounded-xl p-4 text-sm text-red-700" style={{ backgroundColor: 'rgba(255,59,48,0.08)' }}>{error}</div>
       )}
 
       <div className="space-y-3">

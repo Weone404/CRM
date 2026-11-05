@@ -69,7 +69,7 @@ export default function DispositionStats() {
         <button
           onClick={() => loadDispositionData('interested')}
           className="glass-stat p-4 text-left transition cursor-pointer"
-          style={{ backgroundColor: '#f0fdf4' }}
+          style={{ backgroundColor: 'rgba(52,199,89,0.08)' }}
         >
           <div className="text-sm text-green-700 font-semibold">Interested</div>
           <div className="text-3xl font-bold text-green-900">{stats.interested}</div>
@@ -78,7 +78,7 @@ export default function DispositionStats() {
         <button
           onClick={() => loadDispositionData('not-interested')}
           className="glass-stat p-4 text-left transition cursor-pointer"
-          style={{ backgroundColor: '#f3f4f6' }}
+          style={{ backgroundColor: 'rgba(118,118,128,0.12)' }}
         >
           <div className="text-sm text-gray-700 font-semibold">Not Interested</div>
           <div className="text-3xl font-bold text-glass-primary">{stats.not_interested}</div>
@@ -87,7 +87,7 @@ export default function DispositionStats() {
         <button
           onClick={() => loadDispositionData('not-reachable')}
           className="glass-stat p-4 text-left transition cursor-pointer"
-          style={{ backgroundColor: '#fefce8' }}
+          style={{ backgroundColor: 'rgba(255,204,0,0.10)' }}
         >
           <div className="text-sm text-yellow-700 font-semibold">Not Reachable</div>
           <div className="text-3xl font-bold text-yellow-900">{stats.not_reachable}</div>
@@ -96,7 +96,7 @@ export default function DispositionStats() {
         <button
           onClick={() => loadDispositionData('callback')}
           className="glass-stat p-4 text-left transition cursor-pointer"
-          style={{ backgroundColor: '#faf5ff' }}
+          style={{ backgroundColor: 'rgba(175,82,222,0.08)' }}
         >
           <div className="text-sm text-purple-700 font-semibold">Callback</div>
           <div className="text-3xl font-bold text-purple-900">{stats.callback}</div>

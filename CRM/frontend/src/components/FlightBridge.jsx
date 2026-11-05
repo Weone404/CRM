@@ -4,6 +4,7 @@ import { showToast } from '../utils/toast';
 import FlightBridgeSchools from './FlightBridgeSchools';
 import FlightBridgeDetector from './FlightBridgeDetector';
 import Icon from './icons';
+import SectionNav from './SectionNav';
 import { Areas, Automation, Team } from './FlightBridgeOps';
 
 // FlightBridge partnership module (Admin only). This screen records human decisions.
@@ -128,7 +129,7 @@ function ApprovalDetail({ id, onDone, onBack }) {
         <div className="glass-card p-4">
           <div className="font-semibold mb-2">Conversation</div>
           {t.thread.map((m, i) => (
-            <div key={i} className="text-sm mb-3 border-l-2 pl-3" style={{ borderColor: m.direction === 'inbound' ? '#6366f1' : '#22c55e' }}>
+            <div key={i} className="text-sm mb-3 border-l-2 pl-3" style={{ borderColor: m.direction === 'inbound' ? '#5856D6' : '#34C759' }}>
               <div className="text-xs text-glass-muted">{m.direction} · {m.from_address} · {new Date(m.occurred_at).toLocaleString()}</div>
               <div className="font-medium">{m.subject}</div><div className="whitespace-pre-wrap">{m.body_text}</div>
             </div>
@@ -160,11 +161,11 @@ function ApprovalDetail({ id, onDone, onBack }) {
         <div className="glass-card p-4 space-y-2">
           <input className="glass-input w-full px-3 py-2 text-sm" placeholder="Decision note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
           <div className="flex flex-wrap gap-2">
-            {!edit && <button disabled={busy} onClick={() => decide('approve')} className="glass-btn px-4 py-2" style={{ background: '#22c55e' }}>✓ Approve</button>}
-            {edit && <button disabled={busy} onClick={() => decide('edit_approve')} className="glass-btn px-4 py-2" style={{ background: '#16a34a' }}>✓ Approve edited version</button>}
+            {!edit && <button disabled={busy} onClick={() => decide('approve')} className="glass-btn px-4 py-2" style={{ background: '#34C759' }}>✓ Approve</button>}
+            {edit && <button disabled={busy} onClick={() => decide('edit_approve')} className="glass-btn px-4 py-2" style={{ background: '#248A3D' }}>✓ Approve edited version</button>}
             <button disabled={busy} onClick={() => decide('more_research')} className="glass-btn px-4 py-2 text-sm">Request more research</button>
             <button disabled={busy} onClick={() => decide('resolve')} className="glass-btn px-4 py-2 text-sm">Mark resolved</button>
-            <button disabled={busy} onClick={() => decide('reject')} className="glass-btn px-4 py-2 text-sm" style={{ background: '#ef4444' }}>Reject</button>
+            <button disabled={busy} onClick={() => decide('reject')} className="glass-btn px-4 py-2 text-sm" style={{ background: '#FF3B30' }}>Reject</button>
           </div>
           <div className="text-xs text-glass-muted">Approving does not send. It queues the email for automatic jurisdiction and content checks; while DRY_RUN is on it is only rendered.</div>
         </div>
@@ -221,7 +222,7 @@ function Templates() {
             {result.validation.ok ? <div>Looks good. Version {result.version} is ready to approve.</div> : <div>Version {result.version} cannot be approved yet:</div>}
             <Reasons list={result.validation.errors} />
             {result.validation.warnings.length > 0 && <div className="mt-1 text-orange-700">{result.validation.warnings.join(' ')}</div>}
-            {result.validation.ok && <button onClick={() => approve(result.id)} className="glass-btn px-3 py-1 text-xs mt-2" style={{ background: '#22c55e' }}>Approve version {result.version}</button>}
+            {result.validation.ok && <button onClick={() => approve(result.id)} className="glass-btn px-3 py-1 text-xs mt-2" style={{ background: '#34C759' }}>Approve version {result.version}</button>}
           </div>
         )}
       </div>
@@ -489,16 +490,37 @@ export default function FlightBridge() {
   if (selected) return <ApprovalDetail id={selected} onBack={() => setSelected(null)} onDone={() => { setSelected(null); load(); }} />;
   const killEngaged = summary?.kill_switches?.outbound_kill_switch !== false;
   const isAdmin = me?.role === 'admin';
-  const VIEWS = [['detector', 'School Detector'], ['schools', 'Schools'], ['areas', 'Areas'], ['automation', 'Automation'], ['queue', 'Approval queue'],
-    isAdmin && ['templates', 'Email templates'], ['inbox', 'Inbox'], ['outbound', 'Outbound & checks'], ['metrics', 'Metrics'],
-    isAdmin && ['suppression', 'Suppression'], isAdmin && ['team', 'Team'], isAdmin && ['settings', 'Settings']].filter(Boolean);
+  const openApprovals = summary?.approvals?.open || 0;
+  const needLook = (summary?.outbound?.blocked || 0) + (summary?.outbound?.needs_review || 0);
+  const GROUPS = [
+    { label: 'Find schools', items: [
+      { id: 'detector', label: 'School Detector', hint: 'Live world search on the 3D Earth', icon: 'globe' },
+      { id: 'schools', label: 'Schools', hint: 'Every school found, by country', icon: 'list' },
+      { id: 'areas', label: 'Areas', hint: 'Cities and regions to search', icon: 'map' },
+    ] },
+    { label: 'Outreach', items: [
+      { id: 'queue', label: 'Approval queue', hint: 'Emails waiting for your OK', icon: 'check', count: openApprovals },
+      { id: 'inbox', label: 'Inbox', hint: 'Replies from schools', icon: 'inbox' },
+      isAdmin && { id: 'templates', label: 'Email templates', hint: 'Wording of each email', icon: 'mail' },
+      { id: 'outbound', label: 'Outbound & checks', hint: 'Every email and its safety checks', icon: 'outbox', count: needLook },
+    ].filter(Boolean) },
+    { label: 'Results', items: [
+      { id: 'metrics', label: 'Metrics', hint: 'Replies, bounces, approvals', icon: 'chart' },
+    ] },
+    { label: 'Setup', items: [
+      { id: 'automation', label: 'Automation', hint: 'What runs on its own', icon: 'zap' },
+      isAdmin && { id: 'suppression', label: 'Suppression', hint: 'Never contact these', icon: 'ban' },
+      isAdmin && { id: 'team', label: 'Team', hint: 'Who can use FlightBridge', icon: 'team' },
+      isAdmin && { id: 'settings', label: 'Settings', hint: 'Keys and limits', icon: 'settings' },
+    ].filter(Boolean) },
+  ];
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap justify-between items-center gap-2">
         <h2 className="text-xl font-bold text-glass-primary">FlightBridge AI</h2>
         <div className="flex flex-wrap gap-2">
-        {isAdmin && <button onClick={toggleKill} className="glass-btn px-3 py-2 text-sm inline-flex items-center gap-2 min-h-[40px]" style={{ background: killEngaged ? '#dc2626' : '#d97706' }}
+        {isAdmin && <button onClick={toggleKill} className="glass-btn px-3 py-2 text-sm inline-flex items-center gap-2 min-h-[40px]" style={{ background: killEngaged ? '#FF3B30' : '#FF9500' }}
           title={killEngaged ? 'Nothing can be sent. Click to release.' : 'Sending is possible once the server also allows it.'}>
           <Icon name={killEngaged ? 'shield' : 'alert'} size={16} />
           {killEngaged ? 'Sending blocked (kill switch on)' : 'Kill switch released'}
@@ -515,17 +537,7 @@ export default function FlightBridge() {
         </div>
       )}
 
-      <label className="sm:hidden block">
-        <span className="sr-only">Section</span>
-        <select className="glass-input w-full px-3 py-2.5 text-base font-medium" value={view} onChange={(e) => setView(e.target.value)}>
-          {VIEWS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
-        </select>
-      </label>
-      <div className="hidden sm:flex gap-1 overflow-x-auto whitespace-nowrap border-b" style={{ borderColor: 'var(--border-subtle)' }} role="tablist">
-        {VIEWS.map(([v, label]) => (
-          <button key={v} role="tab" aria-selected={view === v} onClick={() => setView(v)} className={`glass-tab-btn ${view === v ? 'active' : ''}`}>{label}</button>
-        ))}
-      </div>
+      <SectionNav groups={GROUPS} value={view} onChange={(v) => { setView(v); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
 
       {view === 'detector' && <FlightBridgeDetector />}
 
@@ -580,7 +592,7 @@ export default function FlightBridge() {
             <select className="glass-input px-2 py-1 text-sm" value={supp.reason} onChange={(e) => setSupp({ ...supp, reason: e.target.value })}>
               {['manual', 'unsubscribe', 'rejection', 'complaint', 'hard_bounce', 'legal'].map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
-            <button disabled={!supp.value} onClick={addSuppression} className="glass-btn px-3 py-1 text-sm" style={{ background: '#ef4444' }}>Suppress</button>
+            <button disabled={!supp.value} onClick={addSuppression} className="glass-btn px-3 py-1 text-sm" style={{ background: '#FF3B30' }}>Suppress</button>
           </div>
           <div className="text-xs text-glass-muted">{summary?.suppressions ?? 0} suppression records.</div>
         </div>
