@@ -7,6 +7,9 @@ import AttendanceCalendar from './AttendanceCalendar';
 import { showToast } from '../utils/toast';
 import { API_URL } from '../api';
 import { USE_SUPABASE } from '../backend/mode';
+import { modalProps } from './ui/overlay';
+import QuickActions, { CloseButton } from './ui/QuickActions';
+import { confirmDialog, promptDialog, choiceDialog, alertDialog } from './ui/dialogs';
 
 export default function EmployeeDirectory() {
   const [employees, setEmployees] = useState([]);
@@ -24,7 +27,7 @@ export default function EmployeeDirectory() {
   const loadEmployeeDetail = async (id) => { try { const token = localStorage.getItem('token'); const res = await fetch(`${API_URL}/api/employees/${id}`, { headers: { 'Authorization': `Bearer ${token}` } }); setSelectedEmployee(await res.json()); } catch { showToast('Failed to load employee details', 'error'); } };
   const handleSubmit = async (e) => { e.preventDefault(); try { const token = localStorage.getItem('token'); const url = formData.id ? `${API_URL}/api/employees/${formData.id}` : `${API_URL}/api/employees`; const res = await fetch(url, { method: formData.id ? 'PATCH' : 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(formData) }); if (!res.ok) { let detail = `Failed to save employee (${res.status})`; try { const body = await res.json(); if (body?.detail) detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail); } catch {} showToast(detail, 'error'); return; } showToast(formData.id ? 'Employee updated' : 'Employee created', 'success'); setShowForm(false); setFormData({}); setLoginIdManual(false); loadEmployees(); } catch { showToast('Failed to save employee', 'error'); } };
   const markLeaveDay = async (date, type) => { try { const token = localStorage.getItem('token'); const res = await fetch(`${API_URL}/api/employees/${selectedEmployee.id}/leave`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ leave_date: date, leave_type: type }) }); if (!res.ok) { const error = await res.json(); showToast(error.detail || 'Failed to mark leave', 'error'); return; } showToast(type === 'wfh' ? 'Work from home marked' : 'Leave marked', 'success'); loadEmployeeDetail(selectedEmployee.id); } catch { showToast('Failed to mark leave', 'error'); } };
-  const resetPassword = async (emp) => { if (!window.confirm(`Reset ${emp.name}'s password to their mobile number?`)) return; try { const token = localStorage.getItem('token'); const res = await fetch(`${API_URL}/api/employees/${emp.id}/reset-password`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } }); const data = await res.json().catch(() => ({})); if (!res.ok) { showToast(data.detail || 'Failed to reset password', 'error'); return; } showToast('Password reset to their mobile number', 'success'); } catch { showToast('Failed to reset password', 'error'); } };
+  const resetPassword = async (emp) => { if (!(await confirmDialog(`Reset ${emp.name}'s password?`, { message: 'It becomes their mobile number.', confirmText: 'Reset' }))) return; try { const token = localStorage.getItem('token'); const res = await fetch(`${API_URL}/api/employees/${emp.id}/reset-password`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } }); const data = await res.json().catch(() => ({})); if (!res.ok) { showToast(data.detail || 'Failed to reset password', 'error'); return; } showToast('Password reset to their mobile number', 'success'); } catch { showToast('Failed to reset password', 'error'); } };
   const unmarkLeaveDay = async (date) => { try { const token = localStorage.getItem('token'); await fetch(`${API_URL}/api/employees/${selectedEmployee.id}/leave/${date}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } }); showToast('Day unmarked', 'success'); loadEmployeeDetail(selectedEmployee.id); } catch { showToast('Failed to unmark leave', 'error'); } };
 
   const filteredEmployees = employees.filter(emp => { if (statusFilter !== 'all' && emp.status !== statusFilter) return false; if (searchQuery) { const query = searchQuery.toLowerCase(); return emp.name.toLowerCase().includes(query) || (emp.employee_id && emp.employee_id.toLowerCase().includes(query)) || (emp.job_role && emp.job_role.toLowerCase().includes(query)); } return true; });
@@ -58,9 +61,10 @@ export default function EmployeeDirectory() {
       )}
 
       {selectedEmployee && createPortal(
-        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto" {...modalProps(() => setSelectedEmployee(null))}>
           <div className="glass-strong max-w-4xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto animate-glass-in">
-            <div className="flex justify-between items-start mb-6"><div className="flex items-center gap-4"><div className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold text-white" style={{ background: '#5856D6', boxShadow: '0 4px 12px rgba(99,102,241,0.30)' }}>{selectedEmployee.name.charAt(0).toUpperCase()}</div><div><h2 className="text-2xl font-bold text-glass-primary">{selectedEmployee.name}</h2><p className="text-glass-secondary">{selectedEmployee.job_role || 'Employee'}</p></div></div><button onClick={() => setSelectedEmployee(null)} className="text-glass-muted hover:text-glass-primary text-2xl">×</button></div>
+            <div className="flex justify-between items-start mb-6"><div className="flex items-center gap-4"><div className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold text-white" style={{ background: '#5856D6', boxShadow: '0 4px 12px rgba(99,102,241,0.30)' }}>{selectedEmployee.name.charAt(0).toUpperCase()}</div><div><h2 className="text-2xl font-bold text-glass-primary">{selectedEmployee.name}</h2><p className="text-glass-secondary">{selectedEmployee.job_role || 'Employee'}</p></div></div><CloseButton onClick={() => setSelectedEmployee(null)} /></div>
+            <QuickActions phone={selectedEmployee.phone} email={selectedEmployee.email} name={selectedEmployee.name} className="mb-6 max-w-md" />
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div><label className="text-sm font-medium text-glass-muted">Employee ID</label><div className="mt-1 text-glass-primary font-medium">{selectedEmployee.employee_id || '-'}</div></div>
@@ -89,7 +93,7 @@ export default function EmployeeDirectory() {
       )}
 
       {showForm && createPortal(
-        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto" {...modalProps(() => { setShowForm(false); setFormData({}); setLoginIdManual(false); }, { guard: true })}>
           <div className="glass-strong max-w-2xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto animate-glass-in">
             <h2 className="text-xl font-bold mb-4 text-glass-primary">{formData.id ? 'Edit' : 'Add'} Employee</h2>
             <form onSubmit={handleSubmit} className="space-y-4">

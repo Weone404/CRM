@@ -11,6 +11,8 @@ import { apiFetch, fetchConfig, API_URL } from './api';
 import { SEGMENTS, segmentOf } from './utils/charter';
 import { signOutSupabase } from './backend/router';
 import { USE_SUPABASE } from './backend/mode';
+import { modalProps } from './components/ui/overlay';
+import { showToast } from './utils/toast';
 
 // Code-split everything that isn't needed for the first paint. Each of these
 // tabs/modals now ships as its own chunk fetched on demand, so a Sales user
@@ -172,7 +174,7 @@ export default function App() {
       const token = localStorage.getItem('token');
       const res = await fetch(`${API_URL}/api/auth/change-password`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ old_password: passwordForm.old_password, new_password: passwordForm.new_password }) });
       if (!res.ok) { const error = await res.json(); setPasswordError(error.detail || 'Failed to change password'); return; }
-      alert('Password changed successfully! Please login again.'); handleLogout();
+      showToast('Password changed — please sign in again', 'success'); handleLogout();
     } catch (error) { setPasswordError('Failed to change password'); }
   };
 
@@ -254,7 +256,7 @@ export default function App() {
       </nav>
 
       {showMore && createPortal(
-        <div className="md:hidden fixed inset-0 z-50 glass-overlay flex items-end" onClick={() => setShowMore(false)}>
+        <div className="md:hidden fixed inset-0 z-50 glass-overlay flex items-end" {...modalProps(() => setShowMore(false))}>
           <div className="w-full glass-strong rounded-b-none p-4 pb-6 animate-glass-in" style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }} role="dialog" aria-label="More" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-2">
               <div className="font-semibold text-glass-primary">{employee.name}</div>
@@ -367,7 +369,7 @@ export default function App() {
       )}
 
       {showChangePassword && createPortal(
-        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto" {...modalProps(() => { setShowChangePassword(false); setPasswordForm({ old_password: '', new_password: '', confirm_password: '' }); setPasswordError(''); }, { guard: true })}>
           <div className="glass-strong max-w-md w-full p-6 my-8 max-h-[90vh] overflow-y-auto animate-glass-in">
             <h2 className="text-xl font-bold mb-4 text-glass-primary">Change Password</h2>
             {passwordError && <div className="mb-4 p-3 rounded-lg text-sm" style={{ background: 'rgba(255,59,48,0.08)', border: '1px solid rgba(255,59,48,0.35)', color: '#D70015' }}>{passwordError}</div>}

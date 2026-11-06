@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../backend/supabaseClient';
 import { showToast } from '../utils/toast';
+import { confirmDialog, promptDialog, choiceDialog, alertDialog } from './ui/dialogs';
 
 // Settings → AI Integrations (Admin only).
 // Keys are stored encrypted in Supabase Vault through Admin-only database functions.
@@ -65,7 +66,7 @@ export default function AIIntegrations() {
     if (err) showToast(err.message, 'error'); else load();
   };
   const remove = async (provider) => {
-    if (!window.confirm(`Delete the ${provider} key? Features using it will stop until a new key is added.`)) return;
+    if (!(await confirmDialog(`Delete the ${provider} key?`, { message: 'Features using it will stop until a new key is added.', confirmText: 'Delete', danger: true }))) return;
     const { error: err } = await supabase.rpc('ai_integration_delete', { provider });
     if (err) showToast(err.message, 'error'); else { showToast('Key deleted.', 'success'); load(); }
   };

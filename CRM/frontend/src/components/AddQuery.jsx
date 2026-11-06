@@ -3,6 +3,9 @@ import { createPortal } from 'react-dom';
 import { API_URL } from '../api';
 import { showToast } from '../utils/toast';
 import { COURSES } from '../constants/courses';
+import { modalProps } from './ui/overlay';
+import { CloseButton } from './ui/QuickActions';
+import { confirmDialog, promptDialog, choiceDialog, alertDialog } from './ui/dialogs';
 
 const SOURCES = ['We One Aviation', 'JustDial', 'Walk-in', 'Direct Call', 'Direct Message', 'Flying Star'];
 const QUALIFICATIONS = ['10th', '12th with Physics & Maths', '12th without Physics & Maths', 'Graduation'];
@@ -28,15 +31,15 @@ function CharterQuery({ onClose, onCreated, onOpenExisting }) {
       const res = await fetch(`${API_URL}/api/leads/query`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await res.json(); setSaving(false);
       if (!res.ok) { showToast(data.detail || 'Failed to add enquiry', 'error'); return; }
-      if (data.status === 'duplicate') { if (window.confirm(`This trip is already in the CRM${data.name ? ` (${data.name})` : ''}. Open it?`)) onOpenExisting(data.lead_id); return; }
+      if (data.status === 'duplicate') { if (await confirmDialog(`This trip is already in the CRM${data.name ? ` (${data.name})` : ''}.`, { title: 'Already in the CRM', confirmText: 'Open it' })) onOpenExisting(data.lead_id); return; }
       showToast(`Charter enquiry added (${data.reference})`, 'success'); onCreated();
     } catch { setSaving(false); showToast('Failed to add enquiry', 'error'); }
   };
 
   return createPortal(
-    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto" {...modalProps(onClose, { guard: true })}>
       <div className="glass-strong max-w-lg w-full p-6 my-8 max-h-[90vh] overflow-y-auto animate-glass-in">
-        <div className="flex justify-between items-start mb-4"><h2 className="text-xl font-bold text-glass-primary">Add Charter Enquiry</h2><button onClick={onClose} className="text-glass-muted hover:text-glass-primary text-2xl">×</button></div>
+        <div className="flex justify-between items-start mb-4"><h2 className="text-xl font-bold text-glass-primary">Add Charter Enquiry</h2><CloseButton onClick={onClose} /></div>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div><label className="block text-sm font-semibold mb-1 text-glass-primary">Enquiry From *</label><select value={form.utm_source} onChange={(e) => set('utm_source', e.target.value)} className={input} required><option value="">-- Select Source --</option>{CHARTER_SOURCES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
           <input className={input} placeholder="Name *" value={form.name} onChange={(e) => set('name', e.target.value)} required />
@@ -84,7 +87,7 @@ function AviationQuery({ requiredQualification, onClose, onCreated, onOpenExisti
       const res = await fetch(`${API_URL}/api/leads/query`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, qualifications, nios_interested: isEligible ? null : niosInterested }) });
       const data = await res.json(); setSaving(false);
       if (!res.ok) { showToast(data.detail || 'Failed to add query', 'error'); return; }
-      if (data.status === 'duplicate') { if (window.confirm(`A lead with this phone already exists${data.name ? ` (${data.name})` : ''}. Open the existing lead?`)) onOpenExisting(data.lead_id); return; }
+      if (data.status === 'duplicate') { if (await confirmDialog(`A lead with this phone already exists${data.name ? ` (${data.name})` : ''}.`, { title: 'Already in the CRM', confirmText: 'Open existing' })) onOpenExisting(data.lead_id); return; }
       showToast('Query added', 'success'); onCreated();
     } catch { setSaving(false); showToast('Failed to add query', 'error'); }
   };
@@ -92,9 +95,9 @@ function AviationQuery({ requiredQualification, onClose, onCreated, onOpenExisti
   const input = "glass-input w-full px-3 py-2";
 
   return createPortal(
-    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto" {...modalProps(onClose, { guard: true })}>
       <div className="glass-strong max-w-lg w-full p-6 my-8 max-h-[90vh] overflow-y-auto animate-glass-in">
-        <div className="flex justify-between items-start mb-4"><h2 className="text-xl font-bold text-glass-primary">Add Query</h2><button onClick={onClose} className="text-glass-muted hover:text-glass-primary text-2xl">×</button></div>
+        <div className="flex justify-between items-start mb-4"><h2 className="text-xl font-bold text-glass-primary">Add Query</h2><CloseButton onClick={onClose} /></div>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div><label className="block text-sm font-semibold mb-1 text-glass-primary">Lead From *</label><select value={form.utm_source} onChange={(e) => set('utm_source', e.target.value)} className={input} required><option value="">-- Select Source --</option>{SOURCES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
           <input className={input} placeholder="Name *" value={form.name} onChange={(e) => set('name', e.target.value)} required />

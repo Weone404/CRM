@@ -4,6 +4,8 @@ import { formatDate } from '../utils/formatters';
 import { showToast } from '../utils/toast';
 import LoadingSpinner from './LoadingSpinner';
 import { API_URL } from '../api';
+import { modalProps } from './ui/overlay';
+import { confirmDialog, promptDialog, choiceDialog, alertDialog } from './ui/dialogs';
 
 export default function TaskBoard() {
   const [employees, setEmployees] = useState([]);
@@ -55,7 +57,7 @@ export default function TaskBoard() {
   const handleStatusChange = async (taskId, newStatus) => {
     try {
       const token = localStorage.getItem('token'); const payload = { status: newStatus };
-      if (newStatus === 'aborted') { const reason = prompt('Abort reason (required):'); if (!reason) return; payload.abort_reason = reason; }
+      if (newStatus === 'aborted') { const reason = await promptDialog('Abort this task?', { message: 'Write the reason (required).', placeholder: 'Reason', required: true, confirmText: 'Abort task', multiline: true }); if (!reason) return; payload.abort_reason = reason; }
       await fetch(`${API_URL}/api/tasks/${taskId}`, { method: 'PATCH', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       showToast('Task updated', 'success'); loadData();
     } catch { showToast('Failed to update task', 'error'); }
@@ -129,7 +131,7 @@ export default function TaskBoard() {
       {employees.length === 0 && <div className="text-center py-16 text-glass-muted"><div className="text-5xl mb-4">👥</div><h3 className="text-lg font-medium text-glass-secondary mb-2">No employees found</h3><p className="text-sm">Add employees to start assigning tasks</p></div>}
 
       {showAddTask && createPortal(
-        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto" {...modalProps(() => { setShowAddTask(false); setFormData({}); }, { guard: true })}>
           <div className="glass-strong max-w-md w-full p-6 my-8 max-h-[90vh] overflow-y-auto animate-glass-in">
             <h2 className="text-xl font-bold mb-4 text-glass-primary">Add New Task</h2>
             <form onSubmit={handleAddTask} className="space-y-4">

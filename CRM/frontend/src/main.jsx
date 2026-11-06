@@ -1,6 +1,7 @@
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
+import { installModalKeys } from './components/ui/overlay';
 import { API_URL } from './api';
 
 // Auto-logout when the saved EMPLOYEE token is rejected (expired, or signed with
@@ -84,6 +85,7 @@ if (!window.__crmFetchWrapped) {
 // which made every data-fetching useEffect fire TWICE (duplicate GET /api/leads,
 // GET /api/followups/pending, etc. seen in the backend logs). Rendering without
 // it so each page load issues each request exactly once.
+installModalKeys();
 ReactDOM.createRoot(document.getElementById('root')).render(
   <App />
 );

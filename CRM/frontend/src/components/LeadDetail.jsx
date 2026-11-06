@@ -3,6 +3,9 @@ import { displayPhone } from '../utils/formatters';
 import { createPortal } from 'react-dom';
 import QuoteGenerator from './QuoteGenerator';
 import { CLOSURE, charterRef, formatTime, formatTripDate, labelOf, routeLine, segmentOf, shortPlace } from '../utils/charter';
+import { modalProps } from './ui/overlay';
+import QuickActions, { CloseButton } from './ui/QuickActions';
+import { showToast } from '../utils/toast';
 
 export default function LeadDetail({ lead, onClose, onContact }) {
   const [disposition, setDisposition] = useState('');
@@ -17,9 +20,9 @@ export default function LeadDetail({ lead, onClose, onContact }) {
   const trip = lead.charter_details || {};
 
   const handleSave = async () => {
-    if (!disposition) { alert('Select a disposition first'); return; }
-    if (disposition === 'Closed') { if (!closureOutcome) { alert(`Select ${closure.positive.label} or ${closure.negative.label}`); return; } await onContact(lead.id, { closure_outcome: closureOutcome, note }); setDisposition(''); setClosureOutcome(''); setTrack(''); setNote(''); onClose(); return; }
-    if (disposition === 'Interested' && !isCharter && !track) { alert('Select a track (CPL / PPL / Flying)'); return; }
+    if (!disposition) { showToast('Select a disposition first', 'error'); return; }
+    if (disposition === 'Closed') { if (!closureOutcome) { showToast(`Select ${closure.positive.label} or ${closure.negative.label}`, 'error'); return; } await onContact(lead.id, { closure_outcome: closureOutcome, note }); setDisposition(''); setClosureOutcome(''); setTrack(''); setNote(''); onClose(); return; }
+    if (disposition === 'Interested' && !isCharter && !track) { showToast('Select a track (CPL / PPL / Flying)', 'error'); return; }
     await onContact(lead.id, { channel: 'phone', disposition, note, ...(disposition === 'Interested' && !isCharter ? { interest_track: track } : {}) });
     if (disposition === 'Callback' && followupDate) { await onContact(lead.id, { followup: true, due_date: followupDate, reason: followupReason }); }
     setDisposition(''); setTrack(''); setNote(''); onClose();
@@ -28,7 +31,6 @@ export default function LeadDetail({ lead, onClose, onContact }) {
   const waText = isCharter
     ? `Hello ${lead.name}, this is Book My Charter regarding your charter enquiry ${charterRef(lead.id)} (${routeLine(trip)}${trip.departureDate ? `, ${formatTripDate(trip.departureDate)}` : ''}).`
     : `Hello ${lead.name}, this is We One Aviation regarding your enquiry.`;
-  const waLink = `https://wa.me/${lead.phone.replace(/\D/g, '')}?text=${encodeURIComponent(waText)}`;
 
   const tripRows = isCharter ? [
     ['From', trip.from],
@@ -51,7 +53,7 @@ export default function LeadDetail({ lead, onClose, onContact }) {
   return (
     <>
       {createPortal(
-        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto" {...modalProps(() => { setTrack(''); onClose(); }, { guard: true })}>
         <div className="glass-strong max-w-2xl w-full my-8 max-h-[90vh] overflow-y-auto p-6 animate-glass-in">
           <div className="flex justify-between items-start mb-4">
             <div>
@@ -59,8 +61,9 @@ export default function LeadDetail({ lead, onClose, onContact }) {
               <p className="text-glass-secondary">{displayPhone(lead.phone)}</p>
               <p className="text-glass-muted">{lead.email}</p>
             </div>
-            <button onClick={() => { setTrack(''); onClose(); }} className="text-glass-muted hover:text-glass-primary text-2xl">×</button>
+            <CloseButton onClick={() => { setTrack(''); onClose(); }} />
           </div>
+          <QuickActions phone={lead.phone} email={lead.email} name={lead.name} waText={waText} className="mb-4" />
           {isCharter && (
             <div className="mb-4 p-4 glass-subtle">
               <div className="flex justify-between items-baseline gap-3 mb-3">
@@ -85,13 +88,6 @@ export default function LeadDetail({ lead, onClose, onContact }) {
           </div>
           {/* Course-fee quotes only: a charter quote is priced per trip. */}
           {!isCharter && <div className="mb-4"><button onClick={() => setShowQuoteGen(true)} className="glass-btn w-full py-3" style={{ background: '#AF52DE' }}>📄 Generate Quote</button></div>}
-          <div className="mb-4">
-            <h3 className="font-semibold mb-3 text-lg text-glass-primary">Contact Lead</h3>
-            <div className="flex gap-3 mb-4">
-              <a href={`tel:${lead.phone}`} className="glass-btn flex-1 py-3 text-center" style={{ background: '#34C759' }}>📞 Call</a>
-              <a href={waLink} target="_blank" rel="noopener noreferrer" className="glass-btn flex-1 py-3 text-center" style={{ background: '#248A3D' }}>💬 WhatsApp</a>
-            </div>
-          </div>
           <div className="mb-4">
             <label className="block text-sm font-semibold mb-2 text-glass-primary">Mark as *</label>
             <div className="grid grid-cols-2 gap-2">

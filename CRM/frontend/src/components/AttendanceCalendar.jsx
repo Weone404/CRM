@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { formatDate } from '../utils/formatters';
 import { API_URL } from '../api';
+import { modalProps } from './ui/overlay';
 
 // Merged Leave + Biometric Attendance calendar.
 // Used by the Employee Directory detail modal (Admin, editable) and MyProfile
@@ -299,8 +300,7 @@ export default function AttendanceCalendar({
       {pickerDate && !readOnly && createPortal(
         <div
           className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-[60]"
-          onClick={() => setPickerDate(null)}
-        >
+         {...modalProps(() => setPickerDate(null))}>
           <div
             className="glass-strong max-w-sm w-full p-5 animate-glass-in"
             onClick={(e) => e.stopPropagation()}

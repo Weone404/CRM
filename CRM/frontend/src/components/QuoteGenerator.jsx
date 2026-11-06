@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { API_URL } from '../api';
 import { USE_SUPABASE } from '../backend/mode';
+import { modalProps } from './ui/overlay';
+import { CloseButton } from './ui/QuickActions';
+import { showToast } from '../utils/toast';
 
 export default function QuoteGenerator({ lead, onClose }) {
   const [courses, setCourses] = useState([]);
@@ -33,7 +36,7 @@ export default function QuoteGenerator({ lead, onClose }) {
 
   const handleGenerate = async () => {
     if (!selectedCourse) {
-      alert('Select a course first');
+      showToast('Select a course first', 'error');
       return;
     }
 
@@ -80,27 +83,22 @@ export default function QuoteGenerator({ lead, onClose }) {
     setLoading(false);
 
     if (res.ok) {
-      alert(`Quote ${data.quote_id} generated! Check Outbox to review before sending.`);
+      showToast(`Quote ${data.quote_id} ready — review it in Outbox before sending`, 'success');
       onClose();
     } else {
-      alert(USE_SUPABASE && data?.detail ? `Could not generate the quote: ${data.detail}` : 'Failed to generate quote');
+      showToast(USE_SUPABASE && data?.detail ? `Could not generate the quote: ${data.detail}` : 'Failed to generate quote', 'error');
     }
   };
 
   return createPortal(
-    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto animate-glass-in">
+    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto animate-glass-in" {...modalProps(onClose, { guard: true })}>
       <div className="glass-strong max-w-lg w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-start mb-4">
           <div>
             <h2 className="text-xl font-bold">Generate Quote</h2>
             <p className="text-glass-secondary text-sm">{lead.name}</p>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-2xl"
-          >
-            ×
-          </button>
+          <CloseButton onClick={onClose} />
         </div>
 
         <div className="mb-4">

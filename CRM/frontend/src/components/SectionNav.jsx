@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Icon from './icons';
+import { modalProps } from './ui/overlay';
 
 // Section picker for a page with many sections (FlightBridge AI).
 // Sections are grouped (e.g. Find schools / Outreach / Results / Setup).
@@ -43,7 +44,7 @@ export default function SectionNav({ groups, value, onChange }) {
       </button>
 
       {open && createPortal(
-        <div className="fixed inset-0 z-50 glass-overlay flex items-end sm:hidden" onClick={() => setOpen(false)}>
+        <div className="fixed inset-0 z-50 glass-overlay flex items-end sm:hidden" {...modalProps(() => setOpen(false))}>
           <div className="w-full glass-strong rounded-b-none max-h-[85vh] overflow-y-auto animate-glass-in" role="dialog" aria-label="Page sections"
             style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }} onClick={(e) => e.stopPropagation()}>
             <div className="sticky top-0 z-10 flex items-center justify-between px-4 pt-3 pb-2" style={{ background: 'inherit' }}>

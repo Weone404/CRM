@@ -7,6 +7,7 @@ import Icon from './icons';
 import SectionNav from './SectionNav';
 import { countryName } from '../utils/country';
 import { Areas, Automation, Team } from './FlightBridgeOps';
+import { confirmDialog, promptDialog, choiceDialog, alertDialog } from './ui/dialogs';
 
 // FlightBridge partnership module (Admin only). This screen records human decisions.
 // It never sends email: the central FlightBridge service runs compliance checks and is the only sender.
@@ -60,7 +61,7 @@ function ApprovalDetail({ id, onDone, onBack }) {
   useEffect(() => { load(); }, [load]);
 
   const decide = async (action) => {
-    if (action === 'reject' && !confirm('Reject this draft?')) return;
+    if (action === 'reject' && !(await confirmDialog('Reject this draft?', { confirmText: 'Reject', danger: true }))) return;
     setBusy(true);
     try {
       const payload = { action, note: note || null };
@@ -574,7 +575,7 @@ function KeyRow({ k, onChanged }) {
     const r = await call(`/integrations/${k.name}/test`, { method: 'POST' });
     showToast(r.message, r.test_ok ? 'success' : 'warning');
   });
-  const remove = () => { if (confirm(`Remove the saved ${k.label}?`)) run(() => call(`/integrations/${k.name}`, { method: 'DELETE' })); };
+  const remove = async () => { if (await confirmDialog(`Remove the saved ${k.label}?`, { confirmText: 'Remove', danger: true })) run(() => call(`/integrations/${k.name}`, { method: 'DELETE' })); };
   const status = k.from_server_env ? { text: 'Set on the server', cls: 'bg-blue-100 text-blue-800' }
     : !k.saved ? { text: 'Not set', cls: 'bg-gray-100 text-gray-700' }
     : k.last_test_ok === true ? { text: `Working · …${k.last4}`, cls: 'bg-green-100 text-green-800' }
@@ -826,7 +827,7 @@ export default function FlightBridge() {
 
   const toggleKill = async () => {
     const engaged = summary?.kill_switches?.outbound_kill_switch !== false;
-    if (engaged && !confirm('Release the outbound kill switch? Nothing will send unless DRY_RUN=false and OUTBOUND_ENABLED=true are also set on the server.')) return;
+    if (engaged && !(await confirmDialog('Release the outbound kill switch?', { message: 'Nothing will send unless DRY_RUN=false and OUTBOUND_ENABLED=true are also set on the server.', confirmText: 'Release', danger: true }))) return;
     try { await call('/kill-switch', { method: 'POST', body: JSON.stringify({ engaged: !engaged }) }); load(); }
     catch (e) { showToast(e.message, 'error'); }
   };

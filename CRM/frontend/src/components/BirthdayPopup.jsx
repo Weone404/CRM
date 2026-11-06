@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { modalProps } from './ui/overlay';
 
 // Confetti is CSS-only (no library, no canvas): a fixed set of small shapes that
 // drift down once and settle. Static so it never re-randomises on a re-render.
@@ -79,11 +80,11 @@ export default function BirthdayPopup({ people, onClose }) {
   return createPortal(
     <div
       className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto overflow-x-hidden"
-      onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-labelledby="birthday-greeting"
-    >
+      data-nosheet
+     {...modalProps(onClose)}>
       <div className="bd-confetti" aria-hidden="true">
         {CONFETTI.map((c, i) => (
           <i

@@ -5,6 +5,9 @@ import { formatDate, displayPhone } from '../utils/formatters';
 import { showToast } from '../utils/toast';
 import { COURSES } from '../constants/courses';
 import { USE_SUPABASE } from '../backend/mode';
+import { modalProps } from './ui/overlay';
+import QuickActions, { CloseButton } from './ui/QuickActions';
+import { confirmDialog, promptDialog, choiceDialog, alertDialog } from './ui/dialogs';
 
 // FastAPI sends `detail` as a string for HTTPException but as a list of
 // {loc, msg} objects for 422s — flatten both so the toast never shows [object Object].
@@ -183,7 +186,7 @@ function AddStudent({ onClose, onCreated, onOpenExisting }) {
       setSaving(false);
       if (!res.ok) { showToast(errorDetail(data) || `Failed to add student (${res.status})`, 'error'); return; }
       if (data.status === 'duplicate') {
-        if (window.confirm(`A student with this mobile already exists${data.name ? ` (${data.name})` : ''}. Open the existing record?`)) {
+        if (await confirmDialog(`A student with this mobile already exists${data.name ? ` (${data.name})` : ''}.`, { title: 'Already in the CRM', confirmText: 'Open existing' })) {
           onOpenExisting(data.student_id);
         }
         return;
@@ -196,11 +199,11 @@ function AddStudent({ onClose, onCreated, onOpenExisting }) {
   const input = 'w-full glass-input';
 
   return createPortal(
-    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto" {...modalProps(onClose, { guard: true })}>
       <div className="glass-strong max-w-lg w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-start mb-4">
           <h2 className="text-xl font-bold">Add Student</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl">×</button>
+          <CloseButton onClick={onClose} />
         </div>
 
         {leads.length > 0 && (
@@ -315,7 +318,7 @@ function StudentDetail({ studentId, onBack }) {
   };
 
   const remove = async (docId, label) => {
-    if (!window.confirm(`Delete "${label}"? This permanently removes the file.`)) return;
+    if (!(await confirmDialog(`Delete "${label}"?`, { message: 'This permanently removes the file.', confirmText: 'Delete', danger: true }))) return;
     const res = await fetch(`${API_URL}/api/students/${studentId}/documents/${docId}`, {
       method: 'DELETE', headers: authHeaders(),
     });
@@ -360,7 +363,8 @@ function StudentDetail({ studentId, onBack }) {
       <h2 className="text-2xl font-bold text-glass-primary">
         {[student.first_name, student.middle_name, student.last_name].filter(Boolean).join(' ')}
       </h2>
-      <p className="text-glass-secondary mb-4">{student.course || 'Student'}</p>
+      <p className="text-glass-secondary mb-3">{student.course || 'Student'}</p>
+      <QuickActions phone={student.mobile} email={student.email} name={student.first_name} className="mb-5 max-w-md" />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
         {field('Mobile', student.mobile)}
@@ -424,7 +428,7 @@ function StudentDetail({ studentId, onBack }) {
       )}
 
       {showDelete && createPortal(
-        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto" {...modalProps(() => setShowDelete(false))}>
           <div className="glass-strong max-w-md w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg font-bold text-red-700 mb-2">Delete Student</h3>
             <p className="text-sm text-gray-700 mb-4">
@@ -525,11 +529,11 @@ function EditStudent({ student, onClose, onSaved }) {
     : [form.course, ...COURSES];
 
   return createPortal(
-    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto" {...modalProps(onClose, { guard: true })}>
       <div className="glass-strong max-w-lg w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-start mb-4">
           <h2 className="text-xl font-bold">Edit Student</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+          <CloseButton onClick={onClose} />
         </div>
 
         {error && (
@@ -647,7 +651,7 @@ function SetPinModal({ studentId, studentName, onClose }) {
   };
 
   return createPortal(
-    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto" {...modalProps(onClose)}>
       <div className="glass-strong max-w-md w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
         <h3 className="text-lg font-bold text-glass-primary mb-1">{USE_SUPABASE ? 'Student Login' : 'Set Student Login PIN'}</h3>
         <p className="text-sm text-glass-muted mb-4">{studentName}</p>

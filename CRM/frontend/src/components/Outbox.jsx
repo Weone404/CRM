@@ -3,19 +3,22 @@ import { createPortal } from 'react-dom';
 import { API_URL } from '../api';
 import { USE_SUPABASE } from '../backend/mode';
 import { displayPhone } from '../utils/formatters';
+import { modalProps } from './ui/overlay';
+import { CloseButton } from './ui/QuickActions';
+import { confirmDialog, promptDialog, choiceDialog, alertDialog } from './ui/dialogs';
 
 export default function Outbox({ onClose }) {
   const [messages, setMessages] = useState([]);
   useEffect(() => { loadMessages(); }, []);
   const loadMessages = async () => { const token = localStorage.getItem('token'); const res = await fetch(`${API_URL}/api/outbox`, { headers: { 'Authorization': `Bearer ${token}` } }); setMessages(await res.json()); };
   const handleApprove = async (msgId) => { const token = localStorage.getItem('token'); await fetch(`${API_URL}/api/outbox/${msgId}/approve`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } }); loadMessages(); };
-  const handleMarkSent = async (msgId) => { if (!confirm('Mark this quote as sent?')) return; const token = localStorage.getItem('token'); await fetch(`${API_URL}/api/outbox/${msgId}/sent`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } }); loadMessages(); };
+  const handleMarkSent = async (msgId) => { if (!(await confirmDialog('Mark this quote as sent?', { confirmText: 'Mark sent' }))) return; const token = localStorage.getItem('token'); await fetch(`${API_URL}/api/outbox/${msgId}/sent`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } }); loadMessages(); };
   const getWhatsAppLink = (msg) => { const pdfUrl = USE_SUPABASE ? (msg.pdf_share_url || '') : `${API_URL}/api/quotes/${msg.id}/pdf`; const text = `Hi ${msg.lead_name},\n\nPlease find your course quote here: ${pdfUrl}\n\nFor any queries, contact us.\n\n- We One Aviation`; const phone = msg.lead_phone.replace(/\D/g, ''); const phoneWith91 = phone.startsWith('91') ? phone : `91${phone}`; return `https://wa.me/${phoneWith91}?text=${encodeURIComponent(text)}`; };
 
   return createPortal(
-    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
+    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto" {...modalProps(onClose)}>
       <div className="glass-strong max-w-4xl w-full my-8 max-h-[90vh] overflow-y-auto p-6 animate-glass-in">
-        <div className="flex justify-between items-start mb-4"><div><h2 className="text-2xl font-bold text-glass-primary">Outbox</h2><p className="text-sm text-glass-secondary">Review quotes before sending via WhatsApp</p></div><button onClick={onClose} className="text-glass-muted hover:text-glass-primary text-2xl">×</button></div>
+        <div className="flex justify-between items-start mb-4"><div><h2 className="text-2xl font-bold text-glass-primary">Outbox</h2><p className="text-sm text-glass-secondary">Review quotes before sending via WhatsApp</p></div><CloseButton onClick={onClose} /></div>
         <div className="space-y-3">
           {messages.map(msg => (
             <div key={msg.id} className="glass-card p-4">

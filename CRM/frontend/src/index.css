@@ -484,3 +484,14 @@ input[type="datetime-local"].glass-input { color-scheme: light; }
 .fb-iconbtn:disabled { opacity: 0.35; cursor: default; }
 .fb-iconbtn:focus-visible { outline: 2px solid #007AFF; outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .fb-fade, .fb-pop { animation: none; } }
+
+/* Every pop-up (modalProps): fade in; on phones it becomes a bottom sheet with a grab handle */
+.glass-overlay[data-modal] { animation: fb-fade-in 160ms ease-out; }
+.glass-overlay[data-modal] > *:focus { outline: none; }
+@keyframes ui-sheet-up { from { transform: translateY(40px); opacity: 0 } to { transform: none; opacity: 1 } }
+@media (max-width: 639px) {
+  .glass-overlay[data-modal]:not([data-nosheet]) { align-items: flex-end !important; justify-content: stretch !important; padding: 0 !important; }
+  .glass-overlay[data-modal]:not([data-nosheet]) > * { width: 100% !important; max-width: none !important; margin: 0 !important; max-height: 92vh !important; border-radius: 24px 24px 0 0 !important; animation: ui-sheet-up 260ms cubic-bezier(.2,.8,.2,1); padding-bottom: calc(1.25rem + env(safe-area-inset-bottom)); }
+  .glass-overlay[data-modal]:not([data-nosheet]) > *::before { content: ''; display: block; width: 40px; height: 5px; border-radius: 9999px; background: rgba(60,60,67,.3); margin: -8px auto 12px; }
+}
+@media (prefers-reduced-motion: reduce) { .glass-overlay[data-modal], .glass-overlay[data-modal] > * { animation: none !important; } }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase, SUPABASE_URL } from '../backend/supabaseClient';
 import { showToast } from '../utils/toast';
+import { confirmDialog, promptDialog, choiceDialog, alertDialog } from './ui/dialogs';
 
 // Settings → Connections (Admin only).
 // The addresses and tokens that outside systems use to send data to the CRM. Copy them from here and paste
@@ -45,7 +46,7 @@ export default function Connections() {
     return data;
   };
   const rotate = async (c) => {
-    if (!window.confirm(`Make a new token for ${c.name}?\n\nThe old one stops working immediately. ${c.name} will stop sending data until you paste the new one there.`)) return;
+    if (!(await confirmDialog(`Make a new token for ${c.name}?`, { message: `The old one stops working immediately. ${c.name} will stop sending data until you paste the new one there.`, confirmText: 'Make new token', danger: true }))) return;
     setBusy(c.id);
     const { data, error } = await supabase.rpc('api_connection_rotate', { p_id: c.id });
     setBusy('');
