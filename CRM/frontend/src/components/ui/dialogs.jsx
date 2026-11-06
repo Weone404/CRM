@@ -40,9 +40,10 @@ const btn = 'px-4 py-2.5 rounded-xl text-sm font-semibold transition';
 const cancelBtn = `${btn} text-glass-primary`;
 const cancelStyle = { background: 'rgba(118,118,128,0.14)' };
 
-export function confirmDialog(message, { title, confirmText = 'OK', cancelText = 'Cancel', danger = false } = {}) {
-  const head = title || (message.length <= 70 ? message : null);
-  const body = head === message ? null : message;
+// confirmDialog('Question?', { message: 'Details' }): the question is the title, the details go under it.
+export function confirmDialog(text, { title, message, confirmText = 'OK', cancelText = 'Cancel', danger = false } = {}) {
+  const head = title || (message ? text : text.length <= 70 ? text : null);
+  const body = message || (head === text ? null : text);
   return mount((done) => (
     <Shell title={head || 'Please confirm'} message={body} icon={danger ? 'alert' : null} tone="#FF3B30" onCancel={() => done(false)}>
       <div className="grid grid-cols-2 gap-2 mt-5">

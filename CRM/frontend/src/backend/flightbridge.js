@@ -75,6 +75,7 @@ export const FLIGHTBRIDGE_ROUTES = [
   ['POST', r('/templates/generate'), ({ body }) => edge('/templates/generate', body)],
   ['POST', r('/templates/followups'), () => edge('/templates/followups', {})],
   ['POST', r(`/templates/${ID}/approve`), ({ params }) => rpc('api_fb_template_approve', { p_id: dec(params[0]) })],
+  ['DELETE', r(`/templates/${ID}`), ({ params }) => rpc('api_fb_template_delete', { p_id: dec(params[0]) })],
 
   ['GET', r('/inbox'), ({ query }) => withLimit(query, 'api_fb_inbox', 'p_limit', 100,
     { p_risk: query?.get('risk') || null, p_unmatched: truthy(query?.get('unmatched')) })],

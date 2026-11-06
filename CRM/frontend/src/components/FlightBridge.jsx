@@ -7,7 +7,7 @@ import Icon from './icons';
 import SectionNav from './SectionNav';
 import { countryName } from '../utils/country';
 import { Areas, Automation, Team } from './FlightBridgeOps';
-import { AutoPilot, Pipeline, autopilotIssues } from './FlightBridgeAutopilot';
+import { AutoPilot, Pipeline, autopilotIssues, TemplateEditor, deleteTemplate, EditIcon, DeleteIcon } from './FlightBridgeAutopilot';
 import { confirmDialog, promptDialog, choiceDialog, alertDialog } from './ui/dialogs';
 import AppleSelect from './ui/AppleSelect';
 
@@ -371,6 +371,7 @@ function Templates() {
   const [body, setBody] = useState('');
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(null);
   const load = useCallback(async () => { try { setList(await call('/templates')); } catch (e) { showToast(e.message, 'error'); } }, []);
   useEffect(() => { load(); }, [load]);
   const current = list.filter((t) => t.kind === kind);
@@ -424,7 +425,16 @@ function Templates() {
         {!approved && <div className="text-sm text-orange-600 mb-2">No approved version. No {KIND_LABEL[kind].toLowerCase()} drafts will be created until one is approved.</div>}
         {current.map((t) => (
           <div key={t.id} className="border-t py-2 text-sm" style={{ borderColor: 'rgba(0,0,0,0.08)' }}>
-            <div className="flex justify-between gap-2"><b>v{t.version} · {t.subject}</b><Badge text={t.status} style={t.status === 'approved' ? 'bg-green-100 text-green-800' : undefined} /></div>
+            <div className="flex justify-between items-start gap-2">
+              <b>v{t.version} · {t.subject}</b>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <Badge text={t.status === 'approved' ? 'in use' : t.status} style={t.status === 'approved' ? 'bg-green-100 text-green-800' : undefined} />
+                <button type="button" className="px-3 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1" style={{ background: 'rgba(0,122,255,0.12)', color: '#007AFF' }}
+                  onClick={() => setEditing(t)} aria-label={`Edit version ${t.version}`}><EditIcon />Edit</button>
+                <button type="button" className="px-3 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1" style={{ background: 'rgba(255,59,48,0.10)', color: '#C4261D' }}
+                  onClick={() => deleteTemplate(t, load)} aria-label={`Delete version ${t.version}`}><DeleteIcon />Delete</button>
+              </div>
+            </div>
             <div className="whitespace-pre-wrap text-glass-secondary mt-1">{t.body}</div>
             {t.status === 'draft' && t.validation?.ok && <button onClick={() => approve(t.id)} className="glass-btn px-3 py-1 text-xs mt-1">Approve this version</button>}
             {t.status === 'draft' && t.validation && !t.validation.ok && <Reasons list={t.validation.errors} />}
@@ -432,6 +442,7 @@ function Templates() {
         ))}
         {current.length === 0 && <div className="text-sm text-glass-muted">Nothing saved yet.</div>}
       </div>
+      {editing && <TemplateEditor t={editing} onClose={() => setEditing(null)} onSaved={() => { setResult(null); load(); }} />}
     </div>
   );
 }

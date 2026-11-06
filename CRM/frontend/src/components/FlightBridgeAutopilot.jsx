@@ -297,8 +297,82 @@ function VersionPicker({ kind, templates, isAdmin, onChanged, onPreview }) {
   );
 }
 
+const PENCIL = <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>;
+const BIN = <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6" /></svg>;
+export const EditIcon = () => PENCIL;
+export const DeleteIcon = () => BIN;
+
+// Delete one saved version (asks first). The version in use stops being used: Auto-Pilot then waits for another.
+export async function deleteTemplate(t, onDone) {
+  const inUse = t.status === 'approved';
+  const ok = await confirmDialog(`Delete version ${t.version} of the ${KIND_NAME(t.kind).toLowerCase()}?`, {
+    message: inUse ? 'This version is in use. Until you choose another, Auto-Pilot won\'t send this email.' : 'This can\'t be undone.',
+    confirmText: 'Delete', danger: true });
+  if (!ok) return;
+  try { await call(`/templates/${t.id}`, { method: 'DELETE' }); showToast(`Version ${t.version} deleted`, 'success'); onDone?.(); }
+  catch (e) { showToast(e.message, 'error'); }
+}
+
+// Edit a saved version. Saving makes a new version, so the history stays; "Save and use" also puts it in use, and every
+// email that hasn't gone out yet takes the new wording.
+export function TemplateEditor({ t, onClose, onSaved }) {
+  const [subject, setSubject] = useState(t.subject);
+  const [body, setBody] = useState(t.body);
+  const [errs, setErrs] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const changed = subject.trim() !== t.subject.trim() || body.trim() !== t.body.trim();
+  const save = async (use) => {
+    setBusy(true); setErrs(null);
+    try {
+      const r = await call('/templates', { method: 'POST', body: JSON.stringify({ kind: t.kind, subject, body }) });
+      if (!r.validation.ok) {
+        setErrs(r.validation.errors);
+        showToast(`Saved as version ${r.version}, but it needs a fix before it can be used`, 'warning');
+        onSaved?.(); return;
+      }
+      if (use) await call(`/templates/${r.id}/approve`, { method: 'POST' });
+      showToast(use ? `${KIND_NAME(t.kind)}: version ${r.version} saved and in use` : `Saved as version ${r.version}`, 'success');
+      onSaved?.(); onClose();
+    } catch (e) { setErrs([e.message]); } finally { setBusy(false); }
+  };
+  const words = body.split(/\s+/).filter(Boolean).length;
+  return (
+    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50" {...modalProps(onClose, { guard: true })}>
+      <div className="apple-card max-w-2xl w-full max-h-[92vh] overflow-y-auto">
+        <div className="sticky top-0 z-10 px-5 pt-4 pb-3" style={{ background: 'rgba(255,255,255,0.82)', WebkitBackdropFilter: 'blur(20px)', backdropFilter: 'blur(20px)', borderBottom: '0.5px solid var(--hairline)' }}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[12px] font-semibold uppercase tracking-wide" style={{ color: '#007AFF' }}>{KIND_NAME(t.kind)} · editing version {t.version}</div>
+              <h2 className="text-[19px] font-bold text-glass-primary leading-snug mt-0.5">Modify wording</h2>
+            </div>
+            <CloseButton onClick={onClose} />
+          </div>
+        </div>
+        <div className="px-5 py-4 space-y-3" style={{ background: 'rgba(255,255,255,0.92)' }}>
+          <label className="block">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-glass-muted">Subject</span>
+            <input className="glass-input w-full px-3 py-2 mt-1 text-[15px] rounded-xl" value={subject} maxLength={150} onChange={(e) => setSubject(e.target.value)} />
+          </label>
+          <label className="block">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-glass-muted">Email</span>
+            <textarea className="glass-input w-full px-3 py-2.5 mt-1 text-[15px] leading-relaxed rounded-xl" rows={16} value={body} onChange={(e) => setBody(e.target.value)} />
+          </label>
+          <div className="text-[11px] text-glass-muted">{words} words · placeholders like {'{{school_name}}'} are filled for each school · the legal footer is added automatically</div>
+          {errs?.length > 0 && <ul className="text-[12px] list-disc pl-5" style={{ color: '#C4261D' }}>{errs.map((x) => <li key={x}>{x}</li>)}</ul>}
+          <div className="flex flex-wrap items-center gap-2 justify-end pt-1">
+            <button className="px-4 py-2.5 rounded-full text-sm font-medium" style={{ background: 'rgba(118,118,128,0.12)' }}
+              onClick={() => save(false)} disabled={busy || !changed}>Save as new version</button>
+            <button className="px-5 py-2.5 rounded-full text-sm font-semibold text-white" style={{ background: '#34C759', boxShadow: '0 6px 16px rgba(52,199,89,0.35)', opacity: busy || !changed ? 0.5 : 1 }}
+              onClick={() => save(true)} disabled={busy || !changed}>{busy ? 'Saving…' : 'Save and use'}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // How the email reads in a school's inbox (an example school fills the placeholders)
-function EmailPreview({ t, from, onClose }) {
+function EmailPreview({ t, from, onClose, onModify }) {
   return (
     <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50" {...modalProps(onClose)}>
       <div className="apple-card max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -308,7 +382,11 @@ function EmailPreview({ t, from, onClose }) {
               <div className="text-[12px] font-semibold uppercase tracking-wide" style={{ color: '#007AFF' }}>{KIND_NAME(t.kind)} · version {t.version}</div>
               <h2 className="text-[19px] font-bold text-glass-primary leading-snug mt-0.5">{fill(t.subject)}</h2>
             </div>
-            <CloseButton onClick={onClose} />
+            <div className="flex items-center gap-2 shrink-0">
+              {onModify && <button type="button" className="px-3.5 py-1.5 rounded-full text-[13px] font-semibold inline-flex items-center gap-1.5"
+                style={{ background: 'rgba(0,122,255,0.12)', color: '#007AFF' }} onClick={() => onModify(t)}>{PENCIL}Modify</button>}
+              <CloseButton onClick={onClose} />
+            </div>
           </div>
           <div className="mt-2 grid grid-cols-[44px_1fr] gap-y-0.5 text-[13px]">
             <span className="text-glass-muted">From</span><span className="text-glass-primary truncate">We One Aviation &lt;{from || 'your sending mailbox'}&gt;</span>
@@ -330,6 +408,7 @@ export function AutoPilot({ isAdmin }) {
   const [fuOpen, setFuOpen] = useState(false);
   const [templates, setTemplates] = useState([]);
   const [preview, setPreview] = useState(null);
+  const [editing, setEditing] = useState(null);
   const fuBtn = useRef(null);
   const dirty = useRef(false);
 
@@ -642,7 +721,9 @@ export function AutoPilot({ isAdmin }) {
           </ul>
         </div>
       )}
-      {preview && <EmailPreview t={preview} from={sel?.address} onClose={() => setPreview(null)} />}
+      {preview && <EmailPreview t={preview} from={sel?.address} onClose={() => setPreview(null)}
+        onModify={isAdmin ? (t) => { setPreview(null); setEditing(t); } : undefined} />}
+      {editing && <TemplateEditor t={editing} onClose={() => setEditing(null)} onSaved={() => load()} />}
       {writer && <FollowupWriter days={d.followup_days || []} onClose={() => setWriter(false)} onDone={() => { setWriter(false); save({ check_now: true }); }} />}
     </div>
   );
