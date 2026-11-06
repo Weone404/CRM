@@ -8,6 +8,7 @@ import { USE_SUPABASE } from '../backend/mode';
 import { modalProps } from './ui/overlay';
 import QuickActions, { CloseButton } from './ui/QuickActions';
 import { confirmDialog, promptDialog, choiceDialog, alertDialog } from './ui/dialogs';
+import AppleSelect from './ui/AppleSelect';
 
 // FastAPI sends `detail` as a string for HTTPException but as a list of
 // {loc, msg} objects for 422s — flatten both so the toast never shows [object Object].
@@ -209,10 +210,10 @@ function AddStudent({ onClose, onCreated, onOpenExisting }) {
         {leads.length > 0 && (
           <div className="mb-4">
             <label className="block text-sm font-semibold mb-1">Prefill from completed admission</label>
-            <select value={form.lead_id} onChange={(e) => prefill(e.target.value)} className={input}>
+            <AppleSelect value={form.lead_id} onChange={(e) => prefill(e.target.value)} className={input}>
               <option value="">-- None (enter manually) --</option>
               {leads.map((l) => <option key={l.id} value={l.id}>{l.name} — {displayPhone(l.phone)}</option>)}
-            </select>
+            </AppleSelect>
           </div>
         )}
 
@@ -229,10 +230,10 @@ function AddStudent({ onClose, onCreated, onOpenExisting }) {
           </div>
           <input className={input} placeholder="Address" value={form.address} onChange={(e) => set('address', e.target.value)} />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <select className={input} value={form.course} onChange={(e) => set('course', e.target.value)} required>
+            <AppleSelect className={input} value={form.course} onChange={(e) => set('course', e.target.value)} required>
               <option value="">Select Course *</option>
               {COURSES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
+            </AppleSelect>
             <input className={input} placeholder="Computer Number (DGCA)" value={form.computer_number} onChange={(e) => set('computer_number', e.target.value)} />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -582,10 +583,10 @@ function EditStudent({ student, onClose, onSaved }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-glass-muted mb-1">Course</label>
-              <select className={input} value={form.course} onChange={(e) => set('course', e.target.value)}>
+              <AppleSelect className={input} value={form.course} onChange={(e) => set('course', e.target.value)}>
                 <option value="">Select Course</option>
                 {courseOptions.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
+              </AppleSelect>
             </div>
             <div>
               <label className="block text-xs text-glass-muted mb-1">Computer Number (DGCA)</label>

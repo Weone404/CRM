@@ -5,6 +5,7 @@ import { USE_SUPABASE } from '../backend/mode';
 import { modalProps } from './ui/overlay';
 import { CloseButton } from './ui/QuickActions';
 import { showToast } from '../utils/toast';
+import AppleSelect from './ui/AppleSelect';
 
 export default function QuoteGenerator({ lead, onClose }) {
   const [courses, setCourses] = useState([]);
@@ -103,7 +104,7 @@ export default function QuoteGenerator({ lead, onClose }) {
 
         <div className="mb-4">
           <label className="block text-sm font-semibold mb-2">Select Course</label>
-          <select
+          <AppleSelect
             value={selectedCourse}
             onChange={(e) => {
               setSelectedCourse(e.target.value);
@@ -119,7 +120,7 @@ export default function QuoteGenerator({ lead, onClose }) {
                 {c.name}
               </option>
             ))}
-          </select>
+          </AppleSelect>
         </div>
 
         {selectedCourse && (
@@ -177,7 +178,7 @@ export default function QuoteGenerator({ lead, onClose }) {
 
             <div className="mb-4">
               <label className="block text-sm font-semibold mb-2">Number of Installments</label>
-              <select
+              <AppleSelect
                 value={installments}
                 onChange={(e) => {
                   const val = parseInt(e.target.value);
@@ -192,7 +193,7 @@ export default function QuoteGenerator({ lead, onClose }) {
                 <option value="4">4 Installments</option>
                 <option value="6">6 Installments</option>
                 <option value="12">12 Installments</option>
-              </select>
+              </AppleSelect>
             </div>
 
             {installments > 1 && (

@@ -9,6 +9,7 @@ import { countryName } from '../utils/country';
 import { Areas, Automation, Team } from './FlightBridgeOps';
 import { AutoPilot, Pipeline } from './FlightBridgeAutopilot';
 import { confirmDialog, promptDialog, choiceDialog, alertDialog } from './ui/dialogs';
+import AppleSelect from './ui/AppleSelect';
 
 // FlightBridge partnership module (Admin only). This screen records human decisions.
 // It never sends email: the central FlightBridge service runs compliance checks and is the only sender.
@@ -118,9 +119,9 @@ function ApprovalDetail({ id, onDone, onBack }) {
               <div className="text-glass-muted">“{e.excerpt}”</div></div>
           ))}
           <div className="mt-2 space-y-1">
-            <select className="glass-input w-full px-2 py-1 text-sm" value={ev.fact} onChange={(e) => setEv({ ...ev, fact: e.target.value })}>
+            <AppleSelect className="glass-input w-full px-2 py-1 text-sm" value={ev.fact} onChange={(e) => setEv({ ...ev, fact: e.target.value })}>
               {HUMAN_FACTS.map((f) => <option key={f} value={f}>{f}</option>)}
-            </select>
+            </AppleSelect>
             <input className="glass-input w-full px-2 py-1 text-sm" placeholder="Source URL you checked" value={ev.source_url} onChange={(e) => setEv({ ...ev, source_url: e.target.value })} />
             <input className="glass-input w-full px-2 py-1 text-sm" placeholder="Exact text that proves it" value={ev.excerpt} onChange={(e) => setEv({ ...ev, excerpt: e.target.value })} />
             <button onClick={addEvidence} disabled={!ev.source_url || ev.excerpt.length < 3} className="glass-btn px-3 py-1 text-sm">Record verified evidence</button>
@@ -290,9 +291,9 @@ function AiWriter({ onSaved, onEdit }) {
               </label>
             ))}
             <label className="text-xs font-medium text-glass-secondary">Versions to write
-              <select className="glass-input w-full px-3 py-2 text-sm mt-1" value={b.count} onChange={set('count')}>
+              <AppleSelect className="glass-input w-full px-3 py-2 text-sm mt-1" value={b.count} onChange={set('count')}>
                 {['3', '4', '5'].map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
+              </AppleSelect>
             </label>
           </div>
           <label className="block text-xs font-medium text-glass-secondary">About your organisation (only these facts are used)
@@ -375,9 +376,9 @@ function Templates() {
       <div className="glass-card p-4 space-y-3">
         <div className="flex flex-wrap gap-2 items-center justify-between">
           <div className="font-semibold">Paste or edit your outreach email</div>
-          <select id="fb-tpl-kind" className="glass-input px-2 py-1 text-sm" value={kind} onChange={(e) => { setKind(e.target.value); setResult(null); }}>
+          <AppleSelect id="fb-tpl-kind" className="glass-input px-2 py-1 text-sm" value={kind} onChange={(e) => { setKind(e.target.value); setResult(null); }}>
             {Object.entries(KIND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </select>
+          </AppleSelect>
         </div>
         <input id="fb-tpl-subject" className="glass-input w-full px-3 py-2" maxLength={150} placeholder="Subject, e.g. Student referral partnership with {{school_name}}" value={subject} onChange={(e) => setSubject(e.target.value)} />
         <textarea id="fb-tpl-body" className="glass-input w-full px-3 py-2 font-mono text-sm" rows={12} placeholder={'Paste the email body here.\n\nYou may use {{school_name}}, {{city}}, {{state}}, {{country}} and {{credential}}.\nDo not add an unsubscribe line or signature divider: the legal footer is added automatically.'} value={body} onChange={(e) => setBody(e.target.value)} />
@@ -422,9 +423,9 @@ function Inbox() {
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-2 items-center">
-        <select id="fb-inbox-risk" className="glass-input px-2 py-1 text-sm" value={risk} onChange={(e) => setRisk(e.target.value)}>
+        <AppleSelect id="fb-inbox-risk" className="glass-input px-2 py-1 text-sm" value={risk} onChange={(e) => setRisk(e.target.value)}>
           <option value="">All risk levels</option><option value="RED">RED</option><option value="AMBER">AMBER</option><option value="GREEN">GREEN</option>
-        </select>
+        </AppleSelect>
         <label className="text-sm flex items-center gap-1"><input id="fb-inbox-unmatched" type="checkbox" checked={unmatched} onChange={(e) => setUnmatched(e.target.checked)} /> Unmatched senders only</label>
       </div>
       {rows.map((m) => (
@@ -791,9 +792,9 @@ function Settings() {
             <h3 className="font-bold">{g.title}</h3>
             {g.provider && (
               <label className="text-sm flex items-center gap-2">Use
-                <select className="glass-input px-2 py-1 text-sm" value={s.llm_provider} onChange={(e) => saveSettings({ llm_provider: e.target.value })}>
+                <AppleSelect className="glass-input px-2 py-1 text-sm" value={s.llm_provider} onChange={(e) => saveSettings({ llm_provider: e.target.value })}>
                   <option value="none">No AI (keywords only)</option><option value="groq">Groq</option><option value="gemini">Gemini</option>
-                </select>
+                </AppleSelect>
               </label>
             )}
           </div>
@@ -924,9 +925,9 @@ export default function FlightBridge() {
 
       {view === 'queue' && (
         <div className="space-y-2">
-          <select className="glass-input px-2 py-1 text-sm" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <AppleSelect className="glass-input px-2 py-1 text-sm" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
             {['open', 'approved', 'edited_approved', 'rejected', 'more_research', 'resolved'].map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
+          </AppleSelect>
           {tasks.map((t) => (
             <button key={t.id} onClick={() => setSelected(t.id)} className="glass-card p-3 w-full text-left hover:shadow-md">
               <div className="flex justify-between"><div className="font-semibold text-glass-primary">{t.org_name} <span className="text-xs text-glass-muted">({t.country})</span></div><Badge text={t.risk} style={RISK_STYLE[t.risk]} /></div>
@@ -957,13 +958,13 @@ export default function FlightBridge() {
         <div className="glass-card p-4 space-y-2">
           <div className="text-sm text-glass-secondary">Suppression is permanent. Domain scope cannot be used for shared providers such as gmail.com.</div>
           <div className="flex flex-wrap gap-2">
-            <select className="glass-input px-2 py-1 text-sm" value={supp.scope} onChange={(e) => setSupp({ ...supp, scope: e.target.value })}>
+            <AppleSelect className="glass-input px-2 py-1 text-sm" value={supp.scope} onChange={(e) => setSupp({ ...supp, scope: e.target.value })}>
               <option value="contact">Contact (email)</option><option value="organisation">Organisation (id)</option><option value="domain">Domain</option>
-            </select>
+            </AppleSelect>
             <input className="glass-input px-2 py-1 text-sm flex-1" placeholder={supp.scope === 'contact' ? 'email@school.example' : supp.scope === 'organisation' ? 'organisation id' : 'school.example'} value={supp.value} onChange={(e) => setSupp({ ...supp, value: e.target.value })} />
-            <select className="glass-input px-2 py-1 text-sm" value={supp.reason} onChange={(e) => setSupp({ ...supp, reason: e.target.value })}>
+            <AppleSelect className="glass-input px-2 py-1 text-sm" value={supp.reason} onChange={(e) => setSupp({ ...supp, reason: e.target.value })}>
               {['manual', 'unsubscribe', 'rejection', 'complaint', 'hard_bounce', 'legal'].map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
+            </AppleSelect>
             <button disabled={!supp.value} onClick={addSuppression} className="glass-btn px-3 py-1 text-sm" style={{ background: '#FF3B30' }}>Suppress</button>
           </div>
           <div className="text-xs text-glass-muted">{summary?.suppressions ?? 0} suppression records.</div>

@@ -1,0 +1,150 @@
+
+/* ===================================================================== Apple-style controls (ui/AppleSelect, Segmented, Stepper)
+   Liquid glass: translucent fill + blur + saturation, hairline edge, soft layered shadow, continuous (large) corners. */
+:root {
+  --apple-blue: #007AFF;
+  --apple-spring: cubic-bezier(.32, 1.25, .55, 1);
+  --apple-ease: cubic-bezier(.25, .8, .25, 1);
+  --hairline: rgba(60, 60, 67, 0.14);
+}
+
+/* pop-up button (closed state) */
+.apple-select {
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0; min-height: 40px; padding: 8px 12px 8px 14px;
+  border-radius: 12px; font-size: 15px; color: var(--label, #000); text-align: left; cursor: pointer;
+  background: rgba(255, 255, 255, 0.62);
+  -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: 0 0 0 0.5px var(--hairline), 0 1px 2px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  transition: box-shadow .2s var(--apple-ease), background .2s var(--apple-ease), transform .15s var(--apple-ease);
+}
+.apple-select:hover:not(:disabled) { background: rgba(255, 255, 255, 0.8); }
+.apple-select:active:not(:disabled) { transform: scale(0.985); }
+.apple-select:focus-visible, .apple-select[data-open] { outline: none; box-shadow: 0 0 0 0.5px var(--hairline), 0 0 0 4px rgba(0, 122, 255, 0.28); }
+.apple-select:disabled { opacity: .5; cursor: default; }
+@media (max-width: 767px) { .apple-select { min-height: 44px; font-size: 16px; } }
+
+/* the menu */
+.apple-menu {
+  position: fixed; z-index: 300; overflow-y: auto; overscroll-behavior: contain; padding: 6px;
+  border-radius: 20px; background: rgba(246, 246, 248, 0.9);
+  -webkit-backdrop-filter: blur(40px) saturate(200%); backdrop-filter: blur(40px) saturate(200%);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 12px 40px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08),
+              inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  transform-origin: top center; animation: apple-pop .22s var(--apple-spring);
+  scrollbar-width: thin; scroll-behavior: smooth;
+}
+.apple-menu-up { transform-origin: bottom center; }
+.apple-menu-item {
+  display: flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 10px 6px 4px; border-radius: 14px;
+  font-size: 14px; color: #1d1d1f; cursor: default; user-select: none;
+}
+.apple-menu-item[data-active]:not([aria-disabled]) { background: var(--apple-blue); color: #fff; }
+.apple-menu-item[aria-disabled] { opacity: .38; }
+.apple-menu-tick { width: 20px; display: inline-grid; place-items: center; color: var(--apple-blue); flex-shrink: 0; }
+.apple-menu-item[data-active] .apple-menu-tick { color: #fff; }
+@media (pointer: coarse) { .apple-menu-item { min-height: 44px; font-size: 16px; } }
+@keyframes apple-pop { from { opacity: 0; transform: scale(.94) translateY(-4px); } to { opacity: 1; transform: none; } }
+
+/* every native <select> left in the app gets the same pop-up look */
+select.glass-input, select.apple-native {
+  -webkit-appearance: none; appearance: none; border-radius: 12px; padding-right: 34px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='16' viewBox='0 0 12 16'%3E%3Cpath d='M3 6l3-3 3 3M3 10l3 3 3-3' fill='none' stroke='%233c3c43' stroke-opacity='.6' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center; background-size: 12px 16px;
+}
+
+/* segmented control (iOS) with a sliding thumb */
+.apple-seg { position: relative; display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 2px;
+  border-radius: 10px; background: rgba(118, 118, 128, 0.14); }
+.apple-seg-thumb { position: absolute; top: 2px; bottom: 2px; left: 2px; border-radius: 8px; background: #fff;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12), 0 3px 1px rgba(0, 0, 0, 0.04), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  transition: transform .32s var(--apple-spring); }
+.apple-seg button { position: relative; z-index: 1; min-width: 40px; height: 32px; padding: 0 12px; border-radius: 8px;
+  font-size: 13px; font-weight: 500; color: #1d1d1f; transition: opacity .2s; }
+.apple-seg button[aria-checked="true"] { font-weight: 600; }
+.apple-seg button:disabled { opacity: .45; }
+.apple-seg button:focus-visible { outline: 2px solid var(--apple-blue); outline-offset: -2px; }
+
+/* inset grouped list (iOS Settings) */
+.apple-group { border-radius: 16px; overflow: hidden; background: rgba(255, 255, 255, 0.66);
+  -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: 0 0 0 0.5px var(--hairline), 0 1px 3px rgba(0, 0, 0, 0.04); }
+.apple-row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 14px; position: relative; }
+.apple-row + .apple-row::before { content: ''; position: absolute; top: 0; right: 0; left: 52px; height: 0.5px; background: var(--hairline); }
+
+/* stepper (− value +) */
+.apple-stepper { display: inline-flex; align-items: center; border-radius: 10px; background: rgba(118, 118, 128, 0.12); overflow: hidden; }
+.apple-stepper button { width: 36px; height: 32px; display: grid; place-items: center; font-size: 18px; color: #1d1d1f;
+  transition: background .15s; }
+.apple-stepper button:hover:not(:disabled) { background: rgba(118, 118, 128, 0.16); }
+.apple-stepper button:active:not(:disabled) { background: rgba(118, 118, 128, 0.28); }
+.apple-stepper button:disabled { opacity: .3; }
+.apple-stepper span { min-width: 34px; text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; font-size: 15px;
+  border-left: 0.5px solid var(--hairline); border-right: 0.5px solid var(--hairline); line-height: 32px; }
+.apple-stepper span.bump { animation: apple-bump .28s var(--apple-spring); }
+@keyframes apple-bump { 0% { transform: scale(1); } 40% { transform: scale(1.18); } 100% { transform: scale(1); } }
+
+/* horizontal paging (cards snap like iOS) */
+.apple-pager { display: flex; gap: 14px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-behavior: smooth;
+  overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding: 4px 2px 10px;
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 3%, #000 97%, transparent); mask-image: linear-gradient(to right, transparent, #000 3%, #000 97%, transparent); }
+.apple-pager::-webkit-scrollbar { display: none; }
+.apple-pager > * { scroll-snap-align: center; scroll-snap-stop: always; flex: 0 0 88%; }
+@media (min-width: 640px) { .apple-pager > * { flex-basis: 78%; } }
+.apple-dots { display: flex; justify-content: center; gap: 6px; }
+.apple-dots button { width: 7px; height: 7px; border-radius: 9999px; background: rgba(60, 60, 67, 0.25); transition: all .3s var(--apple-spring); }
+.apple-dots button[aria-current="true"] { width: 20px; background: var(--apple-blue); }
+
+/* liquid-glass card with a large continuous corner */
+.apple-card { border-radius: 22px; background: rgba(255, 255, 255, 0.7);
+  -webkit-backdrop-filter: blur(24px) saturate(190%); backdrop-filter: blur(24px) saturate(190%);
+  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.6) inset, 0 0 0 0.5px var(--hairline), 0 8px 30px rgba(0, 0, 0, 0.06); }
+
+/* switch: spring thumb */
+.apple-switch-thumb { transition: transform .35s var(--apple-spring) !important; }
+
+/* smooth, quiet scrolling everywhere */
+html { scroll-behavior: smooth; }
+[data-modal] > * { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+* { scrollbar-width: thin; scrollbar-color: rgba(0, 0, 0, 0.22) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.2); border-radius: 9999px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: rgba(0, 0, 0, 0.32); }
+::-webkit-scrollbar-track { background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .apple-menu, .apple-seg-thumb, .apple-switch-thumb, .apple-stepper span.bump, .apple-dots button { animation: none !important; transition: none !important; }
+}
+
+/* ===================================================================== Liquid Glass (iOS 26 / macOS Tahoe)
+   Floating layer: translucent, strongly blurred and saturated, a bright specular rim on the top edge, concentric
+   corners (inner radius = outer radius - padding), capsule-shaped controls. Panels grow out of the control that
+   opened them (ui/GlassPopover.jsx morphFrom). */
+.liquid-pop {
+  position: fixed; z-index: 210; overflow-y: auto; overscroll-behavior: contain; border-radius: 28px;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.93), rgba(246, 247, 250, 0.86));
+  -webkit-backdrop-filter: blur(44px) saturate(210%) brightness(1.04); backdrop-filter: blur(44px) saturate(210%) brightness(1.04);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 0 0 0.5px rgba(255, 255, 255, 0.7),
+              0 0 0 0.5px rgba(0, 0, 0, 0.10), 0 24px 60px rgba(0, 0, 0, 0.20), 0 4px 14px rgba(0, 0, 0, 0.08);
+  scrollbar-width: none; will-change: transform;
+}
+.liquid-pop::-webkit-scrollbar { display: none; }
+.liquid-well { border-radius: 18px; background: rgba(118, 118, 128, 0.09); box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.04); }
+
+/* capsule control (the closed state: just the value) */
+.glass-capsule {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 14px; border-radius: 9999px;
+  font-size: 14px; font-weight: 600; color: #1d1d1f; cursor: pointer;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.66));
+  -webkit-backdrop-filter: blur(16px) saturate(180%); backdrop-filter: blur(16px) saturate(180%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 1), 0 0 0 0.5px rgba(0, 0, 0, 0.10), 0 2px 8px rgba(0, 0, 0, 0.08);
+  transition: transform .25s var(--apple-spring), box-shadow .2s var(--apple-ease);
+}
+.glass-capsule:hover { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 1), 0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 4px 14px rgba(0, 0, 0, 0.12); }
+.glass-capsule:active { transform: scale(0.94); }
+.glass-capsule[aria-expanded="true"] { box-shadow: inset 0 1px 0 #fff, 0 0 0 4px rgba(0, 122, 255, 0.25); }
+.glass-capsule:focus-visible { outline: none; box-shadow: inset 0 1px 0 #fff, 0 0 0 4px rgba(0, 122, 255, 0.35); }
+.glass-capsule-blue { color: #fff; background: linear-gradient(180deg, #2F8CFF, #007AFF); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 4px 12px rgba(0, 122, 255, 0.35); }
+.apple-menu { animation: none; }
+
+.glass-capsule[data-open] { box-shadow: inset 0 1px 0 #fff, 0 0 0 4px rgba(0, 122, 255, 0.25); }

@@ -1,6 +1,7 @@
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
+import './components/ui/apple.css';
 import { installModalKeys } from './components/ui/overlay';
 import { API_URL } from './api';
 

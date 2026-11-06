@@ -10,6 +10,7 @@ import { USE_SUPABASE } from '../backend/mode';
 import { modalProps } from './ui/overlay';
 import QuickActions, { CloseButton } from './ui/QuickActions';
 import { confirmDialog, promptDialog, choiceDialog, alertDialog } from './ui/dialogs';
+import AppleSelect from './ui/AppleSelect';
 
 export default function EmployeeDirectory() {
   const [employees, setEmployees] = useState([]);
@@ -38,7 +39,7 @@ export default function EmployeeDirectory() {
   return (
     <div className="max-w-7xl mx-auto">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4"><h2 className="text-2xl font-bold text-glass-primary">Employee Directory</h2><button onClick={() => { setFormData({}); setLoginIdManual(false); setShowForm(true); }} className="glass-btn px-4 py-2">+ Add Employee</button></div>
-      <div className="flex flex-col sm:flex-row gap-3 mb-6"><input type="text" placeholder="🔍 Search by name, ID, role..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="glass-input flex-1 px-4 py-2" /><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="glass-input px-4 py-2"><option value="all">All Status</option><option value="active">Active</option><option value="non-active">Non-Active</option></select></div>
+      <div className="flex flex-col sm:flex-row gap-3 mb-6"><input type="text" placeholder="🔍 Search by name, ID, role..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="glass-input flex-1 px-4 py-2" /><AppleSelect value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="glass-input px-4 py-2"><option value="all">All Status</option><option value="active">Active</option><option value="non-active">Non-Active</option></AppleSelect></div>
       <div className="text-sm text-glass-secondary mb-3">Showing {filteredEmployees.length} of {employees.length} employees</div>
       {filteredEmployees.length === 0 ? <EmptyState icon="👥" title="No employees found" description={searchQuery ? "Try adjusting your search or filters" : "Click 'Add Employee' to get started"} /> : (
         <div className="glass-table overflow-x-auto">
@@ -104,11 +105,11 @@ export default function EmployeeDirectory() {
                 <input type="date" placeholder="Date of Joining" value={formData.joining_date || ''} onChange={(e) => setFormData({...formData, joining_date: e.target.value})} className="glass-input px-3 py-2" />
                 {/* Optional. Cleared input sends null (never ""), which the API stores as NULL. */}
                 <div><label className="block text-xs font-medium text-glass-muted mb-1">Date of Birth</label><input type="date" value={formData.date_of_birth || ''} onChange={(e) => setFormData({...formData, date_of_birth: e.target.value || null})} className="glass-input w-full px-3 py-2" /></div>
-                <select value={formData.status || 'active'} onChange={(e) => setFormData({...formData, status: e.target.value})} className="glass-input px-3 py-2"><option value="active">Active</option><option value="non-active">Non-Active</option></select>
+                <AppleSelect value={formData.status || 'active'} onChange={(e) => setFormData({...formData, status: e.target.value})} className="glass-input px-3 py-2"><option value="active">Active</option><option value="non-active">Non-Active</option></AppleSelect>
                 {formData.status === 'non-active' && <input type="date" placeholder="Date of Leaving" value={formData.date_of_leaving || ''} onChange={(e) => setFormData({...formData, date_of_leaving: e.target.value})} className="glass-input px-3 py-2" />}
                 <input type="number" placeholder="Monthly Salary" value={formData.monthly_salary || ''} onChange={(e) => setFormData({...formData, monthly_salary: e.target.value})} className="glass-input px-3 py-2" step="0.01" />
                 <input type="number" placeholder="Paid Leave Quota (Monthly)" value={formData.paid_leave_quota || ''} onChange={(e) => setFormData({...formData, paid_leave_quota: e.target.value})} className="glass-input px-3 py-2" min="0" />
-                <select value={formData.department || ''} onChange={(e) => setFormData({...formData, department: e.target.value})} className="glass-input px-3 py-2" required><option value="">Select Department *</option><option value="Admin">Admin</option><option value="IT">IT</option><option value="Sales">Sales</option><option value="Instructors">Instructors</option></select>
+                <AppleSelect value={formData.department || ''} onChange={(e) => setFormData({...formData, department: e.target.value})} className="glass-input px-3 py-2" required><option value="">Select Department *</option><option value="Admin">Admin</option><option value="IT">IT</option><option value="Sales">Sales</option><option value="Instructors">Instructors</option></AppleSelect>
                 <input type="tel" placeholder="Contact Number *" value={formData.phone || ''} onChange={(e) => setFormData({...formData, phone: e.target.value})} className="glass-input px-3 py-2" required />
                 <input type="email" placeholder="Email Address" value={formData.email || ''} onChange={(e) => setFormData({...formData, email: e.target.value})} className="glass-input px-3 py-2" />
                 <input type="text" placeholder="Job Role" value={formData.job_role || ''} onChange={(e) => setFormData({...formData, job_role: e.target.value})} className="glass-input px-3 py-2" />

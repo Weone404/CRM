@@ -6,6 +6,7 @@ import LoadingSpinner from './LoadingSpinner';
 import { API_URL } from '../api';
 import { modalProps } from './ui/overlay';
 import { confirmDialog, promptDialog, choiceDialog, alertDialog } from './ui/dialogs';
+import AppleSelect from './ui/AppleSelect';
 
 export default function TaskBoard() {
   const [employees, setEmployees] = useState([]);
@@ -102,7 +103,7 @@ export default function TaskBoard() {
                         <div className="flex items-start justify-between gap-3 mb-2">
                           <h4 className="font-medium text-glass-primary text-sm flex-1">{task.title}</h4>
                           <div className="flex items-center gap-1">
-                            <select value={task.status} onChange={(e) => handleStatusChange(task.id, e.target.value)} className={`text-xs px-2 py-1 rounded-full border font-medium ${STATUS_COLORS[task.status] || 'glass-subtle text-glass-primary'}`}>{<option value="pending">Pending</option>}<option value="done">Completed</option><option value="aborted">Aborted</option></select>
+                            <AppleSelect value={task.status} onChange={(e) => handleStatusChange(task.id, e.target.value)} className={`text-xs px-2 py-1 rounded-full border font-medium ${STATUS_COLORS[task.status] || 'glass-subtle text-glass-primary'}`}>{<option value="pending">Pending</option>}<option value="done">Completed</option><option value="aborted">Aborted</option></AppleSelect>
                             {canDeleteTask(task) && confirmDeleteId !== task.id && <button onClick={() => setConfirmDeleteId(task.id)} title="Delete task" className="p-1 text-glass-muted hover:text-red-600 transition">🗑️</button>}
                           </div>
                         </div>
@@ -135,7 +136,7 @@ export default function TaskBoard() {
           <div className="glass-strong max-w-md w-full p-6 my-8 max-h-[90vh] overflow-y-auto animate-glass-in">
             <h2 className="text-xl font-bold mb-4 text-glass-primary">Add New Task</h2>
             <form onSubmit={handleAddTask} className="space-y-4">
-              {canViewAllEmployees && <div><label className="block text-sm font-medium text-glass-secondary mb-1">Assign To *</label><select value={formData.assigned_to || ''} onChange={(e) => setFormData({...formData, assigned_to: e.target.value})} className="glass-input w-full px-3 py-2" required><option value="">Select employee...</option>{employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}</select></div>}
+              {canViewAllEmployees && <div><label className="block text-sm font-medium text-glass-secondary mb-1">Assign To *</label><AppleSelect value={formData.assigned_to || ''} onChange={(e) => setFormData({...formData, assigned_to: e.target.value})} className="glass-input w-full px-3 py-2" required><option value="">Select employee...</option>{employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}</AppleSelect></div>}
               <div><label className="block text-sm font-medium text-glass-secondary mb-1">Task Title *</label><input type="text" value={formData.title || ''} onChange={(e) => setFormData({...formData, title: e.target.value})} className="glass-input w-full px-3 py-2" placeholder="e.g., Follow up with lead" required /></div>
               <div><label className="block text-sm font-medium text-glass-secondary mb-1">Description</label><textarea value={formData.description || ''} onChange={(e) => setFormData({...formData, description: e.target.value})} className="glass-input w-full px-3 py-2" rows={3} placeholder="Task details..." /></div>
               <div><label className="block text-sm font-medium text-glass-secondary mb-1">Due Date</label><input type="date" value={formData.due_date || ''} onChange={(e) => setFormData({...formData, due_date: e.target.value})} className="glass-input w-full px-3 py-2" /></div>

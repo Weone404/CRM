@@ -6,6 +6,9 @@ import { countryName } from '../utils/country';
 import { confirmDialog } from './ui/dialogs';
 import { modalProps } from './ui/overlay';
 import { CloseButton } from './ui/QuickActions';
+import AppleSelect from './ui/AppleSelect';
+import { Switch } from './ui/AppleControls';
+import GlassPopover from './ui/GlassPopover';
 
 // Email Auto-Pilot and the outreach Pipeline.
 // The engine on the Mac Mini does the sending (flightbridge/autosend.py): this screen only stores the owner's choices
@@ -57,16 +60,6 @@ function statusLine(d) {
     case 'off': return { tone: 'blue', title: 'Starting', text: 'The Mac Mini picks this up within a minute.' };
     default: return { tone: 'blue', title: 'Starting', text: 'The Mac Mini picks this up within a minute.' };
   }
-}
-
-function Switch({ on, disabled, onChange, label }) {
-  return (
-    <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)}
-      className="relative inline-flex items-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-      style={{ width: 64, height: 36, background: on ? '#34C759' : 'rgba(120,120,128,0.32)', opacity: disabled ? 0.5 : 1, outlineColor: '#007AFF' }}>
-      <span className="absolute rounded-full bg-white transition-transform" style={{ width: 30, height: 30, left: 3, top: 3, transform: on ? 'translateX(28px)' : 'none', boxShadow: '0 2px 6px rgba(0,0,0,0.25)' }} />
-    </button>
-  );
 }
 
 function Stat({ label, value, sub, children }) {
@@ -127,13 +120,24 @@ function FollowupWriter({ days, onClose, onDone }) {
   const [list, setList] = useState(null);
   const [err, setErr] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [page, setPage] = useState(0);
+  const pager = useRef(null);
   const run = useCallback(async () => {
     setBusy(true); setErr(null);
-    try { setList((await call('/templates/followups', { method: 'POST', body: '{}' })).followups); } catch (e) { setErr(e.message); }
+    try { setList((await call('/templates/followups', { method: 'POST', body: '{}' })).followups); setPage(0); } catch (e) { setErr(e.message); }
     setBusy(false);
   }, []);
   useEffect(() => { run(); }, [run]);
   const edit = (i, k, v) => setList((l) => l.map((f, j) => (j === i ? { ...f, [k]: v } : f)));
+  const go = (i) => { const el = pager.current?.children[i]; el?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' }); };
+  const onScroll = () => {
+    const el = pager.current;
+    if (!el) return;
+    const mid = el.scrollLeft + el.clientWidth / 2;
+    let best = 0, dist = Infinity;
+    [...el.children].forEach((c, i) => { const d = Math.abs(c.offsetLeft + c.clientWidth / 2 - mid); if (d < dist) { dist = d; best = i; } });
+    setPage(best);
+  };
   const approveAll = async () => {
     setSaving(true);
     try {
@@ -145,36 +149,83 @@ function FollowupWriter({ days, onClose, onDone }) {
       showToast(`${list.length} follow-ups approved`, 'success'); onDone();
     } catch (e) { showToast(e.message, 'error'); } finally { setSaving(false); }
   };
+  const bad = (list || []).filter((f) => f.check?.errors?.length).length;
   return (
-    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50 overflow-y-auto" {...modalProps(onClose, { guard: true })}>
-      <div className="glass-strong max-w-2xl w-full p-5 my-8 max-h-[90vh] overflow-y-auto animate-glass-in">
-        <div className="flex justify-between items-start gap-3 mb-3">
-          <div>
-            <h2 className="text-xl font-bold text-glass-primary">Follow-up emails</h2>
-            <p className="text-sm text-glass-secondary">Written for your approved first email. Sent only when a school hasn't replied: days {days.join(', ')}.</p>
+    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50" {...modalProps(onClose, { guard: true })}>
+      <div className="apple-card max-w-3xl w-full p-5 sm:p-6 max-h-[92vh] overflow-y-auto animate-glass-in">
+        <div className="flex justify-between items-start gap-3">
+          <div className="min-w-0">
+            <div className="text-[12px] font-semibold uppercase tracking-wide" style={{ color: '#007AFF' }}>Follow-up sequence</div>
+            <h2 className="text-[22px] font-bold text-glass-primary leading-tight mt-0.5">Written for your first email</h2>
+            <p className="text-sm text-glass-secondary mt-1">Each one goes only if the school hasn't replied. Swipe to read and edit.</p>
           </div>
           <CloseButton onClick={onClose} />
         </div>
-        {busy && <div className="py-10 text-center text-glass-muted text-sm">Writing {days.length} follow-ups…</div>}
-        {err && <div className="p-3 rounded-xl text-sm" style={{ background: TONE.red.bg, color: TONE.red.fg }}>{err} <button className="underline ml-1" onClick={run}>Try again</button></div>}
-        {list && !busy && (
-          <div className="space-y-3">
-            {list.map((f, i) => (
-              <div key={f.step} className="glass-subtle rounded-2xl p-3 space-y-2">
-                <div className="flex items-center justify-between gap-2 text-[12px] text-glass-muted">
-                  <span className="font-semibold text-glass-primary text-sm">Follow-up {f.step} · day {f.day}</span>
-                  {f.check?.errors?.length ? <span style={{ color: '#C4261D' }}>{f.check.errors.length} to fix</span> : <span style={{ color: '#1E7B34' }}>Checks passed</span>}
-                </div>
-                <input className="glass-input w-full px-3 py-2 text-sm" value={f.subject} maxLength={150} onChange={(e) => edit(i, 'subject', e.target.value)} aria-label={`Follow-up ${f.step} subject`} />
-                <textarea className="glass-input w-full px-3 py-2 text-sm" rows={6} value={f.body} onChange={(e) => edit(i, 'body', e.target.value)} aria-label={`Follow-up ${f.step} body`} />
-                {f.check?.errors?.length > 0 && <ul className="text-[12px] list-disc pl-5" style={{ color: '#C4261D' }}>{f.check.errors.map((x) => <li key={x}>{x}</li>)}</ul>}
-              </div>
-            ))}
-            <div className="flex flex-wrap gap-2 justify-end pt-1">
-              <button className="px-4 py-2 rounded-xl text-sm glass-subtle" onClick={run} disabled={saving}>Write again</button>
-              <button className="glass-btn px-4 py-2 text-sm" style={{ background: '#34C759' }} onClick={approveAll} disabled={saving}>{saving ? 'Saving…' : `Approve all ${list.length}`}</button>
-            </div>
+
+        {/* the sequence as a timeline; tap a step to jump to it */}
+        <div className="flex items-center gap-1.5 overflow-x-auto mt-4 pb-1" role="tablist" aria-label="Follow-ups">
+          <span className="shrink-0 px-3 py-1.5 rounded-full text-[12px] font-medium" style={{ background: 'rgba(118,118,128,0.12)' }}>First email · day 0</span>
+          {days.map((d, i) => (
+            <span key={d} className="contents">
+              <span className="shrink-0 w-4 h-px" style={{ background: 'rgba(60,60,67,0.25)' }} />
+              <button type="button" role="tab" aria-selected={page === i} onClick={() => go(i)}
+                className="shrink-0 px-3 py-1.5 rounded-full text-[12px] font-semibold transition"
+                style={page === i ? { background: '#007AFF', color: '#fff' } : { background: 'rgba(0,122,255,0.10)', color: '#0058C2' }}>
+                Follow-up {i + 1} · day {d}
+              </button>
+            </span>
+          ))}
+        </div>
+
+        {busy && (
+          <div className="py-14 grid place-items-center gap-3 text-glass-muted text-sm">
+            <span className="w-8 h-8 rounded-full border-[3px] border-blue-500/25 border-t-blue-500 animate-spin" aria-hidden="true" />
+            Writing {days.length} follow-ups…
           </div>
+        )}
+        {err && <div className="mt-4 p-3 rounded-2xl text-sm" style={{ background: TONE.red.bg, color: TONE.red.fg }}>{err} <button className="underline ml-1" onClick={run}>Try again</button></div>}
+        {list && !busy && (
+          <>
+            <div ref={pager} className="apple-pager mt-4 -mx-1" onScroll={onScroll}>
+              {list.map((f, i) => (
+                <section key={f.step} className="apple-card p-4 space-y-3" aria-label={`Follow-up ${f.step}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="w-7 h-7 rounded-full grid place-items-center text-[13px] font-bold text-white" style={{ background: '#007AFF' }}>{f.step}</span>
+                      <div className="leading-tight">
+                        <div className="text-sm font-semibold text-glass-primary">Day {f.day}</div>
+                        <div className="text-[11px] text-glass-muted">if no reply yet</div>
+                      </div>
+                    </div>
+                    {f.check?.errors?.length
+                      ? <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ background: TONE.red.bg, color: TONE.red.fg }}>{f.check.errors.length} to fix</span>
+                      : <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold inline-flex items-center gap-1" style={{ background: TONE.green.bg, color: TONE.green.fg }}><Icon name="check" size={12} />Checks passed</span>}
+                  </div>
+                  <label className="block">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-glass-muted">Subject</span>
+                    <input className="glass-input w-full px-3 py-2 mt-1 text-[15px] rounded-xl" value={f.subject} maxLength={150} onChange={(e) => edit(i, 'subject', e.target.value)} />
+                  </label>
+                  <label className="block">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-glass-muted">Email</span>
+                    <textarea className="glass-input w-full px-3 py-2.5 mt-1 text-[15px] leading-relaxed rounded-xl" rows={9} value={f.body} onChange={(e) => edit(i, 'body', e.target.value)} />
+                  </label>
+                  <div className="text-[11px] text-glass-muted">{f.body.split(/\s+/).filter(Boolean).length} words · placeholders like {'{{school_name}}'} are filled for each school</div>
+                  {f.check?.errors?.length > 0 && <ul className="text-[12px] list-disc pl-5" style={{ color: '#C4261D' }}>{f.check.errors.map((x) => <li key={x}>{x}</li>)}</ul>}
+                </section>
+              ))}
+            </div>
+            <div className="apple-dots mt-1" role="tablist" aria-label="Pages">
+              {list.map((f, i) => <button key={f.step} type="button" aria-label={`Follow-up ${f.step}`} aria-current={page === i} onClick={() => go(i)} />)}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 justify-between pt-4">
+              <span className="text-[12px] text-glass-muted">{bad ? `${bad} need a fix before approving` : 'All checks passed'}</span>
+              <div className="flex gap-2">
+                <button className="px-4 py-2.5 rounded-full text-sm font-medium" style={{ background: 'rgba(118,118,128,0.12)' }} onClick={run} disabled={saving}>Write again</button>
+                <button className="px-5 py-2.5 rounded-full text-sm font-semibold text-white" style={{ background: '#34C759', boxShadow: '0 6px 16px rgba(52,199,89,0.35)' }}
+                  onClick={approveAll} disabled={saving}>{saving ? 'Approving…' : `Approve all ${list.length}`}</button>
+              </div>
+            </div>
+          </>
         )}
       </div>
     </div>
@@ -186,6 +237,8 @@ export function AutoPilot({ isAdmin }) {
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState(null);
   const [writer, setWriter] = useState(false);
+  const [fuOpen, setFuOpen] = useState(false);
+  const fuBtn = useRef(null);
   const dirty = useRef(false);
 
   const load = useCallback(async () => {
@@ -230,7 +283,11 @@ export function AutoPilot({ isAdmin }) {
   const setDays = (n) => {
     dirty.current = true;
     const base = [4, 9, 16, 25, 40];
-    setForm((f) => ({ ...f, followups: n, days: Array.from({ length: n }, (_, i) => f.days[i] ?? base[i]) }));
+    setForm((f) => {
+      const days = [];
+      for (let i = 0; i < n; i++) days.push(Math.max(f.days[i] ?? base[i], i ? days[i - 1] + 1 : 2));
+      return { ...f, followups: n, days };
+    });
   };
   const daysOk = form.days.every((v, i) => Number.isInteger(v) && v >= 2 && v <= 90 && (i === 0 || v > form.days[i - 1]));
   const changed = form.daily_limit !== (cfg.daily_limit ?? 40) || form.warmup !== (cfg.warmup !== false)
@@ -272,61 +329,142 @@ export function AutoPilot({ isAdmin }) {
       </div>
 
       {/* settings */}
-      <div className="glass-card p-4 sm:p-5 space-y-4">
-        <div className="font-semibold text-glass-primary">Settings</div>
-        <label className="block">
-          <span className="text-sm font-medium text-glass-primary">Send emails from</span>
-          <select className="glass-input w-full px-3 py-2 mt-1" value={sel?.id || ''} disabled={!isAdmin || busy}
-            onChange={(e) => save({ send_from: e.target.value }, 'Sending mailbox changed')} aria-label="Send emails from">
-            {mailboxes.map((m) => <option key={m.id} value={m.id} disabled={!m.connected && !m.selected}>{m.address} · {m.provider}{m.connected ? '' : ' (not connected)'}</option>)}
-          </select>
-          <span className="text-[12px] text-glass-muted">Only connected mailboxes can be chosen. Connect another in Settings › Email.</span>
-        </label>
+      <div className="glass-card p-4 sm:p-5 space-y-5">
+        <div className="text-[13px] font-semibold uppercase tracking-wide text-glass-muted">Settings</div>
 
-        <div className="grid sm:grid-cols-2 gap-4">
-          <div>
-            <div className="text-sm font-medium text-glass-primary">Daily pace</div>
-            <label className="flex items-center gap-2 mt-2 text-sm">
-              <input type="checkbox" className="w-4 h-4" checked={form.warmup} disabled={!isAdmin}
-                onChange={(e) => { dirty.current = true; setForm({ ...form, warmup: e.target.checked }); }} />
-              Warm-up (safest for a new sending domain)
-            </label>
-            <label className="flex items-center gap-2 mt-2 text-sm">
-              <span className="text-glass-secondary">Up to</span>
-              <input type="number" min={1} max={100} className="glass-input px-2 py-1.5 w-20 text-center" value={form.daily_limit} disabled={!isAdmin}
-                onChange={(e) => { dirty.current = true; setForm({ ...form, daily_limit: Math.max(1, Math.min(100, Number(e.target.value) || 1)) }); }} aria-label="Emails a day" />
-              <span className="text-glass-secondary">emails a day</span>
-            </label>
-            <p className="text-[12px] text-glass-muted mt-1.5">{form.warmup ? `Week 1: ${Math.min(10, form.daily_limit)} a day, +10 each week until ${form.daily_limit}.` : `${form.daily_limit} every day from the start.`} Weekdays, in each school's 9 am–5 pm, with random gaps of 4–11 minutes.</p>
+        <section>
+          <div className="text-sm font-semibold text-glass-primary mb-1.5">Send emails from</div>
+          <AppleSelect className="w-full" value={sel?.id || ''} disabled={!isAdmin || busy} aria-label="Send emails from"
+            onChange={(e) => save({ send_from: e.target.value }, 'Sending mailbox changed')}>
+            {mailboxes.map((m) => (
+              <option key={m.id} value={m.id} disabled={!m.connected && !m.selected}
+                data-hint={`${m.provider}${m.connected ? ' · connected' : ' · not connected yet'}`}>{m.address}</option>
+            ))}
+          </AppleSelect>
+          <p className="text-[12px] text-glass-muted mt-1.5">Only connected mailboxes can be chosen. Connect another in Settings › Email.</p>
+        </section>
+
+        <section>
+          <div className="text-sm font-semibold text-glass-primary mb-1.5">Daily pace</div>
+          <div className="apple-group">
+            <div className="apple-row">
+              <span className="w-8 h-8 rounded-lg grid place-items-center text-white shrink-0" style={{ background: '#34C759' }}><Icon name="chart" size={16} /></span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[15px] text-glass-primary">Warm-up</div>
+                <div className="text-[12px] text-glass-muted">Safest for a domain new to outreach</div>
+              </div>
+              <Switch size="sm" on={form.warmup} disabled={!isAdmin} label="Warm-up"
+                onChange={(v) => { dirty.current = true; setForm({ ...form, warmup: v }); }} />
+            </div>
+            <div className="apple-row">
+              <span className="w-8 h-8 rounded-lg grid place-items-center text-white shrink-0" style={{ background: '#007AFF' }}><Icon name="send" size={15} /></span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[15px] text-glass-primary">{form.warmup ? 'Up to' : 'Every day'}</div>
+                <div className="text-[12px] text-glass-muted">emails a day</div>
+              </div>
+              <AppleSelect variant="capsule" menuWidth={150} value={form.daily_limit} disabled={!isAdmin} aria-label="Emails a day"
+                onChange={(e) => { dirty.current = true; setForm({ ...form, daily_limit: Number(e.target.value) }); }}>
+                {[...new Set([5, 10, 15, 20, 25, 30, 40, 50, 60, 75, 100, form.daily_limit])].sort((x, y) => x - y)
+                  .map((n) => <option key={n} value={n} data-hint={form.warmup && n > 10 ? `reached in week ${Math.ceil(n / 10)}` : undefined}>{String(n)}</option>)}
+              </AppleSelect>
+            </div>
           </div>
-          <div>
-            <div className="text-sm font-medium text-glass-primary">Follow-ups when there's no reply</div>
-            <div className="flex flex-wrap gap-1.5 mt-2" role="radiogroup" aria-label="Number of follow-ups">
-              {[0, 1, 2, 3, 4, 5].map((n) => (
-                <button key={n} type="button" role="radio" aria-checked={form.followups === n} disabled={!isAdmin} onClick={() => setDays(n)}
-                  className="w-10 h-9 rounded-xl text-sm font-medium transition"
-                  style={form.followups === n ? { background: '#007AFF', color: '#fff' } : { background: 'rgba(118,118,128,0.12)', color: '#3C3C43' }}>{n}</button>
-              ))}
+          <p className="text-[12px] text-glass-muted mt-1.5 px-1">
+            {form.warmup ? `Week 1: ${Math.min(10, form.daily_limit)} a day, then +10 each week until ${form.daily_limit}.` : `${form.daily_limit} a day from the start.`}
+            {' '}Weekdays only, in each school's 9 am – 5 pm, with random 4–11 minute gaps.
+          </p>
+        </section>
+
+        <section>
+          <div className="text-sm font-semibold text-glass-primary mb-1.5">Follow-ups</div>
+          <div className="apple-group">
+            <div className="apple-row">
+              <span className="w-8 h-8 rounded-lg grid place-items-center text-white shrink-0" style={{ background: '#FF9500' }}><Icon name="refresh" size={15} /></span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[15px] text-glass-primary">When there's no reply</div>
+                <div className="text-[12px] text-glass-muted">Stops the moment the school replies</div>
+              </div>
+              <AppleSelect variant="capsule" menuWidth={170} value={form.followups} disabled={!isAdmin} aria-label="Number of follow-ups"
+                display={(o) => <span className="text-[17px] font-semibold tabular-nums">{o?.value ?? form.followups}</span>}
+                onChange={(e) => setDays(Number(e.target.value))}>
+                {[0, 1, 2, 3, 4, 5].map((n) => (
+                  <option key={n} value={n} data-hint={n === 0 ? 'First email only' : n > 3 ? 'More can feel pushy' : n === 3 ? 'Recommended' : undefined}>
+                    {String(n)}
+                  </option>
+                ))}
+              </AppleSelect>
             </div>
             {form.followups > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5 mt-2 text-sm">
-                <span className="text-glass-secondary">On days</span>
-                {form.days.map((v, i) => (
-                  <input key={i} type="number" min={2} max={90} value={v} disabled={!isAdmin} aria-label={`Follow-up ${i + 1} day`}
-                    className="glass-input px-1 py-1.5 w-14 text-center"
-                    onChange={(e) => { dirty.current = true; const days = [...form.days]; days[i] = Number(e.target.value); setForm({ ...form, days }); }} />
-                ))}
+              <div className="apple-row">
+                <span className="w-8 h-8 rounded-lg grid place-items-center text-white shrink-0" style={{ background: '#5856D6' }}><Icon name="calendar" size={15} /></span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[15px] text-glass-primary">Schedule</div>
+                  <div className="text-[12px] text-glass-muted truncate">
+                    Wording {form.days.filter((_, i) => d.templates?.[`followup_${i + 1}`]).length} of {form.followups} approved
+                  </div>
+                </div>
+                <button ref={fuBtn} type="button" className="glass-capsule" aria-haspopup="dialog" aria-expanded={fuOpen}
+                  aria-label="Follow-up schedule" onClick={() => setFuOpen((o) => !o)}>
+                  <span className="tabular-nums">Day {form.days.join(' · ')}</span>
+                  <svg width="10" height="14" viewBox="0 0 12 16" aria-hidden="true" className="opacity-60"><path d="M3 6l3-3 3 3M3 10l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                </button>
               </div>
             )}
-            <p className="text-[12px] mt-1.5" style={{ color: daysOk ? undefined : '#C4261D' }}>
-              {daysOk ? (form.followups ? 'Days after the first email. Stops the moment the school replies, unsubscribes or bounces.' : 'Only the first email is sent.') : 'Each day must be 2–90 and later than the one before.'}
-            </p>
           </div>
-        </div>
+          <GlassPopover anchor={fuBtn} open={fuOpen && form.followups > 0} onClose={() => setFuOpen(false)} label="Follow-up schedule" width={380}>
+            {(close) => (
+              <div className="p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-[17px] font-semibold text-glass-primary">Schedule</div>
+                    <div className="text-[12px] text-glass-muted">Days after the first email</div>
+                  </div>
+                  <button type="button" className="glass-capsule glass-capsule-blue" onClick={close}>Done</button>
+                </div>
+                <ol className="liquid-well divide-y" style={{ borderColor: 'var(--hairline)' }}>
+                  <li className="flex items-center gap-3 px-3.5 py-2.5">
+                    <span className="w-7 h-7 rounded-full grid place-items-center text-white shrink-0" style={{ background: '#8E8E93' }}><Icon name="mail" size={13} /></span>
+                    <div className="flex-1 min-w-0"><div className="text-[14px] text-glass-primary">First email</div>
+                      <div className="text-[11px] text-glass-muted">{d.templates?.initial ? 'Wording approved' : 'Wording not approved yet'}</div></div>
+                    <span className="text-[13px] text-glass-muted tabular-nums pr-1">Day 0</span>
+                  </li>
+                  {form.days.map((v, i) => {
+                    const ready = d.templates?.[`followup_${i + 1}`];
+                    const lo = i ? form.days[i - 1] + 1 : 2;
+                    const hi = i < form.days.length - 1 ? form.days[i + 1] - 1 : 90;
+                    const choices = [...new Set([2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 21, 25, 28, 30, 35, 40, 45, 60, 90, v])]
+                      .filter((n) => n >= lo && n <= hi).sort((x, y) => x - y);
+                    return (
+                      <li key={i} className="flex items-center gap-3 px-3.5 py-2.5 fb-fade">
+                        <span className="w-7 h-7 rounded-full grid place-items-center text-[12px] font-bold text-white shrink-0" style={{ background: '#007AFF' }}>{i + 1}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[14px] text-glass-primary">Follow-up {i + 1}</div>
+                          <div className="text-[11px]" style={{ color: ready ? '#1E7B34' : '#A35A00' }}>{ready ? 'Wording approved' : 'Wording not approved yet'}</div>
+                        </div>
+                        <AppleSelect variant="capsule" menuWidth={190} value={v} disabled={!isAdmin} aria-label={`Follow-up ${i + 1} day`}
+                          display={(o) => `Day ${o?.value ?? v}`}
+                          onChange={(e) => { dirty.current = true; const days = [...form.days]; days[i] = Number(e.target.value); setForm({ ...form, days }); }}>
+                          {choices.map((n) => <option key={n} value={n} data-hint={`${n - (i ? form.days[i - 1] : 0)} day${n - (i ? form.days[i - 1] : 0) === 1 ? '' : 's'} after the ${i ? 'last one' : 'first email'}`}>{String(n)}</option>)}
+                        </AppleSelect>
+                      </li>
+                    );
+                  })}
+                </ol>
+                {isAdmin && form.days.some((_, i) => !d.templates?.[`followup_${i + 1}`]) && (
+                  <button className="w-full glass-capsule justify-center gap-1.5" style={{ color: '#007AFF' }} onClick={() => { close(); setWriter(true); }}>
+                    <Icon name="sparkles" size={15} />Write the follow-up wording with AI
+                  </button>
+                )}
+              </div>
+            )}
+          </GlassPopover>
+        </section>
+
         {isAdmin && (
-          <div className="flex justify-end gap-2">
-            {changed && <button className="px-4 py-2 rounded-xl text-sm glass-subtle" onClick={() => { dirty.current = false; load(); }}>Undo</button>}
-            <button className="glass-btn px-4 py-2 text-sm" disabled={!changed || !daysOk || busy}
+          <div className="flex justify-end gap-2 pt-1">
+            {changed && <button className="px-4 py-2.5 rounded-full text-sm font-medium" style={{ background: 'rgba(118,118,128,0.12)' }} onClick={() => { dirty.current = false; load(); }}>Undo</button>}
+            <button className="px-5 py-2.5 rounded-full text-sm font-semibold text-white transition disabled:opacity-40" style={{ background: '#007AFF' }}
+              disabled={!changed || !daysOk || busy}
               onClick={() => save({ daily_limit: form.daily_limit, warmup: form.warmup, followup_days: form.days }, 'Settings saved')}>Save settings</button>
           </div>
         )}
@@ -415,13 +553,13 @@ export function Pipeline() {
   };
   return (
     <div className="space-y-3">
-      <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1" role="tablist" aria-label="Pipeline stages">
+      <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 snap-x" style={{ scrollbarWidth: 'none' }} role="tablist" aria-label="Pipeline stages">
         {[['all', 'All', 'grey'], ...STAGES].map(([k, l]) => {
           const n = k === 'all' ? total : counts[k] || 0;
           const on = stage === k;
           return (
             <button key={k} role="tab" aria-selected={on} onClick={() => setStage(k)}
-              className="shrink-0 px-3 py-2 rounded-xl text-sm font-medium inline-flex items-center gap-1.5 transition"
+              className="shrink-0 snap-start px-3.5 py-2 rounded-full text-sm font-medium inline-flex items-center gap-1.5 transition"
               style={on ? { background: '#007AFF', color: '#fff' } : { background: 'rgba(118,118,128,0.12)', color: '#3C3C43' }}>
               {l}<span className="tabular-nums text-[12px] px-1.5 rounded-full" style={{ background: on ? 'rgba(255,255,255,0.25)' : 'rgba(118,118,128,0.16)' }}>{n}</span>
             </button>

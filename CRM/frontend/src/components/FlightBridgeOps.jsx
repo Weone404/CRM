@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../api';
 import { showToast } from '../utils/toast';
 import { countryName } from '../utils/country';
+import AppleSelect from './ui/AppleSelect';
 
 // FlightBridge areas, automation and team, inside the CRM.
 
@@ -87,10 +88,10 @@ function AddArea({ onAdded }) {
     <form className="glass-card p-4" onSubmit={submit}>
       <h3 className="font-bold mb-2">Add an area</h3>
       <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
-        <label>Country<select className={f} value={v.country} onChange={(e) => setV({ ...v, country: e.target.value })}>{Object.keys(COUNTRY).map((c) => <option key={c} value={c}>{cname(c)}</option>)}</select></label>
+        <label>Country<AppleSelect className={f} value={v.country} onChange={(e) => setV({ ...v, country: e.target.value })}>{Object.keys(COUNTRY).map((c) => <option key={c} value={c}>{cname(c)}</option>)}</AppleSelect></label>
         <label>State / province<input className={f} value={v.region} onChange={(e) => setV({ ...v, region: e.target.value })} placeholder="Florida" required /></label>
         <label>Area<input className={f} value={v.name} onChange={(e) => setV({ ...v, name: e.target.value })} placeholder="Lakeland" required /></label>
-        <label>Kind<select className={f} value={v.kind} onChange={(e) => setV({ ...v, kind: e.target.value })}><option value="training_hub">Flying-school hub</option><option value="demand_hub">Student-demand hub</option></select></label>
+        <label>Kind<AppleSelect className={f} value={v.kind} onChange={(e) => setV({ ...v, kind: e.target.value })}><option value="training_hub">Flying-school hub</option><option value="demand_hub">Student-demand hub</option></AppleSelect></label>
         <label>Radius (km)<input className={f} type="number" min={2} max={50} value={v.radius_km} onChange={(e) => setV({ ...v, radius_km: e.target.value })} /></label>
       </div>
       <div className="flex items-center justify-between mt-2 gap-2">
@@ -305,9 +306,9 @@ export function Team({ meId }) {
               <td className="p-1.5"><b>{e.name}</b> <span className="text-xs text-glass-muted">{e.department}</span></td>
               <td className="p-1.5 text-right">
                 {e.department === 'Admin' ? <span className="text-xs text-glass-muted">Admin (CRM)</span> : (
-                  <select className="glass-input px-2 py-1 text-sm" value={e.fb_role || ''} disabled={e.id === meId} onChange={(x) => set(e, x.target.value)}>
+                  <AppleSelect className="glass-input px-2 py-1 text-sm" value={e.fb_role || ''} disabled={e.id === meId} onChange={(x) => set(e, x.target.value)}>
                     <option value="">No access</option><option value="researcher">Research assistant</option><option value="admin">Admin</option>
-                  </select>
+                  </AppleSelect>
                 )}
               </td>
             </tr>

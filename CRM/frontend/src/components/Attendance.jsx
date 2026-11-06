@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, Fragment } from 'react';
 import { API_URL } from '../api';
+import AppleSelect from './ui/AppleSelect';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const thisMonthStr = () => new Date().toISOString().slice(0, 7);
@@ -315,12 +316,12 @@ function DayRow({ row, onChanged }) {
               </div>
               <div>
                 <label className="block text-xs font-medium text-glass-muted mb-1">Override status</label>
-                <select value={override} onChange={(e) => setOverride(e.target.value)}
+                <AppleSelect value={override} onChange={(e) => setOverride(e.target.value)}
                   className="w-full glass-input px-3 py-2 text-sm">
                   {OVERRIDE_OPTIONS.map((o) => (
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
-                </select>
+                </AppleSelect>
               </div>
               <div className="flex gap-2">
                 <button onClick={save} disabled={busy}
@@ -674,12 +675,12 @@ function DevicePersonRow({ person, employees = [], onChanged }) {
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 items-end border-t border-slate-100 pt-4">
           <div>
             <label className="block text-xs font-medium text-glass-muted mb-1">Type</label>
-            <select value={personType}
+            <AppleSelect value={personType}
               onChange={(e) => { setPersonType(e.target.value); setSelected(null); setQuery(''); }}
               className="w-full glass-input px-3 py-2 text-sm">
               <option value="employee">Employee</option>
               <option value="student">Student</option>
-            </select>
+            </AppleSelect>
           </div>
           <div>
             <label className="block text-xs font-medium text-glass-muted mb-1">Search CRM person</label>
