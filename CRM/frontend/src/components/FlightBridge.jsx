@@ -7,7 +7,7 @@ import Icon from './icons';
 import SectionNav from './SectionNav';
 import { countryName } from '../utils/country';
 import { Areas, Automation, Team } from './FlightBridgeOps';
-import { AutoPilot, Pipeline } from './FlightBridgeAutopilot';
+import { AutoPilot, Pipeline, autopilotIssues } from './FlightBridgeAutopilot';
 import { confirmDialog, promptDialog, choiceDialog, alertDialog } from './ui/dialogs';
 import AppleSelect from './ui/AppleSelect';
 
@@ -841,12 +841,15 @@ export default function FlightBridge() {
   const [selected, setSelected] = useState(null);
   const [error, setError] = useState(null);
   const [supp, setSupp] = useState({ scope: 'contact', value: '', reason: 'manual' });
+  const [ap, setAp] = useState(null);
+  useEffect(() => { const t = setInterval(() => call('/send-autopilot').then(setAp).catch(() => {}), 30000); return () => clearInterval(t); }, []);
 
   const load = useCallback(async () => {
     try {
       setError(null);
       const [m, s, t, o] = await Promise.all([call('/me'), call('/summary'), call(`/approvals?status=${statusFilter}`), call('/outbound?limit=50')]);
       setMe(m); setSummary(s); setTasks(t); setOutbound(o);
+      call('/send-autopilot').then(setAp).catch(() => {});
     } catch (e) { setError(e.message); }
   }, [statusFilter]);
   useEffect(() => { load(); }, [load]);
@@ -932,6 +935,17 @@ export default function FlightBridge() {
         </div>
       )}
 
+      {ap?.config?.enabled && view !== 'autopilot' && autopilotIssues(ap).length > 0 && (
+        <button type="button" onClick={() => setView('autopilot')} className="w-full text-left flex items-center gap-3 px-4 py-3 rounded-2xl fb-fade"
+          style={{ background: 'rgba(255,59,48,0.10)', boxShadow: 'inset 0 0 0 0.5px rgba(255,59,48,0.35)' }}>
+          <span className="w-8 h-8 rounded-full grid place-items-center text-white shrink-0" style={{ background: '#FF3B30' }}><Icon name="alert" size={16} /></span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[14px] font-semibold" style={{ color: '#C4261D' }}>Email Auto-Pilot is on but not sending</span>
+            <span className="block text-[12px] text-glass-secondary truncate">{autopilotIssues(ap).map((it) => it.label).join(' · ')}</span>
+          </span>
+          <span className="glass-capsule shrink-0" style={{ color: '#C4261D' }}>Fix</span>
+        </button>
+      )}
       <SectionNav groups={GROUPS} value={view} onChange={(v) => { setView(v); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
 
       {view === 'detector' && <FlightBridgeDetector />}

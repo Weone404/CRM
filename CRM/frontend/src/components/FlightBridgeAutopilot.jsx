@@ -41,11 +41,38 @@ const TONE = {
   grey: { bg: 'rgba(118,118,128,0.12)', fg: '#3C3C43', dot: '#8E8E93' },
 };
 
+// Everything that stops Auto-Pilot from sending right now, each with its fix (and a one-tap action where there is one).
+// Live facts (kill switch, the Mac's DRY_RUN, a pause) come first; the rest from the Mac's latest pre-flight check.
+export function autopilotIssues(d) {
+  if (!d) return [];
+  const cfg = d.config || {};
+  const st = d.state || {};
+  const out = [];
+  if (st.paused_at && !(cfg.resume_at && cfg.resume_at > st.paused_at)) {
+    out.push({ id: 'paused', label: 'Paused for safety', fix: st.pause_reason || 'Check the latest emails, then resume.', action: 'resume' });
+  }
+  if (!d.engine_online) out.push({ id: 'offline', label: 'The Mac Mini is not reporting', fix: `Last heard ${when(d.engine?.at) || 'never'}. Wake the Mac and make sure it's online.` });
+  if (d.engine && !(d.engine.dry_run === false && d.engine.outbound_enabled)) {
+    out.push({ id: 'server', label: 'Sending is switched off on the Mac (DRY_RUN)', fix: 'In ~/FlightBridgeEngine/.env set these two lines, then run install.sh:', code: 'DRY_RUN=false\nOUTBOUND_ENABLED=true' });
+  }
+  if (d.kill_switch_engaged) out.push({ id: 'kill_switch', label: 'The kill switch is on', fix: 'It blocks every email.', action: 'kill' });
+  if (!d.templates?.initial) out.push({ id: 'template_initial', label: 'No first email approved', fix: 'Approve a version in Email templates.' });
+  for (const c of st.preflight?.checks || []) {
+    if (c.status === 'fail' && !['server', 'kill_switch', 'template_initial'].includes(c.id)) out.push({ id: c.id, label: c.label, fix: c.fix || c.detail, detail: c.detail });
+  }
+  return out;
+}
+
 // What the engine reported, in plain words
 function statusLine(d) {
   const cfg = d.config || {};
   const st = d.state || {};
   if (!cfg.enabled) return { tone: 'grey', title: 'Off', text: 'Nothing is sent automatically. Turn it on when the checklist is green.' };
+  const issues = autopilotIssues(d);
+  if (issues.length) {
+    return { tone: 'red', title: `On · not sending: ${issues.length} to fix`, issues,
+      text: 'Auto-Pilot starts by itself the moment these are fixed. Nothing has been sent.' };
+  }
   if (!d.engine_online) return { tone: 'orange', title: 'Waiting for the Mac Mini', text: `The engine hasn't reported since ${when(d.engine?.at) || 'it was installed'}. Wake the Mac or open it.` };
   if (st.paused_at && !(cfg.resume_at && cfg.resume_at > st.paused_at)) return { tone: 'red', title: 'Paused for safety', text: st.pause_reason, paused: true };
   const detail = st.status_detail || '';
@@ -307,10 +334,21 @@ export function AutoPilot({ isAdmin }) {
   const dirty = useRef(false);
 
   const loaded = useRef(false);
+  const seen = useRef([]);
   const load = useCallback(async (quiet) => {
     try {
       const [x, tpls] = await Promise.all([call('/send-autopilot'), call('/templates').catch(() => null)]);
       if (tpls) setTemplates(tpls);
+      // something new went wrong while Auto-Pilot is on: say so at once (the status card lists the fix)
+      const ids = x.config?.enabled ? autopilotIssues(x).map((it) => it.id) : [];
+      if (loaded.current) {
+        const fresh = ids.filter((i) => !seen.current.includes(i));
+        if (fresh.length) {
+          const it = autopilotIssues(x).find((v) => v.id === fresh[0]);
+          showToast(`Auto-Pilot stopped: ${it.label}`, 'error');
+        }
+      }
+      seen.current = ids;
       loaded.current = true;
       setD(x);
       if (!dirty.current) {
@@ -340,13 +378,20 @@ export function AutoPilot({ isAdmin }) {
 
   const toggle = async (on) => {
     if (on) {
-      const fails = (st.preflight?.checks || []).filter((c) => c.status === 'fail').length;
-      const yes = await confirmDialog('Turn on Email Auto-Pilot?', {
-        message: `It will email Eligible schools by itself with your approved templates from ${sel?.address || 'the chosen mailbox'}, up to ${limit} today${cfg.warmup !== false ? ' (warm-up)' : ''}, only in each school's business hours.${fails ? ` ${fails} checklist item(s) must be fixed before the first email goes.` : ''} You can turn it off any time.`,
-        confirmText: 'Turn on' });
+      const issues = autopilotIssues(d);
+      const yes = await confirmDialog(issues.length ? `Turn on? ${issues.length} thing${issues.length > 1 ? 's' : ''} to fix first` : 'Turn on Email Auto-Pilot?', {
+        message: issues.length
+          ? `Nothing will be sent until these are fixed: ${issues.map((it, i) => `${i + 1}) ${it.label}`).join('  ')}. Auto-Pilot then starts by itself.`
+          : `It will email Eligible schools by itself with your approved templates from ${sel?.address || 'the chosen mailbox'}, up to ${limit} today${cfg.warmup !== false ? ' (warm-up)' : ''}, only in each school's business hours. You can turn it off any time.`,
+        confirmText: issues.length ? 'Turn on and wait' : 'Turn on' });
       if (!yes) return;
     }
     save({ enabled: on }, on ? 'Auto-Pilot is on' : 'Auto-Pilot is off');
+  };
+  const releaseKill = async () => {
+    if (!(await confirmDialog('Release the kill switch?', { message: 'Emails can then go out once the Mac also allows sending and Auto-Pilot is on.', confirmText: 'Release', danger: true }))) return;
+    try { await call('/kill-switch', { method: 'POST', body: JSON.stringify({ engaged: false }) }); showToast('Kill switch released', 'success'); load(); }
+    catch (e) { showToast(e.message, 'error'); }
   };
   const setDays = (n) => {
     dirty.current = true;
@@ -375,6 +420,28 @@ export function AutoPilot({ isAdmin }) {
             {line.text && <p className="text-sm text-glass-secondary mt-1.5 break-words">{line.text}</p>}
             {line.paused && isAdmin && (
               <button className="glass-btn px-3 py-1.5 text-sm mt-2 inline-flex items-center gap-1.5" disabled={busy} onClick={() => save({ resume: true }, 'Resumed')}><Icon name="play" size={14} />Resume</button>
+            )}
+            {line.issues && (
+              <ol className="mt-3 liquid-well divide-y fb-fade" style={{ borderColor: 'var(--hairline)' }} aria-label="What to fix">
+                {line.issues.map((it, i) => (
+                  <li key={it.id} className="flex gap-3 px-3.5 py-3">
+                    <span className="w-6 h-6 rounded-full grid place-items-center text-[12px] font-bold text-white shrink-0 mt-0.5" style={{ background: '#FF3B30' }}>{i + 1}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[14px] font-semibold text-glass-primary">{it.label}</div>
+                      <div className="text-[13px] text-glass-secondary break-words">{it.fix}</div>
+                      {it.code && (
+                        <div className="mt-1.5 flex items-start gap-2">
+                          <pre className="text-[12px] px-3 py-2 rounded-xl overflow-x-auto flex-1" style={{ background: 'rgba(0,0,0,0.06)' }}>{it.code}</pre>
+                          <button type="button" className="glass-capsule" style={{ padding: '6px 12px' }}
+                            onClick={() => navigator.clipboard?.writeText(it.code).then(() => showToast('Copied', 'success'), () => showToast('Could not copy', 'error'))}>Copy</button>
+                        </div>
+                      )}
+                    </div>
+                    {isAdmin && it.action === 'kill' && <button type="button" className="glass-capsule glass-capsule-blue shrink-0 self-center" disabled={busy} onClick={releaseKill}>Release</button>}
+                    {isAdmin && it.action === 'resume' && <button type="button" className="glass-capsule glass-capsule-blue shrink-0 self-center" disabled={busy} onClick={() => save({ resume: true }, 'Resumed')}>Resume</button>}
+                  </li>
+                ))}
+              </ol>
             )}
           </div>
           <Switch on={!!cfg.enabled} disabled={!isAdmin || busy} onChange={toggle} label="Email Auto-Pilot" />

@@ -21,6 +21,7 @@ import logging.handlers
 import os
 import socket
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,6 +66,23 @@ def heartbeat(s, engine_off: bool) -> None:
                         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""", (json.dumps(status),))
 
 
+def pulse(s, secrets, autosend_step) -> None:
+    """Runs beside the main loop, so a long research cycle never makes the Mac look offline or delays Email Auto-Pilot:
+    every 30 seconds it reports to the CRM (engine_status) and takes one Auto-Pilot step (at most one email)."""
+    while True:
+        try:
+            engine_off = os.environ.get("FLIGHTBRIDGE_ENGINE", "").strip().lower() == "off"
+            heartbeat(s, engine_off)
+            enabled = not engine_off and bool(secrets.settings(s.database_url).get("engine_in_crm", True))
+            if enabled and autosend_step is not None:
+                out = autosend_step(s)
+                if out.get("state") not in ("off", "gap", "done_today", "waiting_hours", "idle", "waiting", "blocked", "paused"):
+                    log.info("auto-pilot: %s", {k: out.get(k) for k in ("state", "kind", "detail")})
+        except Exception:
+            log.exception("heartbeat / auto-pilot step failed")
+        time.sleep(POLL_SECONDS)
+
+
 def main() -> None:
     load_env(HOME / ".env")
     os.environ.setdefault("FB_RUNNER", "mac-mini")
@@ -87,19 +105,12 @@ def main() -> None:
         time.sleep(300)                 # launchd restarts the job; don't spin
         sys.exit(2)
     log.info("FlightBridge engine started on %s (dry_run=%s, outbound_enabled=%s)", socket.gethostname(), s.dry_run, s.outbound_enabled)
+    threading.Thread(target=pulse, args=(s, secrets, autosend_step), name="pulse", daemon=True).start()
     last_cycle = 0.0
     while True:
         try:
             engine_off = os.environ.get("FLIGHTBRIDGE_ENGINE", "").strip().lower() == "off"
-            heartbeat(s, engine_off)
             enabled = not engine_off and bool(secrets.settings(s.database_url).get("engine_in_crm", True))
-            if enabled and autosend_step is not None:
-                try:
-                    out = autosend_step(s)
-                    if out.get("state") not in ("off", "gap", "done_today", "waiting_hours", "idle", "waiting", "blocked", "paused"):
-                        log.info("auto-pilot: %s", {k: out.get(k) for k in ("state", "kind", "detail")})
-                except Exception:
-                    log.exception("auto-pilot step failed")
             if enabled:
                 if time.time() - last_cycle >= CYCLE_SECONDS:
                     out = run_once(s, trigger="schedule")
