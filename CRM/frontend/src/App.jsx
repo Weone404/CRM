@@ -31,6 +31,7 @@ const Attendance = lazy(() => import('./components/Attendance'));
 const FlightBridge = lazy(() => import('./components/FlightBridge'));
 const AIIntegrations = lazy(() => import('./components/AIIntegrations'));
 const Connections = lazy(() => import('./components/Connections'));
+const Amazon = lazy(() => import('./components/Amazon'));
 
 // Tabs the birthday popup is allowed to appear over: the landing tab plus the
 // two people-facing views. Anywhere else it would be an interruption.
@@ -77,6 +78,16 @@ export default function App() {
     return () => { live = false; };
   }, [employee, department]);
   const canAccessFlightBridge = department === 'Admin' || !!fbRole;
+  // Amazon section (Supabase backend only): Admin, plus people Admin grants in Amazon > Settings.
+  const [amzAccess, setAmzAccess] = useState(null);
+  useEffect(() => {
+    if (!employee || !USE_SUPABASE) { setAmzAccess(null); return undefined; }
+    let live = true;
+    import('./backend/supabaseClient').then(({ supabase }) => supabase?.rpc('api_amz_access'))
+      .then((r) => { if (live) setAmzAccess(r && !r.error ? r.data : null); }).catch(() => {});
+    return () => { live = false; };
+  }, [employee]);
+  const canAccessAmazon = USE_SUPABASE && !!amzAccess?.can_view;
   const canAccessLeads = department === 'Admin' || department === 'Sales';
   const canAccessDirectory = department === 'Admin';
   const canAccessAllTasks = department === 'Admin';
@@ -196,6 +207,7 @@ export default function App() {
     canAccessDirectory && { id: 'team', label: 'Team', icon: 'team' },
     department === 'Admin' && { id: 'policy', label: 'Policy Docs', icon: 'policy' },
     canAccessFlightBridge && { id: 'partnerships', label: 'FlightBridge AI', icon: 'globe' },
+    canAccessAmazon && { id: 'amazon', label: 'Amazon', icon: 'cart' },
     USE_SUPABASE && department === 'Admin' && { id: 'settings', label: 'Settings', icon: 'settings' },
     isEmployeeSession && { id: 'profile', label: 'My Profile', icon: 'profile' },
     isEmployeeSession && { id: 'leave', label: 'My Leave', icon: 'calendar' },
@@ -350,6 +362,7 @@ export default function App() {
           {activeTab === 'team' && canAccessDirectory && <EmployeeDirectory />}
           {activeTab === 'policy' && department === 'Admin' && <PolicyDocs />}
           {activeTab === 'partnerships' && canAccessFlightBridge && <FlightBridge />}
+          {activeTab === 'amazon' && canAccessAmazon && <Amazon access={amzAccess} />}
           {activeTab === 'settings' && USE_SUPABASE && department === 'Admin' && <><AIIntegrations /><Connections /></>}
           {activeTab === 'profile' && isEmployeeSession && <MyProfile />}
           {activeTab === 'leave' && isEmployeeSession && <LeaveCalendar employeeId={employee.id} />}

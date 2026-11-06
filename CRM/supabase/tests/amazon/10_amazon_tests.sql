@@ -1,0 +1,285 @@
+-- Amazon module SQL tests. Run on the local harness after 00_supabase_stub.sql, 072 and 073:
+--   psql -v ON_ERROR_STOP=1 -f 10_amazon_tests.sql
+-- Each check prints "PASS <name>"; the first failure stops the run with "FAIL <name>".
+\set QUIET on
+SET client_min_messages = warning;
+
+CREATE OR REPLACE FUNCTION pg_temp.ok(cond boolean, name text) RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  IF cond IS NOT TRUE THEN RAISE EXCEPTION 'FAIL %', name; END IF;
+  RAISE NOTICE 'PASS %', name;
+END $$;
+-- Expect an error whose message matches p_like when running p_sql as the current role.
+CREATE OR REPLACE FUNCTION pg_temp.fails(p_sql text, p_like text, name text) RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  BEGIN EXECUTE p_sql;
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM ILIKE p_like THEN RAISE NOTICE 'PASS %', name; RETURN; END IF;
+    RAISE EXCEPTION 'FAIL % (wrong error: %)', name, SQLERRM;
+  END;
+  RAISE EXCEPTION 'FAIL % (no error)', name;
+END $$;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pg_temp TO authenticated, anon, service_role;
+SET client_min_messages = notice;
+
+-- People: an admin, a sales user without access, an approver without approve right, an approver with it.
+INSERT INTO public.employee (id, name, department, auth_user_id) VALUES
+  ('00000000-0000-0000-0000-00000000000a', 'Admin', 'Admin', '10000000-0000-0000-0000-00000000000a'),
+  ('00000000-0000-0000-0000-00000000000b', 'Sales', 'Sales', '10000000-0000-0000-0000-00000000000b'),
+  ('00000000-0000-0000-0000-00000000000c', 'Viewer', 'Sales', '10000000-0000-0000-0000-00000000000c'),
+  ('00000000-0000-0000-0000-00000000000d', 'Approver', 'IT', '10000000-0000-0000-0000-00000000000d')
+ON CONFLICT DO NOTHING;
+INSERT INTO public.amazon_approvers (employee_id, can_approve) VALUES
+  ('00000000-0000-0000-0000-00000000000c', false), ('00000000-0000-0000-0000-00000000000d', true) ON CONFLICT DO NOTHING;
+INSERT INTO public.amazon_product_facts (asin, facts) VALUES ('B0HJ4XXK37', '["160 lined pages", "PU leather cover", "built-in pen holder"]')
+ON CONFLICT DO NOTHING;
+
+-- ---------------------------------------------------------------- guards (as the admin)
+SET ROLE authenticated; SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+
+SELECT pg_temp.ok((public.api_amz_check('price', '69-E0DG-L8W8', '{"price": 298}')->>'ok')::boolean = false
+  AND public.api_amz_check('price', '69-E0DG-L8W8', '{"price": 298}')->'blockers'->0->>'code' = 'price_floor', 'X01a price 298 blocked (floor 299)');
+SELECT pg_temp.ok((public.api_amz_check('price', '69-E0DG-L8W8', '{"price": 299}')->>'ok')::boolean, 'X01b price 299 allowed');
+SELECT pg_temp.ok(jsonb_array_length(public.api_amz_check('price', '69-E0DG-L8W8', '{"price": 360}')->'confirms') = 0,
+  'X01c price 449 -> 360 (-19.8%) needs no second confirm');
+SELECT pg_temp.ok(public.api_amz_check('price', '69-E0DG-L8W8', '{"price": 999}')->'confirms'->0->>'code' = 'price_change_confirm',
+  'X01d price 449 -> 999 (+122%) needs a second confirm');
+SELECT pg_temp.ok(public.api_amz_check('price', '69-E0DG-L8W8', '{"price": 499, "mrp": 450}')->'blockers'->0->>'code' = 'mrp_gte_price',
+  'X02 MRP below price blocked');
+
+SELECT pg_temp.ok(EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_check('listing', '69-E0DG-L8W8',
+  jsonb_build_object('title', repeat('a', 70) || ' bcdef'))->'blockers') b WHERE b->>'code' = 'title_max_chars'), 'G01 76-character title blocked');
+SELECT pg_temp.ok(NOT EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_check('listing', '69-E0DG-L8W8',
+  jsonb_build_object('title', repeat('a', 70) || ' bcde'))->'blockers') b WHERE b->>'code' = 'title_max_chars'), 'G02 75-character title passes length');
+SELECT pg_temp.ok(EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_check('listing', '69-E0DG-L8W8',
+  '{"title": "Nitaniya 2027 Diary A5 Diary for Office, Diaries Gift"}')->'blockers') b WHERE b->>'code' = 'title_word_repeat'),
+  'G03 diary x3 (plural counts) blocked');
+SELECT pg_temp.ok(EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_check('listing', '69-E0DG-L8W8',
+  '{"title": "Best 2027 Diary A5 for Office"}')->'blockers') b WHERE b->>'code' = 'title_promo_words'), 'G04 promo word "Best" blocked');
+SELECT pg_temp.ok(NOT EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_check('listing', '69-E0DG-L8W8',
+  '{"title": "Nitaniya Bestow Diary A5"}')->'blockers') b WHERE b->>'code' = 'title_promo_words'), 'G05 "Bestow" is not the promo word "best"');
+SELECT pg_temp.ok(EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_check('listing', '69-E0DG-L8W8',
+  '{"title": "2027 Diary A5!"}')->'blockers') b WHERE b->>'code' = 'title_special_chars'), 'G06 "!" blocked');
+SELECT pg_temp.ok((public.api_amz_check('listing', '69-E0DG-L8W8', jsonb_build_object('item_highlights', repeat('x', 126)))->>'ok')::boolean = false,
+  'G07 Item Highlights 126 chars blocked');
+-- 83 Devanagari letters = 249 bytes (passes); 84 = 252 bytes (blocked) although only 84 characters
+SELECT pg_temp.ok((public.api_amz_check('listing', '69-E0DG-L8W8', jsonb_build_object('backend_terms', repeat('ड', 83)))->'blockers')
+  @> '[]' AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_check('listing', '69-E0DG-L8W8',
+  jsonb_build_object('backend_terms', repeat('ड', 83)))->'blockers') b WHERE b->>'code' = 'backend_terms_bytes'), 'X19a 249 bytes of Hindi passes');
+SELECT pg_temp.ok(EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_check('listing', '69-E0DG-L8W8',
+  jsonb_build_object('backend_terms', repeat('ड', 84)))->'blockers') b WHERE b->>'code' = 'backend_terms_bytes'), 'X19b 84 Hindi letters = 252 bytes blocked');
+SELECT pg_temp.ok(EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_check('listing', '69-E0DG-L8W8',
+  '{"backend_terms": "diary 📒 planner"}')->'blockers') b WHERE b->>'code' = 'backend_no_emoji'), 'X19c emoji blocked');
+SELECT pg_temp.ok(EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_check('listing', '69-E0DG-L8W8',
+  '{"main_image": {"width": 800, "height": 800, "white_bg": true, "has_text": false}}')->'blockers') b WHERE b->>'code' = 'main_image'),
+  'G08 800 px main image blocked');
+SELECT pg_temp.ok(EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_check('listing', '69-E0DG-L8W8',
+  '{"main_image": {"width": 2000, "height": 2000, "white_bg": false, "has_text": false}}')->'blockers') b WHERE b->>'code' = 'main_image'),
+  'G09 non-white main image blocked');
+SELECT pg_temp.ok(EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_check('listing', '69-E0DG-L8W8',
+  '{"claims": ["waterproof"]}')->'blockers') b WHERE b->>'code' = 'claim_traceability'), 'X03a invented claim "waterproof" blocked');
+SELECT pg_temp.ok(NOT EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_check('listing', '69-E0DG-L8W8',
+  '{"claims": ["160 Lined Pages"]}')->'blockers') b WHERE b->>'code' = 'claim_traceability'), 'X03b claim from the Product Brief allowed');
+SELECT pg_temp.ok(public.api_amz_check('ads_budget', NULL, '{"daily_budget_total": 501}')->'blockers'->0->>'code' = 'ads_daily_budget'
+  AND public.api_amz_check('ads_budget', NULL, '{"daily_budget_total": 49}')->'blockers'->0->>'code' = 'ads_daily_budget'
+  AND (public.api_amz_check('ads_budget', NULL, '{"daily_budget_total": 500}')->>'ok')::boolean, 'G10 ads budget limited to 50..500');
+SELECT pg_temp.ok(public.api_amz_check('listing', '42-PAH6-ZOOW', '{"title": "NITANIYA Customised Leather Diary 2027 A5 with Strap"}')->'confirms'->0->>'code'
+  = 'parent_edit_confirm', 'X27 parent edit needs a second confirm');
+SELECT pg_temp.ok(EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_check('create', 'NEW-SKU-1',
+  '{"title": "Nitaniya 2027 Diary A5"}')->'blockers') b WHERE b->>'code' = 'legal_fields'), 'G11 new listing without legal fields blocked');
+
+-- ---------------------------------------------------------------- queue + approval
+SELECT pg_temp.fails($$SELECT public.api_amz_draft_create('price', '69-E0DG-L8W8', '{}')$$, '%Nothing to change%', 'Q01 empty draft refused');
+DO $$
+DECLARE d jsonb;
+BEGIN
+  d := public.api_amz_draft_create('price', '69-E0DG-L8W8', '{"price": 298}', 'too low');
+  PERFORM pg_temp.ok(d->>'status' = 'pending' AND (d->'guard_result'->>'ok')::boolean = false, 'Q02 blocked draft stored as pending with blockers');
+  PERFORM pg_temp.fails(format($f$SELECT public.api_amz_approve(%L)$f$, d->>'id'), '%blockers%', 'Q03 blocked draft cannot be approved');
+  PERFORM pg_temp.fails(format($f$UPDATE public.amazon_change_queue SET status = 'approved' WHERE id = %L$f$, d->>'id'),
+    '%permission denied%', 'Q04 browser cannot write the queue table directly');
+END $$;
+RESET ROLE;
+DO $$
+DECLARE cid uuid;
+BEGIN
+  -- even the table owner (Claude via SQL) cannot approve a blocked change or skip a status
+  INSERT INTO public.amazon_change_queue (kind, sku, after, created_by_type, status)
+  VALUES ('price', '69-E0DG-L8W8', '{"price": 250}', 'claude', 'approved') RETURNING amazon_change_queue.id INTO cid;
+  PERFORM pg_temp.ok((SELECT status FROM public.amazon_change_queue q WHERE q.id = cid) = 'pending', 'Q05 insert with status approved is forced to pending');
+  PERFORM pg_temp.fails(format($f$UPDATE public.amazon_change_queue SET status = 'approved' WHERE id = %L$f$, cid), '%blockers%',
+    'Q06 owner cannot approve a blocked change');
+  PERFORM pg_temp.fails(format($f$UPDATE public.amazon_change_queue SET status = 'live' WHERE id = %L$f$, cid), '%cannot go from pending to live%',
+    'Q07 status cannot skip from pending to live');
+END $$;
+SET ROLE authenticated; SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+
+DO $$
+DECLARE d jsonb; a jsonb; c jsonb;
+BEGIN
+  d := public.api_amz_draft_create('price', '69-E0DG-L8W8', '{"price": 999}', 'big move');
+  PERFORM pg_temp.fails(format($f$SELECT public.api_amz_approve(%L)$f$, d->>'id'), '%second confirmation%', 'X01e +122% price needs second confirm');
+  a := public.api_amz_approve((d->>'id')::uuid, true);
+  PERFORM pg_temp.ok(a->>'status' = 'approved' AND a->>'second_confirmed_by' IS NOT NULL, 'X01f approved after second confirm');
+  PERFORM pg_temp.fails(format($f$SELECT public.api_amz_approve(%L, true)$f$, d->>'id'), '%Already approved%', 'X06a second approve refused');
+  RESET ROLE; SET ROLE service_role;
+  c := public.svc_amz_claim((d->>'id')::uuid);
+  PERFORM pg_temp.ok(c IS NOT NULL AND c->>'status' = 'executing', 'X06b first claim executes');
+  PERFORM pg_temp.ok(public.svc_amz_claim((d->>'id')::uuid) IS NULL, 'X06c second claim gets nothing (executes once)');
+  PERFORM public.svc_amz_finish((d->>'id')::uuid, 'live', '{"status":"VALID"}', NULL, false);
+  PERFORM pg_temp.ok((SELECT price FROM public.amazon_listings WHERE sku = '69-E0DG-L8W8') = 999
+    AND (SELECT version FROM public.amazon_listings WHERE sku = '69-E0DG-L8W8') = 2
+    AND EXISTS (SELECT 1 FROM public.amazon_listing_versions WHERE sku = '69-E0DG-L8W8' AND source = 'change'),
+    'F05 live change updates the listing and records version 2');
+  RESET ROLE; SET ROLE authenticated; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  -- F07: roll back the live change -> a new pending change restoring 449
+  c := public.api_amz_rollback((d->>'id')::uuid);
+  PERFORM pg_temp.ok(c->>'kind' = 'rollback' AND (c->'after'->>'price')::numeric = 449 AND c->>'status' = 'pending', 'F07 rollback drafted with old price');
+END $$;
+
+-- X05 stale: a draft made at version N, listing moves to N+1 -> approve refused and draft marked stale
+DO $$
+DECLARE d jsonb;
+BEGIN
+  d := public.api_amz_draft_create('listing', 'ZL-HFFY-RKIN', '{"title": "Nitaniya 2027 Diary with Magnetic Leather Cover"}', 'title');
+  RESET ROLE;
+  UPDATE public.amazon_listings SET version = version + 1 WHERE sku = 'ZL-HFFY-RKIN';
+  SET ROLE authenticated; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  PERFORM pg_temp.ok(public.api_amz_approve((d->>'id')::uuid)->>'status' = 'stale', 'X05a out-of-date draft is not approved');
+  PERFORM pg_temp.ok(EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_queue('stale')) x WHERE x->>'id' = d->>'id'), 'X05b and is kept as Stale');
+END $$;
+
+-- F06 reject needs a reason
+DO $$
+DECLARE d jsonb;
+BEGIN
+  d := public.api_amz_draft_create('listing', 'LP-W67L-0Y3I', '{"title": "Nitaniya 2027 B5 Diary for Men and Women"}', 'title');
+  PERFORM pg_temp.fails(format($f$SELECT public.api_amz_reject(%L, '')$f$, d->>'id'), '%reason%', 'F06a reject without reason refused');
+  PERFORM pg_temp.ok(public.api_amz_reject((d->>'id')::uuid, 'Keep B5 first')->>'status' = 'rejected', 'F06b reject with reason stored');
+END $$;
+
+-- X12 batch cap 20
+DO $$
+DECLARE b uuid := gen_random_uuid(); i int; d jsonb;
+BEGIN
+  FOR i IN 1..20 LOOP PERFORM public.api_amz_draft_create('price', 'LP-W67L-0Y3I', '{"price": 400}', 'b', b); END LOOP;
+  d := public.api_amz_draft_create('price', 'LP-W67L-0Y3I', '{"price": 400}', 'b', b);
+  PERFORM pg_temp.ok(d->'guard_result'->'blockers'->0->>'code' = 'bulk_batch_max', 'X12a 21st change in a batch blocked');
+  PERFORM pg_temp.ok(public.api_amz_cancel_batch(b) = 21, 'X12b cancel stops the whole batch');
+END $$;
+
+-- ---------------------------------------------------------------- access
+SELECT pg_temp.ok((public.api_amz_access()->>'is_admin')::boolean, 'A01 admin has access');
+SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000b', false);
+SELECT pg_temp.fails($$SELECT public.api_amz_settings()$$, '%Only Admin%', 'F15a non-admin cannot read Settings');
+SELECT pg_temp.fails($$SELECT public.api_amz_settings_save('AMZ_SELLER_ID', 'A1B2C3D4E5')$$, '%Only Admin%', 'F15b non-admin cannot save Settings');
+SELECT pg_temp.fails($$SELECT public.api_amz_listings()$$, '%access to the Amazon section%', 'A02 sales user without grant cannot see Amazon');
+SELECT pg_temp.fails($$SELECT * FROM public.amazon_listings$$, '%permission denied%', 'A03 tables are not readable directly');
+SELECT pg_temp.fails($$SELECT * FROM vault.decrypted_secrets$$, '%permission denied%', 'A04 vault not readable');
+SELECT pg_temp.fails($$SELECT public.svc_amz_secrets()$$, '%permission denied%', 'A05 service functions not callable from the browser');
+SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000c', false);
+SELECT pg_temp.ok(jsonb_array_length(public.api_amz_listings()) = 20, 'A06 granted viewer sees 20 listings');
+DO $$
+DECLARE d jsonb;
+BEGIN
+  d := public.api_amz_draft_create('listing', 'LP-W67L-0Y3I', '{"title": "Nitaniya 2027 B5 Diary for Office"}', 'viewer draft');
+  PERFORM pg_temp.fails(format($f$SELECT public.api_amz_approve(%L)$f$, d->>'id'), '%not allowed to approve%', 'A07 viewer without approve right cannot approve');
+  PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000d', false);
+  PERFORM pg_temp.ok(public.api_amz_approve((d->>'id')::uuid)->>'status' = 'approved', 'A08 granted approver can approve');
+END $$;
+RESET ROLE; SET ROLE anon;
+SELECT pg_temp.fails($$SELECT public.api_amz_overview()$$, '%permission denied%', 'A09 anon cannot call the API');
+RESET ROLE;
+
+-- ---------------------------------------------------------------- settings
+SET ROLE authenticated; SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+SELECT pg_temp.fails($$SELECT public.api_amz_settings_save('AMZ_LWA_CLIENT_ID', 'abc')$$, '%amzn1.application-oa2-client%', 'S01 client ID format checked');
+SELECT pg_temp.fails($$SELECT public.api_amz_settings_save('AMZ_REFRESH_TOKEN', 'abc')$$, '%Atzr|%', 'S02 refresh token format checked');
+SELECT pg_temp.fails($$SELECT public.api_amz_settings_save('AMZ_MARKETPLACE_ID', 'ATVPDKIKX0DER')$$, '%locked to India%', 'X10a wrong marketplace refused');
+SELECT pg_temp.fails($$SELECT public.api_amz_settings_save('AMZ_REGION', 'na')$$, '%locked to eu%', 'X10b wrong region refused');
+SELECT pg_temp.fails($$SELECT public.api_amz_settings_save('AMZ_LWA_CLIENT_SECRET', 'abc def')$$, '%spaces%', 'S03 pasted value with spaces refused');
+SELECT pg_temp.ok(public.api_amz_settings_save('AMZ_REFRESH_TOKEN', 'Atzr|TESTVALUE1234WXYZ') = '{"saved": true, "last4": "WXYZ"}', 'S04 save returns last 4 only');
+SELECT pg_temp.ok(public.api_amz_settings()->'AMZ_REFRESH_TOKEN' ? 'last4'
+  AND public.api_amz_settings()::text NOT LIKE '%TESTVALUE%', 'F01 settings never return the full value');
+SELECT pg_temp.ok(NOT EXISTS (SELECT 1 FROM public.api_amz_activity(50) a WHERE a::text LIKE '%TESTVALUE%'), 'X11 activity log has no secret value');
+SELECT public.api_amz_settings_save('AMZ_SECRET_ROTATED_ON', to_char(current_date - 160, 'YYYY-MM-DD'));
+SELECT pg_temp.ok((public.api_amz_overview()->>'rotation_alert')::int = 30, 'F14 secret 20 days from expiry -> 30-day alert');
+SELECT pg_temp.fails($$SELECT public.api_amz_settings_save('AMZ_SECRET_ROTATED_ON', '2999-01-01')$$, '%future%', 'S05 future rotation date refused');
+RESET ROLE;
+
+-- ---------------------------------------------------------------- sync side
+SET ROLE service_role;
+SELECT pg_temp.ok(public.svc_amz_run_begin('listings') IS NOT NULL, 'X23a first run takes the lock');
+SELECT pg_temp.ok(public.svc_amz_run_begin('listings') IS NOT NULL, 'X23b same holder renews (one runner)');
+RESET ROLE;
+UPDATE public.job_lease SET holder = 'other' WHERE name = 'amazon_listings';
+SET ROLE service_role;
+SELECT pg_temp.ok(public.svc_amz_run_begin('listings') IS NULL, 'X23c a second runner is skipped while the lock is held');
+-- X16 drift: Amazon returns a different title than the one we approved
+SELECT public.svc_amz_upsert_listings('[{"sku": "TW-U7H6-VB1W", "asin": "B0H9XT2HF5", "title": "A5 Diary 2027 Hardcover"}]');
+SELECT pg_temp.ok(EXISTS (SELECT 1 FROM public.amazon_audit_findings WHERE sku = 'TW-U7H6-VB1W' AND rule_code = 'title_drift' AND status = 'open'),
+  'X16 Amazon rewriting a title is flagged');
+-- X14 suppressed after change -> rollback draft
+DO $$
+DECLARE cid uuid; r jsonb;
+BEGIN
+  RESET ROLE;
+  INSERT INTO public.amazon_change_queue (kind, sku, asin, after, before, base_version, created_by_type)
+  SELECT 'listing', 'R2-LK5A-P7RP', 'B0HDT5YVLV', '{"description": "Two hardcover 2027 diaries"}', crm_private.amz_snapshot('R2-LK5A-P7RP'), version, 'claude'
+    FROM public.amazon_listings WHERE sku = 'R2-LK5A-P7RP' RETURNING amazon_change_queue.id INTO cid;
+  UPDATE public.amazon_change_queue SET status = 'approved', approved_at = now() WHERE amazon_change_queue.id = cid;
+  SET ROLE service_role;
+  PERFORM public.svc_amz_claim(cid);
+  r := public.svc_amz_finish(cid, 'live', NULL, NULL, true);
+  PERFORM pg_temp.ok(r->>'rollback_draft' IS NOT NULL AND EXISTS (SELECT 1 FROM public.amazon_audit_findings
+    WHERE sku = 'R2-LK5A-P7RP' AND rule_code = 'suppressed_after_change'), 'X14 suppression after a change opens a rollback draft');
+END $$;
+RESET ROLE;
+
+-- Audit is idempotent and closes fixed findings
+CREATE TEMP TABLE au AS SELECT 0 AS n;
+SELECT crm_private.amz_audit_all();
+UPDATE au SET n = (SELECT count(*) FROM public.amazon_audit_findings WHERE status = 'open');
+SELECT crm_private.amz_audit_all();
+SELECT pg_temp.ok((SELECT count(*) FROM public.amazon_audit_findings WHERE status = 'open') = (SELECT n FROM au)
+  AND NOT EXISTS (SELECT 1 FROM public.amazon_audit_findings WHERE status = 'open'
+                  GROUP BY coalesce(sku, ''), coalesce(asin, ''), rule_code HAVING count(*) > 1),
+  'AU1 audit run twice: same open findings, no duplicates');
+UPDATE public.amazon_listings SET title = 'Nitaniya 2027 Diary Leather Cover with Magnetic Closure' WHERE sku = '69-E0DG-L8W8';
+SELECT crm_private.amz_audit_all();
+SELECT pg_temp.ok(EXISTS (SELECT 1 FROM public.amazon_audit_findings WHERE sku = '69-E0DG-L8W8' AND rule_code = 'title_max_chars' AND status = 'fixed'),
+  'AU2 fixed title closes its finding');
+INSERT INTO public.amazon_health_daily (day, odr, cancel_rate, late_ship_rate, valid_tracking_rate) VALUES (current_date, 0.8, 0.2, 0.5, 99);
+SELECT crm_private.amz_audit_all();
+SELECT pg_temp.ok(EXISTS (SELECT 1 FROM public.amazon_audit_findings WHERE rule_code = 'health_odr' AND status = 'open'), 'F13 ODR 0.8% crosses the 0.7% early warning');
+
+
+-- Needs-manual and resubmit
+SET ROLE authenticated; SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+DO $$
+DECLARE d jsonb;
+BEGIN
+  d := public.api_amz_draft_create('listing', 'L4-T8EF-CKAP', '{"item_highlights": "A5, 2027 dated, name on cover"}', 'highlights');
+  PERFORM public.api_amz_approve((d->>'id')::uuid);
+  RESET ROLE; SET ROLE service_role;
+  PERFORM public.svc_amz_claim((d->>'id')::uuid);
+  PERFORM public.svc_amz_finish((d->>'id')::uuid, 'needs_manual', NULL, 'Set by hand: item_highlights');
+  RESET ROLE; SET ROLE authenticated; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  PERFORM pg_temp.ok(public.api_amz_manual_done((d->>'id')::uuid)->>'status' = 'live', 'M01 manual step confirmed -> live');
+  PERFORM pg_temp.ok((SELECT x->>'item_highlights' FROM jsonb_array_elements(public.api_amz_listings()) x WHERE x->>'sku' = 'L4-T8EF-CKAP')
+    = 'A5, 2027 dated, name on cover', 'M02 confirmed manual change written to the listing');
+  d := public.api_amz_draft_create('price', 'L4-T8EF-CKAP', '{"price": 379}', 'p');
+  PERFORM public.api_amz_approve((d->>'id')::uuid);
+  RESET ROLE; SET ROLE service_role;
+  PERFORM public.svc_amz_claim((d->>'id')::uuid);
+  PERFORM public.svc_amz_finish((d->>'id')::uuid, 'failed', NULL, 'preview error');
+  RESET ROLE;
+  UPDATE public.amazon_rules SET value = '{"min": 380}' WHERE code = 'price_floor';
+  SET ROLE authenticated; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  d := public.api_amz_resubmit((d->>'id')::uuid);
+  PERFORM pg_temp.ok(d->>'status' = 'pending' AND d->'guard_result'->'blockers'->0->>'code' = 'price_floor', 'M03 resubmitted change is re-checked against today''s rules');
+  RESET ROLE; UPDATE public.amazon_rules SET value = '{"min": 299}' WHERE code = 'price_floor';
+END $$;
+RESET ROLE;
+
+\echo ALL SQL TESTS PASSED
