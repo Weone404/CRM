@@ -472,3 +472,15 @@ input[type="datetime-local"].glass-input { color-scheme: light; }
     radial-gradient(1px 1px at 40% 8%, rgba(255,255,255,.45), transparent 60%);
   background-size: 340px 340px;
 }
+
+/* FlightBridge school window: fade-in backdrop, window rises in; round icon buttons */
+@keyframes fb-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fb-pop-in { from { opacity: 0; transform: translateY(24px) scale(0.98); } to { opacity: 1; transform: none; } }
+.fb-fade { animation: fb-fade-in 160ms ease-out; }
+.fb-pop { animation: fb-pop-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.fb-iconbtn { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 9999px;
+  background: rgba(118, 118, 128, 0.12); color: rgba(60, 60, 67, 0.85); transition: background 120ms; }
+.fb-iconbtn:hover:not(:disabled) { background: rgba(118, 118, 128, 0.22); }
+.fb-iconbtn:disabled { opacity: 0.35; cursor: default; }
+.fb-iconbtn:focus-visible { outline: 2px solid #007AFF; outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .fb-fade, .fb-pop { animation: none; } }
