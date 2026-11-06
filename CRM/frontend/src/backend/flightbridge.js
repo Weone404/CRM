@@ -73,6 +73,7 @@ export const FLIGHTBRIDGE_ROUTES = [
   ['POST', r('/templates'), ({ body }) => rpc('api_fb_template_save', { p_data: body || {} })],
   ['GET', r('/templates/brief'), () => rpc('api_fb_template_brief')],
   ['POST', r('/templates/generate'), ({ body }) => edge('/templates/generate', body)],
+  ['POST', r('/templates/followups'), () => edge('/templates/followups', {})],
   ['POST', r(`/templates/${ID}/approve`), ({ params }) => rpc('api_fb_template_approve', { p_id: dec(params[0]) })],
 
   ['GET', r('/inbox'), ({ query }) => withLimit(query, 'api_fb_inbox', 'p_limit', 100,
@@ -95,6 +96,11 @@ export const FLIGHTBRIDGE_ROUTES = [
   ['POST', r(`/schools/${ID}/eligibility`), ({ params, body }) => rpc('api_fb_eligibility', { p_id: dec(params[0]), p_data: body || {} })],
   ['GET', r('/regions'), () => rpc('api_fb_regions')],
 
+  ['GET', r('/send-autopilot'), () => rpc('api_fb_send_autopilot')],
+  ['POST', r('/send-autopilot'), ({ body }) => rpc('api_fb_send_autopilot_set', { p_data: body || {} })],
+  ['GET', r('/pipeline'), ({ query }) => rpc('api_fb_pipeline', { p_data: Object.fromEntries(['stage', 'q', 'limit']
+    .map((k) => [k, query?.get(k)]).filter(([, v]) => v !== null && v !== undefined && v !== '')) })],
+  ['POST', r('/pipeline/move'), ({ body }) => rpc('api_fb_pipeline_move', { p_data: body || {} })],
   ['GET', r('/automation'), () => rpc('api_fb_automation')],
   ['POST', r('/automation/run'), ({ body }) => rpc('api_fb_run', { p_data: body || {} })],
   ['POST', r('/automation/settings'), ({ body }) => rpc('api_fb_autopilot_set', { p_data: body || {} })],

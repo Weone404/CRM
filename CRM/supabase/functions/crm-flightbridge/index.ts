@@ -5,7 +5,12 @@
 //                                                     (hiox_mail_password: IMAP + SMTP login to the HIOX India mailbox)
 //   POST /crm-flightbridge/areas                      add an area by name; Google finds the coordinates (admin)
 //   POST /crm-flightbridge/templates/generate         "Write with AI": 3-5 checked email-template versions (admin)
+//   POST /crm-flightbridge/templates/followups        Auto-Pilot: write the follow-up sequence (one per follow-up day)
+//                                                     for the approved first email; nothing is saved here (admin)
 //   POST /crm-flightbridge/webhooks/hostinger         Hostinger mailbox webhook (Authorization: Bearer <secret>)
+//   POST|GET /crm-flightbridge/u/FB-XXXXXXXXXXXX      one-click unsubscribe from the List-Unsubscribe header of each
+//                                                     outreach email (RFC 8058). The link is only in the header, never
+//                                                     in the body, so link scanners don't trigger it.
 //
 // Edge Function secrets:
 //   FB_SECRETS_KEY                 the same value the engine uses (Render: FB_SECRETS_KEY, or SECRET_KEY if that
@@ -18,7 +23,8 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import { fernetDecrypt, fernetEncrypt, last4 } from "./fernet.ts";
 import { checkMailbox } from "./mailcheck.ts";
-import { type Brief, groqJson, morePrompt, parseVariants, prompt, repairPrompt, styleIssues, SYSTEM, type Variant } from "./templates.ts";
+import { type Brief, FU_SYSTEM, type Followup, followupPrompt, followupStyle, groqJson, morePrompt, parseFollowups, parseVariants,
+  prompt, repairPrompt, styleIssues, SYSTEM, type Variant } from "./templates.ts";
 
 const URL_ = Deno.env.get("SUPABASE_URL")!;
 const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -272,6 +278,36 @@ async function generateTemplates(req: Request): Promise<Response> {
   return json(req, 200, { model: first.model, variants: variants.map((v, i) => ({ ...v, check: checks[i], style: styleIssues(v, brief) })) });
 }
 
+// Follow-up sequence for the approved first email: permission, daily limit, the first email, the brief and the days
+// come from the database (as the user); every follow-up is checked with the template rules and fixed once if needed.
+async function generateFollowups(req: Request): Promise<Response> {
+  const ctx = await asUser(req, "api_fb_followup_generate_start", {}) as
+    { brief: Brief | null; initial: { subject: string; body: string }; days: number[] };
+  const key = await getSecret("groq_api_key");
+  if (!key) throw new HttpError(400, "Save the Groq key in FlightBridge AI > Settings first");
+  const n = ctx.days.length;
+  const tokens = 700 * n + 2500;
+  let first;
+  try { first = await groqJson(key, FU_SYSTEM, followupPrompt(ctx.brief, ctx.initial, ctx.days), tokens); }
+  catch (e) { throw new HttpError(502, String((e as Error).message)); }
+  let fus = parseFollowups(first.data, n);
+  if (fus.length < n) throw new HttpError(502, "The AI writer returned too few follow-ups. Try again.");
+  const checkAll = async (list: Followup[]) => {
+    const res = await asUser(req, "api_fb_template_check_many", { p_items: list.map((f) => ({ subject: f.subject, body: f.body })) }) as
+      { ok: boolean; errors: string[]; warnings: string[] }[];
+    return list.map((f, i) => ({ errors: [...res[i].errors, ...followupStyle(f, ctx.brief)], warnings: res[i].warnings }));
+  };
+  let checks = await checkAll(fus);
+  const bad = fus.map((f, i) => ({ f, issues: checks[i].errors })).filter((x) => x.issues.length);
+  if (bad.length) {
+    try {
+      const again = parseFollowups((await groqJson(key, FU_SYSTEM, followupPrompt(ctx.brief, ctx.initial, ctx.days, bad), tokens)).data, n);
+      if (again.length === n) { fus = again; checks = await checkAll(fus); }
+    } catch (e) { console.error("follow-up repair failed", String(e)); }
+  }
+  return json(req, 200, { model: first.model, followups: fus.map((f, i) => ({ ...f, day: ctx.days[i], step: i + 1, check: checks[i] })) });
+}
+
 function safeEqual(a: string, b: string): boolean {
   const x = new TextEncoder().encode(a), y = new TextEncoder().encode(b);
   let diff = x.length ^ y.length;
@@ -294,16 +330,33 @@ async function hostingerWebhook(req: Request): Promise<Response> {
   return json(req, 200, { ok: true });
 }
 
+// Mail apps POST "List-Unsubscribe=One-Click"; a person who opens the link gets the same result. Plain text only
+// (Edge Functions don't serve HTML pages on this domain).
+async function unsubscribe(ref: string): Promise<Response> {
+  const text = (status: number, body: string) =>
+    new Response(body, { status, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+  const { data, error } = await admin.rpc("svc_fb_unsubscribe", { p_ref: ref });
+  if (error) {
+    console.error("unsubscribe failed", error.message);
+    return text(500, "Sorry, that didn't work. Please reply \"unsubscribe\" to the email instead.");
+  }
+  if (!data?.ok) return text(404, "This unsubscribe link isn't recognised. Please reply \"unsubscribe\" to the email instead.");
+  return text(200, "You're unsubscribed. We One Aviation will not email this address again.");
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors(req) });
   const path = new URL(req.url).pathname.replace(/^.*\/crm-flightbridge/, "").replace(/\/+$/, "");
   try {
+    const u = /^\/u\/(FB-[0-9A-F]{12})$/.exec(path);
+    if (u && (req.method === "POST" || req.method === "GET")) return await unsubscribe(u[1]);
     if (req.method !== "POST") return json(req, 405, { detail: "Use POST" });
     let m: RegExpExecArray | null;
     if ((m = /^\/integrations\/([a-z_]+)\/test$/.exec(path))) return await testKey(req, m[1]);
     if ((m = /^\/integrations\/([a-z_]+)$/.exec(path))) return await saveKey(req, m[1]);
     if (path === "/areas") return await addArea(req);
     if (path === "/templates/generate") return await generateTemplates(req);
+    if (path === "/templates/followups") return await generateFollowups(req);
     if (path === "/webhooks/hostinger") return await hostingerWebhook(req);
     return json(req, 404, { detail: "Not found" });
   } catch (e) {

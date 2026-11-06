@@ -8,6 +8,9 @@
     while Render is still on; whichever runner holds the lock does the cycle
   * paused from FlightBridge AI > Settings ("Run automation"), or with FLIGHTBRIDGE_ENGINE=off in the .env file
   * reports its state to the CRM (system_setting 'engine_status'): dry run on/off, which keys come from this Mac
+  * Email Auto-Pilot (engine 1.8.0+): about every 30 seconds, at most one email when the CRM switch is ON, the pre-flight
+    checklist is green and the pace allows it (flightbridge/autosend.py). This Mac sends because it can reach the mail
+    server (Render's free plan blocks SMTP ports).
 
 Sending stays governed by DRY_RUN / OUTBOUND_ENABLED (missing or anything else => nothing is sent) and the CRM
 kill switch. Settings come from ~/FlightBridgeEngine/.env (private to this Mac; never commit or paste it).
@@ -73,6 +76,10 @@ def main() -> None:
         from flightbridge.worker import verify_step
     except ImportError:               # engine older than 1.5.0
         verify_step = None
+    try:
+        from flightbridge.worker import autosend_step
+    except ImportError:               # engine older than 1.8.0
+        autosend_step = None
 
     s = Settings.from_env()
     if not s.database_url or "PASTE_" in s.database_url:
@@ -86,6 +93,13 @@ def main() -> None:
             engine_off = os.environ.get("FLIGHTBRIDGE_ENGINE", "").strip().lower() == "off"
             heartbeat(s, engine_off)
             enabled = not engine_off and bool(secrets.settings(s.database_url).get("engine_in_crm", True))
+            if enabled and autosend_step is not None:
+                try:
+                    out = autosend_step(s)
+                    if out.get("state") not in ("off", "gap", "done_today", "waiting_hours", "idle", "waiting", "blocked", "paused"):
+                        log.info("auto-pilot: %s", {k: out.get(k) for k in ("state", "kind", "detail")})
+                except Exception:
+                    log.exception("auto-pilot step failed")
             if enabled:
                 if time.time() - last_cycle >= CYCLE_SECONDS:
                     out = run_once(s, trigger="schedule")

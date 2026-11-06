@@ -7,6 +7,7 @@ import Icon from './icons';
 import SectionNav from './SectionNav';
 import { countryName } from '../utils/country';
 import { Areas, Automation, Team } from './FlightBridgeOps';
+import { AutoPilot, Pipeline } from './FlightBridgeAutopilot';
 import { confirmDialog, promptDialog, choiceDialog, alertDialog } from './ui/dialogs';
 
 // FlightBridge partnership module (Admin only). This screen records human decisions.
@@ -336,7 +337,7 @@ function AiWriter({ onSaved, onEdit }) {
   );
 }
 
-const KIND_LABEL = { initial: 'First email', followup_1: 'Follow-up 1', followup_2: 'Follow-up 2', followup_3: 'Follow-up 3' };
+const KIND_LABEL = { initial: 'First email', followup_1: 'Follow-up 1', followup_2: 'Follow-up 2', followup_3: 'Follow-up 3', followup_4: 'Follow-up 4', followup_5: 'Follow-up 5' };
 
 function Templates() {
   const [list, setList] = useState([]);
@@ -866,6 +867,8 @@ export default function FlightBridge() {
       { id: 'areas', label: 'Areas', hint: 'Cities and regions to search', icon: 'map' },
     ] },
     { label: 'Outreach', items: [
+      { id: 'autopilot', label: 'Email Auto-Pilot', hint: 'Sends to Eligible schools by itself, safely', icon: 'rocket' },
+      { id: 'pipeline', label: 'Pipeline', hint: 'Every school emailed: sent, replied, partner', icon: 'funnel' },
       { id: 'queue', label: 'Approval queue', hint: 'Emails waiting for your OK', icon: 'check', count: openApprovals },
       { id: 'inbox', label: 'Inbox', hint: 'Replies from schools', icon: 'inbox' },
       isAdmin && { id: 'templates', label: 'Email templates', hint: 'Wording of each email', icon: 'mail' },
@@ -913,6 +916,8 @@ export default function FlightBridge() {
       {view === 'team' && isAdmin && <Team meId={me?.id} />}
       {view === 'templates' && isAdmin && <Templates />}
       {view === 'inbox' && <Inbox />}
+      {view === 'autopilot' && <AutoPilot isAdmin={isAdmin} />}
+      {view === 'pipeline' && <Pipeline />}
       {view === 'metrics' && <Metrics />}
       {view === 'settings' && isAdmin && <Settings />}
       {view === 'schools' && <FlightBridgeSchools />}
