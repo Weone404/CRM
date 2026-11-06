@@ -232,26 +232,94 @@ function FollowupWriter({ days, onClose, onDone }) {
   );
 }
 
+// ----------------------------------------------------------------------------- email wording: versions + preview
+const KIND_NAME = (k) => (k === 'initial' ? 'First email' : `Follow-up ${k.split('_')[1]}`);
+const SAMPLE = { school_name: 'Lone Star Aviation', city: 'Austin', state: 'Texas', country: 'the United States', credential: 'FAA Part 141 certification' };
+const fill = (t) => (t || '').replace(/\{\{\s*([a-z_]+)\s*\}\}/g, (m, k) => SAMPLE[k] ?? m);
+
+// One drop list per email: every saved version, the one in use ticked. Choosing another switches every email that
+// hasn't gone out yet (Auto-Pilot always uses the version approved at the moment it sends).
+function VersionPicker({ kind, templates, isAdmin, onChanged, onPreview }) {
+  const list = templates.filter((t) => t.kind === kind).sort((a, b) => b.version - a.version);
+  const cur = list.find((t) => t.status === 'approved');
+  if (!list.length) return <span className="text-[12px] text-glass-muted">No wording yet</span>;
+  const pick = async (e) => {
+    const t = list.find((x) => String(x.id) === e.target.value);
+    if (!t || t.status === 'approved') return;
+    if (!(await confirmDialog(`Use version ${t.version} for the ${KIND_NAME(kind).toLowerCase()}?`, {
+      message: 'Every email that hasn\'t gone out yet will use this wording.', confirmText: `Use v${t.version}` }))) return;
+    try { await call(`/templates/${t.id}/approve`, { method: 'POST' }); showToast(`${KIND_NAME(kind)}: version ${t.version} in use`, 'success'); onChanged(); }
+    catch (err) { showToast(err.message, 'error'); }
+  };
+  return (
+    <span className="inline-flex items-center gap-1.5 shrink-0">
+      <AppleSelect variant="capsule" menuWidth={280} value={cur ? String(cur.id) : ''} placeholder="Choose" disabled={!isAdmin}
+        aria-label={`${KIND_NAME(kind)} version`} onChange={pick} display={(o) => (o ? `v${list.find((t) => String(t.id) === o.value)?.version}` : 'Choose')}>
+        {list.map((t) => (
+          <option key={t.id} value={String(t.id)} disabled={t.status !== 'approved' && t.validation && t.validation.ok === false}
+            data-hint={`${t.status === 'approved' ? 'In use · ' : t.validation?.ok === false ? 'Needs fixes · ' : ''}${t.subject}`}>
+            {`Version ${t.version}`}
+          </option>
+        ))}
+      </AppleSelect>
+      <button type="button" className="glass-capsule" style={{ padding: '6px 10px' }} aria-label={`Preview the ${KIND_NAME(kind).toLowerCase()}`}
+        title="Preview" disabled={!cur} onClick={() => onPreview(cur)}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>
+      </button>
+    </span>
+  );
+}
+
+// How the email reads in a school's inbox (an example school fills the placeholders)
+function EmailPreview({ t, from, onClose }) {
+  return (
+    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50" {...modalProps(onClose)}>
+      <div className="apple-card max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="sticky top-0 z-10 px-5 pt-4 pb-3" style={{ background: 'rgba(255,255,255,0.82)', WebkitBackdropFilter: 'blur(20px)', backdropFilter: 'blur(20px)', borderBottom: '0.5px solid var(--hairline)' }}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[12px] font-semibold uppercase tracking-wide" style={{ color: '#007AFF' }}>{KIND_NAME(t.kind)} · version {t.version}</div>
+              <h2 className="text-[19px] font-bold text-glass-primary leading-snug mt-0.5">{fill(t.subject)}</h2>
+            </div>
+            <CloseButton onClick={onClose} />
+          </div>
+          <div className="mt-2 grid grid-cols-[44px_1fr] gap-y-0.5 text-[13px]">
+            <span className="text-glass-muted">From</span><span className="text-glass-primary truncate">We One Aviation &lt;{from || 'your sending mailbox'}&gt;</span>
+            <span className="text-glass-muted">To</span><span className="text-glass-primary truncate">{SAMPLE.school_name} (example school)</span>
+          </div>
+        </div>
+        <div className="px-5 py-4 text-[15px] leading-relaxed text-glass-primary whitespace-pre-wrap break-words" style={{ background: 'rgba(255,255,255,0.92)' }}>{fill(t.body)}</div>
+        <div className="px-5 py-3 text-[12px] text-glass-muted" style={{ background: 'rgba(255,255,255,0.92)' }}>The legal footer, the unsubscribe line and a reference number are added below automatically.</div>
+      </div>
+    </div>
+  );
+}
+
 export function AutoPilot({ isAdmin }) {
   const [d, setD] = useState(null);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState(null);
   const [writer, setWriter] = useState(false);
   const [fuOpen, setFuOpen] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [preview, setPreview] = useState(null);
   const fuBtn = useRef(null);
   const dirty = useRef(false);
 
-  const load = useCallback(async () => {
+  const loaded = useRef(false);
+  const load = useCallback(async (quiet) => {
     try {
-      const x = await call('/send-autopilot');
+      const [x, tpls] = await Promise.all([call('/send-autopilot'), call('/templates').catch(() => null)]);
+      if (tpls) setTemplates(tpls);
+      loaded.current = true;
       setD(x);
       if (!dirty.current) {
         setForm({ daily_limit: x.config.daily_limit ?? 40, warmup: x.config.warmup !== false,
           followups: (x.followup_days || []).length, days: [...(x.followup_days || [])] });
       }
-    } catch (e) { showToast(e.message, 'error'); }
+    } catch (e) { if (!quiet || !loaded.current) showToast(e.message, 'error'); }    // background refresh stays quiet
   }, []);
-  useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, [load]);
+  useEffect(() => { load(); const t = setInterval(() => load(true), 15000); return () => clearInterval(t); }, [load]);
 
   const save = async (patch, ok) => {
     setBusy(true);
@@ -342,6 +410,20 @@ export function AutoPilot({ isAdmin }) {
             ))}
           </AppleSelect>
           <p className="text-[12px] text-glass-muted mt-1.5">Only connected mailboxes can be chosen. Connect another in Settings › Email.</p>
+        </section>
+
+        <section>
+          <div className="text-sm font-semibold text-glass-primary mb-1.5">Email wording</div>
+          <div className="apple-group">
+            <div className="apple-row">
+              <span className="w-8 h-8 rounded-lg grid place-items-center text-white shrink-0" style={{ background: '#007AFF' }}><Icon name="mail" size={15} /></span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[15px] text-glass-primary">First email</div>
+                <div className="text-[12px] text-glass-muted truncate">{templates.find((t) => t.kind === 'initial' && t.status === 'approved')?.subject || 'Not approved yet: Email templates'}</div>
+              </div>
+              <VersionPicker kind="initial" templates={templates} isAdmin={isAdmin} onChanged={() => load()} onPreview={setPreview} />
+            </div>
+          </div>
         </section>
 
         <section>
@@ -441,6 +523,9 @@ export function AutoPilot({ isAdmin }) {
                           <div className="text-[14px] text-glass-primary">Follow-up {i + 1}</div>
                           <div className="text-[11px]" style={{ color: ready ? '#1E7B34' : '#A35A00' }}>{ready ? 'Wording approved' : 'Wording not approved yet'}</div>
                         </div>
+                        {templates.some((t) => t.kind === `followup_${i + 1}`) && (
+                          <VersionPicker kind={`followup_${i + 1}`} templates={templates} isAdmin={isAdmin} onChanged={() => load()} onPreview={setPreview} />
+                        )}
                         <AppleSelect variant="capsule" menuWidth={190} value={v} disabled={!isAdmin} aria-label={`Follow-up ${i + 1} day`}
                           display={(o) => `Day ${o?.value ?? v}`}
                           onChange={(e) => { dirty.current = true; const days = [...form.days]; days[i] = Number(e.target.value); setForm({ ...form, days }); }}>
@@ -490,6 +575,7 @@ export function AutoPilot({ isAdmin }) {
           </ul>
         </div>
       )}
+      {preview && <EmailPreview t={preview} from={sel?.address} onClose={() => setPreview(null)} />}
       {writer && <FollowupWriter days={d.followup_days || []} onClose={() => setWriter(false)} onDone={() => { setWriter(false); save({ check_now: true }); }} />}
     </div>
   );
