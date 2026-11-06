@@ -51,8 +51,10 @@ export function autopilotIssues(d) {
   if (st.paused_at && !(cfg.resume_at && cfg.resume_at > st.paused_at)) {
     out.push({ id: 'paused', label: 'Paused for safety', fix: st.pause_reason || 'Check the latest emails, then resume.', action: 'resume' });
   }
-  if (!d.engine_online) out.push({ id: 'offline', label: 'The Mac Mini is not reporting', fix: `Last heard ${when(d.engine?.at) || 'never'}. Wake the Mac and make sure it's online.` });
-  if (d.engine && !(d.engine.dry_run === false && d.engine.outbound_enabled)) {
+  // the cloud sender (GitHub Actions) covers school hours when the Mac is off
+  const cloud = d.cloud_ready && d.cloud?.may_send;
+  if (!d.engine_online && !cloud) out.push({ id: 'offline', label: 'The Mac Mini is not reporting', fix: `Last heard ${when(d.engine?.at) || 'never'}. Wake the Mac and make sure it's online (or set up the cloud sender).` });
+  if (d.engine && d.engine_online && !(d.engine.dry_run === false && d.engine.outbound_enabled)) {
     out.push({ id: 'server', label: 'Sending is switched off on the Mac (DRY_RUN)', fix: 'In ~/FlightBridgeEngine/.env set these two lines, then run install.sh:', code: 'DRY_RUN=false\nOUTBOUND_ENABLED=true' });
   }
   if (d.kill_switch_engaged) out.push({ id: 'kill_switch', label: 'The kill switch is on', fix: 'It blocks every email.', action: 'kill' });
@@ -73,7 +75,7 @@ function statusLine(d) {
     return { tone: 'red', title: `On · not sending: ${issues.length} to fix`, issues,
       text: 'Auto-Pilot starts by itself the moment these are fixed. Nothing has been sent.' };
   }
-  if (!d.engine_online) return { tone: 'orange', title: 'Waiting for the Mac Mini', text: `The engine hasn't reported since ${when(d.engine?.at) || 'it was installed'}. Wake the Mac or open it.` };
+  if (!d.engine_online && !(d.cloud_ready && d.cloud?.may_send)) return { tone: 'orange', title: 'Waiting for the Mac Mini', text: `The engine hasn't reported since ${when(d.engine?.at) || 'it was installed'}. Wake the Mac or open it.` };
   if (st.paused_at && !(cfg.resume_at && cfg.resume_at > st.paused_at)) return { tone: 'red', title: 'Paused for safety', text: st.pause_reason, paused: true };
   const detail = st.status_detail || '';
   switch (st.status) {
@@ -537,6 +539,7 @@ export function AutoPilot({ isAdmin }) {
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-glass-muted">
           <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: d.engine_online ? '#34C759' : '#FF9500' }} />Mac Mini {d.engine_online ? 'online' : 'offline'}{d.engine?.at ? ` · ${ago(d.engine.at)}` : ''}</span>
+          <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: d.cloud_online ? '#34C759' : d.cloud_ready ? '#007AFF' : '#8E8E93' }} />Cloud sender: {d.cloud_online ? (d.engine_online ? 'standing by' : 'sending') : d.cloud_ready ? 'ready for school hours' : 'not set up'}{d.cloud?.at ? ` · ${ago(d.cloud.at)}` : ''}</span>
           <span>Server sending: {d.engine?.dry_run === false && d.engine?.outbound_enabled ? 'on' : 'off (DRY_RUN)'}</span>
           <span>Kill switch: {d.kill_switch_engaged ? 'on' : 'released'}</span>
         </div>
