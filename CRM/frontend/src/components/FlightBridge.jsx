@@ -267,6 +267,18 @@ function AiWriter({ onSaved, onEdit }) {
     }).catch(() => {});
   }, []);
   const set = (k) => (e) => setB((p) => ({ ...p, [k]: e.target.value }));
+  // Email in the signature: the connected mailboxes and the office address, as a drop list ("Other address…" to type one)
+  const [mailboxes, setMailboxes] = useState([]);
+  const [otherEmail, setOtherEmail] = useState(false);
+  useEffect(() => { call('/send-autopilot').then((x) => setMailboxes(x?.mailboxes || [])).catch(() => {}); }, []);
+  const emailChoices = (() => {
+    const out = [];
+    const add = (address, hint) => { if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address || '') && !out.some((m) => m.address === address)) out.push({ address, hint }); };
+    mailboxes.forEach((m) => add(m.address, `${m.provider} mailbox${m.selected ? ' · sends the emails' : ''}${m.connected ? '' : ' · not connected yet'}`));
+    add('info@weoneaviation.com', 'Office address');
+    add(b.sender_email, 'Used last time');
+    return out;
+  })();
   const ready = ((b.reason || '') + (b.instructions || '')).trim().length >= 10;
   const generate = async () => {
     setBusy(true); setOut(null);
@@ -285,11 +297,23 @@ function AiWriter({ onSaved, onEdit }) {
       {open && (
         <>
           <div className="grid gap-2 sm:grid-cols-2">
-            {BRIEF_FIELDS.map(([k, label, ph]) => (
+            {BRIEF_FIELDS.map(([k, label, ph]) => (k === 'sender_email' && !otherEmail ? (
               <label key={k} className="text-xs font-medium text-glass-secondary">{label}
-                <input className="glass-input w-full px-3 py-2 text-sm mt-1" value={b[k] || ''} placeholder={ph} onChange={set(k)} maxLength={160} />
+                <AppleSelect className="w-full mt-1" value={b.sender_email || ''} aria-label={label} placeholder="Choose an email"
+                  onChange={(e) => (e.target.value === '__other__' ? setOtherEmail(true) : setB((p) => ({ ...p, sender_email: e.target.value })))}>
+                  {emailChoices.map((m) => <option key={m.address} value={m.address} data-hint={m.hint}>{m.address}</option>)}
+                  <option value="__other__" data-hint="Type any address">Other address…</option>
+                </AppleSelect>
               </label>
-            ))}
+            ) : (
+              <label key={k} className="text-xs font-medium text-glass-secondary">{label}
+                <span className="flex gap-2 mt-1">
+                  <input className="glass-input w-full px-3 py-2 text-sm" value={b[k] || ''} placeholder={ph} onChange={set(k)} maxLength={160}
+                    autoFocus={k === 'sender_email'} type={k === 'sender_email' ? 'email' : 'text'} />
+                  {k === 'sender_email' && <button type="button" className="glass-capsule shrink-0" onClick={() => setOtherEmail(false)}>List</button>}
+                </span>
+              </label>
+            )))}
             <label className="text-xs font-medium text-glass-secondary">Versions to write
               <AppleSelect className="glass-input w-full px-3 py-2 text-sm mt-1" value={b.count} onChange={set('count')}>
                 {['3', '4', '5'].map((c) => <option key={c} value={c}>{c}</option>)}

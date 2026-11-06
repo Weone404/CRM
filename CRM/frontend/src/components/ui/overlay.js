@@ -1,3 +1,4 @@
+import { morphFrom } from './GlassPopover';
 // One behaviour for every pop-up in the CRM.
 //   <div className="fixed inset-0 glass-overlay …" {...modalProps(onClose)}> <div className="glass-strong …">…</div> </div>
 // * a click or tap on the dimmed background (outside the window) closes it
@@ -42,6 +43,21 @@ export function installModalKeys() {
       m.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     }
   });
+  // Apple-style zoom: a window grows out of the row or button that opened it (desktop/tablet; phones slide up a sheet)
+  let lastTap = null, lastTapAt = 0;
+  document.addEventListener('pointerdown', (e) => {
+    const t = e.target.closest?.('button, a, tr, li, [role="button"], [role="row"], .glass-card');
+    if (t && !t.closest('[data-modal], [aria-modal="true"]')) { lastTap = t; lastTapAt = Date.now(); }
+  }, true);
+  const zoomNew = () => {
+    if (window.innerWidth < 640 || !lastTap || Date.now() - lastTapAt > 1200 || !document.contains(lastTap)) return;
+    document.querySelectorAll('[data-modal]:not([data-zoomed]), [role="dialog"][aria-modal="true"]:not([data-zoomed])').forEach((m) => {
+      m.setAttribute('data-zoomed', '');
+      const win = m.matches('[data-modal]') ? [...m.children].find((c) => c.getAttribute('aria-hidden') !== 'true') : m;
+      if (win && !m.hasAttribute('data-nosheet')) morphFrom(lastTap, win, { duration: 480 });
+    });
+    lastTap = null;
+  };
   let locked = false, saved = '';
   const sync = () => {
     const m = top();
@@ -55,5 +71,5 @@ export function installModalKeys() {
       (f || win)?.focus({ preventScroll: true });
     }
   };
-  new MutationObserver(sync).observe(document.body, { childList: true, subtree: true });
+  new MutationObserver(() => { zoomNew(); sync(); }).observe(document.body, { childList: true, subtree: true });
 }
