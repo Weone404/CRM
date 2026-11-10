@@ -12,9 +12,9 @@ import { SpApi, UnknownOutcome, SpApiError, buildPatches, parseListing, verifyAp
 
 export type Rpc = (fn: string, args?: Record<string, unknown>) => Promise<any>;
 
-const FIELDS = ["title", "bullets", "description", "backend_terms", "price", "mrp", "country_of_origin", "manufacturer"] as const;
+const FIELDS = ["title", "bullets", "description", "backend_terms", "price", "mrp", "country_of_origin", "manufacturer", "handling_days"] as const;
 const norm = (v: unknown) => (v == null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v).trim());
-const numish = (k: string, v: unknown) => (k === "price" || k === "mrp") && v != null && v !== "" ? String(Number(v)) : norm(v);
+const numish = (k: string, v: unknown) => (k === "price" || k === "mrp" || k === "handling_days") && v != null && v !== "" ? String(Number(v)) : norm(v);
 
 // Fields where Amazon now differs both from what the draft was based on and from what we want.
 export function staleFields(before: Record<string, any>, after: Record<string, any>, live: Record<string, any>) {

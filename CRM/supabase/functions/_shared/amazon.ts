@@ -255,6 +255,9 @@ export function parseListing(item: any, sellerSkuFallback?: string) {
     price: price != null ? Number(price) : null,
     mrp: mrp != null ? Number(mrp) : null,
     quantity: fa.quantity ?? null,
+    // Easy Ship dispatch time (handling time): 0 = same day, 1 = next day. Null when Amazon does not return it.
+    handling_days: (() => { const d = first(a.fulfillment_availability)?.lead_time_to_ship_max_days;
+      return d == null || d === "" || Number.isNaN(Number(d)) ? null : Number(d); })(),
     fulfillment: fa.fulfillmentChannelCode && fa.fulfillmentChannelCode !== "DEFAULT" ? "FBA" : "FBM",
     country_of_origin: val(a.country_of_origin) ?? null,
     manufacturer: val(a.manufacturer) ?? null,
@@ -293,6 +296,11 @@ export function buildPatches(after: Record<string, any>, mk: string, lang: strin
       case "country_of_origin":
         patches.push({ op: "replace", path: "/attributes/country_of_origin", value: [{ value: String(v), marketplace_id: mk }] });
         break;
+      case "handling_days":
+        // merge: only the dispatch time changes; stock quantity is left as it is on Amazon.
+        patches.push({ op: "merge", path: "/attributes/fulfillment_availability",
+          value: [{ fulfillment_channel_code: "DEFAULT", lead_time_to_ship_max_days: Number(v) }] });
+        break;
       case "main_image":
         if ((v as any)?.url) {
           patches.push({ op: "replace", path: "/attributes/main_product_image_locator",
@@ -315,6 +323,7 @@ export function verifyApplied(after: Record<string, any>, live: ReturnType<typeo
   if ("backend_terms" in after && !same(after.backend_terms, live.backend_terms)) bad.push("backend_terms");
   if ("description" in after && !same(after.description, live.description)) bad.push("description");
   if ("bullets" in after && JSON.stringify(after.bullets) !== JSON.stringify(live.bullets)) bad.push("bullets");
+  if ("handling_days" in after && live.handling_days != null && Number(after.handling_days) !== live.handling_days) bad.push("handling_days");
   return bad;
 }
 

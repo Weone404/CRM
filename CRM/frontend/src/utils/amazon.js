@@ -9,13 +9,39 @@ export const pct = (n) => (n == null ? '—' : `${Number(n).toFixed(2)}%`);
 
 // Fields shown in diffs, in this order, with labels.
 export const FIELD_LABELS = {
-  title: 'Title', item_highlights: 'Item Highlights', bullets: 'Bullet points', description: 'Description',
-  backend_terms: 'Backend search terms', price: 'Price', mrp: 'MRP', country_of_origin: 'Country of origin',
-  manufacturer: 'Manufacturer', net_quantity: 'Net quantity', main_image: 'Main image', claims: 'Claims',
-  daily_budget_total: 'Total daily ad budget',
+  title: 'Product name', item_highlights: 'Short highlight', bullets: 'Key points', description: 'Description',
+  backend_terms: 'Hidden search words', price: 'Price', mrp: 'MRP', country_of_origin: 'Made in (country)',
+  manufacturer: 'Maker name & address', net_quantity: 'Quantity in the box', main_image: 'Main photo', claims: 'Claims',
+  daily_budget_total: 'Daily ad budget (all ads)', handling_days: 'Dispatch time',
 };
 
+// Dispatch (handling) time in plain words. 0 = same day, 1 = next day.
+export const dispatchText = (d) => (d == null || d === '' ? 'Not known yet'
+  : Number(d) === 0 ? 'Same day' : Number(d) === 1 ? 'Next day' : `${d} days`);
+
+// Audit rule codes in plain words: what is wrong, and what to do.
+export const PLAIN = {
+  title_max_chars: ['Product name is too long', 'Amazon allows 75 letters. Shorten it.'],
+  title_word_repeat: ['Product name repeats a word', 'Use each word at most twice.'],
+  title_promo_words: ['Product name has sales words', 'Remove words like "best", "sale", "free".'],
+  title_special_chars: ['Product name has odd symbols', 'Remove symbols like !, *, $.'],
+  stale_year: ['Product name shows an old year', 'Update the year, e.g. 2027.'],
+  title_drift: ['Product name was changed outside the CRM', 'Check it is still right.'],
+  buybox_lost: ['Another seller is winning the "Add to Cart" button', 'Check the price (never below ₹299).'],
+  buybox_none: ['Nobody has the "Add to Cart" button', 'Check price, stock and dispatch time.'],
+  legal_fields: ['Required details missing', 'Add MRP, maker, country and quantity.'],
+  highlights_max_chars: ['Short highlight is too long', 'Keep it under 125 letters.'],
+  backend_terms_bytes: ['Hidden search words are too long', 'Remove some words.'],
+  backend_no_emoji: ['Hidden search words have emoji', 'Remove the emoji.'],
+  main_image: ['Main photo breaks Amazon rules', 'White background, no text, at least 1000 px.'],
+  suppressed_after_change: ['Product is hidden on Amazon after a change', 'Approve the undo in Approve Changes.'],
+  price_floor: ['Price is below ₹299', 'Raise the price.'],
+  mrp_gte_price: ['MRP is lower than the price', 'MRP must be equal or higher.'],
+};
+export const plain = (code, fallback) => PLAIN[code] || [fallback || 'Needs a look', ''];
+
 const show = (k, v) => {
+  if (k === 'handling_days') return dispatchText(v);
   if (v == null || v === '') return '—';
   if (k === 'price' || k === 'mrp' || k === 'daily_budget_total') return inr(v);
   if (Array.isArray(v)) return v.join('\n');
@@ -58,14 +84,14 @@ export function borderIsWhite(data, w, h, frame = 4) {
 }
 
 export const STATUS_STYLE = {
-  pending: { bg: 'rgba(255,149,0,0.14)', fg: '#B25E00', label: 'Waiting for approval' },
+  pending: { bg: 'rgba(255,149,0,0.14)', fg: '#B25E00', label: 'Waiting for your OK' },
   approved: { bg: 'rgba(0,122,255,0.12)', fg: '#0062CC', label: 'Approved' },
   executing: { bg: 'rgba(0,122,255,0.12)', fg: '#0062CC', label: 'Sending to Amazon' },
-  live: { bg: 'rgba(52,199,89,0.14)', fg: '#1E7B34', label: 'Live' },
+  live: { bg: 'rgba(52,199,89,0.14)', fg: '#1E7B34', label: 'Live on Amazon' },
   rejected: { bg: 'rgba(118,118,128,0.14)', fg: '#555', label: 'Rejected' },
-  stale: { bg: 'rgba(255,149,0,0.14)', fg: '#B25E00', label: 'Stale — listing changed' },
-  failed: { bg: 'rgba(255,59,48,0.12)', fg: '#C4261D', label: 'Failed' },
-  needs_manual: { bg: 'rgba(175,82,222,0.12)', fg: '#7A2EA8', label: 'Needs a manual step' },
+  stale: { bg: 'rgba(255,149,0,0.14)', fg: '#B25E00', label: 'Out of date' },
+  failed: { bg: 'rgba(255,59,48,0.12)', fg: '#C4261D', label: 'Amazon said no' },
+  needs_manual: { bg: 'rgba(175,82,222,0.12)', fg: '#7A2EA8', label: 'One step left for you' },
   cancelled: { bg: 'rgba(118,118,128,0.14)', fg: '#555', label: 'Cancelled' },
 };
 

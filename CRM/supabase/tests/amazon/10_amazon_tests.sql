@@ -282,4 +282,48 @@ BEGIN
 END $$;
 RESET ROLE;
 
+-- D: dispatch speed (075)
+DO $$
+DECLARE d jsonb; g jsonb; n int; child text; cid uuid;
+  sa CONSTANT text := 'SET ROLE authenticated';
+BEGIN
+  SELECT sku INTO child FROM public.amazon_listings WHERE NOT coalesce(is_parent, false) ORDER BY sku LIMIT 1;
+  SELECT count(*) INTO n FROM public.amazon_listings WHERE NOT coalesce(is_parent, false);
+  EXECUTE sa; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  g := public.api_amz_check('dispatch', child, '{"handling_days": 0}');
+  PERFORM pg_temp.ok((g->>'ok')::boolean AND g->'warnings' @> '[{"code":"dispatch_days"}]', 'D01 same-day dispatch passes with a pickup-cutoff warning');
+  g := public.api_amz_check('dispatch', child, '{"handling_days": 31}');
+  PERFORM pg_temp.ok(NOT (g->>'ok')::boolean, 'D02 dispatch time over 30 days is blocked');
+  g := public.api_amz_check('dispatch', child, '{"handling_days": 1}');
+  PERFORM pg_temp.ok((g->>'ok')::boolean AND jsonb_array_length(g->'warnings') = 0
+    AND NOT (g->'blockers' @> '[{"code":"legal_fields"}]'), 'D03 next-day dispatch is clean (no Legal Metrology noise)');
+  g := public.api_amz_check('dispatch', child, '{"handling_days": 1, "price": 10}');
+  PERFORM pg_temp.ok(g->'blockers' @> '[{"code":"dispatch_only"}]', 'D04 a dispatch change cannot carry other fields');
+  d := public.api_amz_dispatch_all(0);
+  PERFORM pg_temp.ok((d->>'drafted')::int = n, 'D05 "all products" drafts one change per variation');
+  d := public.api_amz_dispatch_all(0);
+  PERFORM pg_temp.ok((d->>'drafted')::int = 0, 'D08 running it twice does not duplicate drafts');
+  RESET ROLE;
+  PERFORM pg_temp.ok(NOT EXISTS (SELECT 1 FROM public.amazon_change_queue q JOIN public.amazon_listings l USING (sku)
+    WHERE q.kind = 'dispatch' AND l.is_parent), 'D06 parents are skipped');
+  PERFORM pg_temp.ok(NOT EXISTS (SELECT q.batch_id FROM public.amazon_change_queue q WHERE q.kind = 'dispatch'
+    GROUP BY q.batch_id HAVING count(*) > 20), 'D07 batches hold at most 20 changes');
+  SELECT id INTO cid FROM public.amazon_change_queue q WHERE q.kind = 'dispatch' AND q.sku = child;
+  EXECUTE sa; PERFORM public.api_amz_approve(cid);
+  RESET ROLE; SET ROLE service_role;
+  PERFORM public.svc_amz_claim(cid);
+  PERFORM public.svc_amz_finish(cid, 'live', NULL, NULL);
+  RESET ROLE;
+  PERFORM pg_temp.ok((SELECT handling_days FROM public.amazon_listings WHERE sku = child) = 0, 'D09 live dispatch change updates the CRM copy');
+  EXECUTE sa;
+  d := public.api_amz_rollback(cid);
+  PERFORM pg_temp.ok(d->'after' ? 'handling_days' AND NOT (d->'guard_result'->>'ok')::boolean,
+    'D10 rolling back to an unknown old dispatch time is blocked (set it in Seller Central)');
+  RESET ROLE; SET ROLE service_role;
+  n := public.svc_amz_upsert_dispatch(jsonb_build_array(jsonb_build_object('sku', child, 'handling_days', 2)));
+  RESET ROLE;
+  PERFORM pg_temp.ok(n = 1 AND (SELECT handling_days FROM public.amazon_listings WHERE sku = child) = 2, 'D11 sync stores Amazon''s dispatch time');
+END $$;
+RESET ROLE;
+
 \echo ALL SQL TESTS PASSED

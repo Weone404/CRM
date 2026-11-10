@@ -2,16 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from '../backend/supabaseClient';
 import { showToast } from '../utils/toast';
 import { confirmDialog, promptDialog } from './ui/dialogs';
-import SectionNav from './SectionNav';
 import Icon from './icons';
-import LinkTile from './ui/LinkTile';
 import { useRoute, navigate } from '../utils/route';
-import { chars, utf8Bytes, inr, pct, diffRows, measureImage, STATUS_STYLE, ageText } from '../utils/amazon';
+import { chars, utf8Bytes, inr, pct, diffRows, measureImage, STATUS_STYLE, ageText, dispatchText, plain } from '../utils/amazon';
 
 // CRM > Amazon (Nitaniya on Amazon.in). Admin, plus people Admin grants in Settings.
+// Built for a non-technical seller: 4 tabs (Home, My Products, Approve Changes, Sales) and everything else under More.
 // Every read and write goes through api_amz_* database functions, which check access and run the guards
 // (price floor, title limits, Legal Metrology fields, ...). Nothing here talks to Amazon directly:
-// approved changes are sent by the amazon-execute Edge Function; Claude drafts into the same Change Queue.
+// approved changes are sent by the amazon-execute Edge Function; Claude drafts into the same approval list.
 
 const rpc = async (fn, args) => {
   const { data, error } = await supabase.rpc(fn, args);
@@ -45,21 +44,33 @@ function useLoad(fn, deps = []) {
   return [data, load, error];
 }
 
+const GREEN = { bg: 'rgba(52,199,89,0.14)', fg: '#1E7B34' };
 const Chip = ({ children, bg = 'rgba(118,118,128,0.14)', fg = '#3C3C43' }) => (
   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap" style={{ background: bg, color: fg }}>{children}</span>
 );
-const Stat = ({ label, value, sub, tone, to }) => (
-  <LinkTile to={to} className="glass-card p-3">
-    <div className="text-xs text-glass-muted">{label}</div>
-    <div className="text-2xl font-bold" style={tone ? { color: tone } : undefined}>{value}</div>
-    {sub && <div className="text-[11px] text-glass-muted mt-0.5">{sub}</div>}
-  </LinkTile>
-);
+const Stat = ({ label, value, sub, tone, onClick }) => {
+  const body = (
+    <>
+      <div className="text-xs text-glass-muted">{label}</div>
+      <div className="text-2xl font-bold" style={tone ? { color: tone } : undefined}>{value}</div>
+      {sub && <div className="text-[11px] text-glass-muted mt-0.5">{sub}</div>}
+    </>
+  );
+  return onClick ? <button type="button" onClick={onClick} className="glass-card p-3 text-left w-full">{body}</button> : <div className="glass-card p-3">{body}</div>;
+};
 const Empty = ({ children }) => <div className="text-center text-glass-muted py-10 text-sm">{children}</div>;
 const Err = ({ msg }) => (msg ? <div className="glass-card p-3 text-sm" style={{ color: '#C4261D' }}>{msg}</div> : null);
 const SEV = { blocker: { bg: 'rgba(255,59,48,0.12)', fg: '#C4261D' }, warning: { bg: 'rgba(255,149,0,0.14)', fg: '#B25E00' },
               confirm: { bg: 'rgba(0,122,255,0.12)', fg: '#0062CC' }, info: {} };
+const SEV_WORD = { blocker: 'Must fix', warning: 'Heads up', confirm: 'Double-check' };
 const NEEDS_BR = <Chip bg="rgba(118,118,128,0.12)" fg="#6E6E73">Needs Brand Registry</Chip>;
+const Seg = ({ value, options, onChange, label }) => (
+  <div className="flex gap-1 p-1 rounded-xl w-max max-w-full overflow-x-auto" role="group" aria-label={label} style={{ background: 'rgba(118,118,128,0.12)' }}>
+    {options.map(([v, l]) => (
+      <button key={v} type="button" onClick={() => onChange(v)} aria-pressed={value === v}
+        className={`px-3 py-1.5 rounded-lg text-sm whitespace-nowrap ${value === v ? 'bg-white font-semibold shadow-sm' : ''}`}>{l}</button>))}
+  </div>
+);
 
 function GuardList({ g }) {
   if (!g) return null;
@@ -69,145 +80,343 @@ function GuardList({ g }) {
     <ul className="mt-2 space-y-1">
       {items.map((i, n) => (
         <li key={n} className="text-xs flex gap-2 items-start">
-          <Chip {...SEV[i.severity]}>{i.severity === 'confirm' ? 'confirm' : i.severity}</Chip><span className="text-glass-secondary">{i.message}</span>
+          <Chip {...SEV[i.severity]}>{SEV_WORD[i.severity] || i.severity}</Chip><span className="text-glass-secondary">{i.message}</span>
         </li>
       ))}
     </ul>
   );
 }
 
-function Score({ s }) {
-  if (!s) return null;
-  const bar = (label, v) => (
-    <div className="flex items-center gap-1.5" title={`${label}: ${v}/100 (CRM heuristic, not an Amazon score)`}>
-      <span className="text-[10px] text-glass-muted w-16">{label}</span>
-      <span className="h-1.5 w-14 rounded-full overflow-hidden" style={{ background: 'rgba(118,118,128,0.16)' }}>
-        <span className="block h-full" style={{ width: `${v}%`, background: v >= 70 ? '#34C759' : v >= 40 ? '#FF9500' : '#FF3B30' }} />
-      </span>
-    </div>
-  );
-  return <div className="grid grid-cols-2 gap-x-3 gap-y-1">{bar('Index', s.index)}{bar('Intent', s.intent)}{bar('Conversion', s.conversion)}{bar('Compliance', s.compliance)}</div>;
+// Plain-words health verdict from Amazon's limits.
+function healthVerdict(h) {
+  if (!h) return null;
+  const bad = [];
+  if (h.odr != null && h.odr >= 1) bad.push('too many unhappy orders');
+  if (h.cancel_rate != null && h.cancel_rate >= 2.5) bad.push('too many cancelled orders');
+  if (h.late_ship_rate != null && h.late_ship_rate >= 4) bad.push('too many late dispatches');
+  if (h.valid_tracking_rate != null && h.valid_tracking_rate <= 95) bad.push('tracking missing on orders');
+  return bad;
 }
 
-// ---------------------------------------------------------------- Overview
-function Overview({ access, go }) {
+// ---------------------------------------------------------------- Home: what to do today
+function Home({ access, go, listings, reloadAll }) {
   const [o, load, err] = useLoad(() => rpc('api_amz_overview'));
   const [syncing, setSyncing] = useState(false);
+  const names = useMemo(() => Object.fromEntries((listings || []).map((l) => [l.sku, l.title])), [listings]);
   const sync = async () => {
     setSyncing(true);
     const r = await run(edge('amazon-sync', { jobs: ['listings', 'pricing'] }));
     setSyncing(false);
     if (r?.status === 'not-configured') showToast(r.detail, 'error');
-    else if (r) showToast(r.results.map((x) => `${x.job}: ${x.status}`).join(' · '), r.results.some((x) => x.status === 'error') ? 'error' : 'success');
-    load();
+    else if (r) showToast(r.results.some((x) => x.status === 'error') ? 'Update finished with a problem. See History.' : 'Updated from Amazon.', r.results.some((x) => x.status === 'error') ? 'error' : 'success');
+    load(); reloadAll();
   };
   if (err) return <Err msg={err} />;
   if (!o) return <Empty>Loading…</Empty>;
-  const h = o.health;
-  const alerts = [];
-  if (!o.connected) alerts.push({ tone: '#FF9500', text: 'Amazon is not connected yet. Admin: add the keys in Settings, then Test Connection.', to: access.is_admin ? 'settings' : null });
-  else if (o.last_test && o.last_test !== 'Connected') alerts.push({ tone: '#FF3B30', text: `Last connection test: ${o.last_test}.`, to: access.is_admin ? 'settings' : null });
-  if (o.rotation_alert) alerts.push({ tone: o.rotation_alert <= 7 ? '#FF3B30' : '#FF9500',
-    text: `Amazon client secret expires in ${o.rotation_days_left} days. Rotate it in Seller Central and paste the new one in Settings.`, to: access.is_admin ? 'settings' : null });
-  Object.entries(o.last_sync || {}).forEach(([job, r]) => { if (r.status === 'error') alerts.push({ tone: '#FF3B30', text: `Sync "${job}" failed ${ageText(r.at)}: ${r.detail}` }); });
+  const slow = (listings || []).filter((l) => !l.is_parent && (l.handling_days == null || Number(l.handling_days) !== 0)).length;
+  const healthBad = healthVerdict(o.health);
+  const todo = [];
+  if (!o.connected) todo.push({ tone: '#FF9500', icon: 'lock', text: 'Amazon is not connected yet.', sub: access.is_admin ? 'Add the Amazon keys in Settings, then press Test Connection.' : 'Ask Admin to finish Settings.', btn: access.is_admin && 'Open Settings', to: 'settings' });
+  else if (o.last_test && o.last_test !== 'Connected') todo.push({ tone: '#FF3B30', icon: 'alert', text: 'The link to Amazon is not working.', sub: `Last check said: ${o.last_test}.`, btn: access.is_admin && 'Open Settings', to: 'settings' });
+  if (o.pending) todo.push({ tone: '#FF9500', icon: 'check', text: `${o.pending} change${o.pending > 1 ? 's are' : ' is'} waiting for your OK.`, sub: 'Nothing goes to Amazon until you approve it.', btn: 'Review', to: 'approve' });
+  const probs = (o.open_findings?.blocker || 0) + (o.open_findings?.warning || 0);
+  if (probs) todo.push({ tone: o.open_findings.blocker ? '#FF3B30' : '#FF9500', icon: 'shield', text: `${probs} thing${probs > 1 ? 's' : ''} to fix on your products.`, sub: 'Fixing them helps you show up in search and sell more.', btn: 'See them', to: 'audit' });
+  if (slow) todo.push({ tone: '#007AFF', icon: 'zap', text: `Fast delivery is not on for ${slow} product${slow > 1 ? 's' : ''}.`, sub: 'Same-day dispatch gives customers an earlier delivery date.', btn: 'Turn on', to: 'products' });
+  if (healthBad?.length) todo.push({ tone: '#FF3B30', icon: 'heart', text: 'Your account health needs attention.', sub: `Problem: ${healthBad.join(', ')}.`, btn: 'See health', to: 'health' });
+  if (o.rotation_alert) todo.push({ tone: o.rotation_alert <= 7 ? '#FF3B30' : '#FF9500', icon: 'lock', text: `Amazon password (client secret) expires in ${o.rotation_days_left} days.`, sub: 'Make a new one in Seller Central and paste it in Settings.', btn: access.is_admin && 'Open Settings', to: 'settings' });
+  Object.entries(o.last_sync || {}).forEach(([job, r]) => { if (r.status === 'error') todo.push({ tone: '#FF3B30', icon: 'refresh', text: 'Getting data from Amazon failed.', sub: `${job}, ${ageText(r.at)}: ${r.detail}` }); });
+  const lastAt = Object.values(o.last_sync || {}).map((r) => r.at).filter(Boolean).sort().pop();
   return (
     <div className="space-y-4">
-      {alerts.map((a, i) => (
-        <button key={i} type="button" disabled={!a.to} onClick={() => a.to && go(a.to)} className="w-full text-left flex items-center gap-3 px-4 py-3 rounded-2xl"
-          style={{ background: `${a.tone}1A`, boxShadow: `inset 0 0 0 0.5px ${a.tone}59` }}>
-          <span className="w-8 h-8 rounded-full grid place-items-center text-white shrink-0" style={{ background: a.tone }}><Icon name="alert" size={16} /></span>
-          <span className="text-sm text-glass-primary">{a.text}</span>
-        </button>
-      ))}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Stat label="Sales today" to={['amazon', 'sales']} value={inr(o.sales_today.revenue)} sub={`${o.sales_today.units} units`} />
-        <Stat label="Last 7 days" to={['amazon', 'sales']} value={inr(o.sales_7d.revenue)} sub={`${o.sales_7d.units} units`} />
-        <Stat label="Waiting for approval" to={['amazon', 'queue']} value={o.pending} tone={o.pending ? '#B25E00' : undefined} />
-        <Stat label="Open problems" to={['amazon', 'audit']} value={o.open_findings.blocker} sub={`${o.open_findings.warning} warnings`} tone={o.open_findings.blocker ? '#C4261D' : undefined} />
+      <div className="grid grid-cols-2 gap-3">
+        <Stat label="Sold today" value={inr(o.sales_today.revenue)} sub={`${o.sales_today.units} item${o.sales_today.units === 1 ? '' : 's'}`} onClick={() => go('sales')} />
+        <Stat label="Sold in last 7 days" value={inr(o.sales_7d.revenue)} sub={`${o.sales_7d.units} item${o.sales_7d.units === 1 ? '' : 's'}`} onClick={() => go('sales')} />
       </div>
       <div className="glass-card p-4">
-        <div className="flex justify-between items-center mb-2">
-          <h3 className="font-bold">Fix first</h3>
-          <button className="text-sm font-semibold" style={{ color: 'var(--accent)' }} onClick={() => go('audit')}>All findings</button>
-        </div>
-        {o.top_findings.length === 0 ? <Empty>Nothing open.</Empty> : (
-          <ul className="space-y-2">{o.top_findings.map((f) => (
-            <li key={f.id} className="flex gap-2 items-start text-sm"><Chip {...SEV[f.severity]}>{f.severity}</Chip>
-              <span><b className="text-glass-primary">{f.asin || 'Account'}</b> <span className="text-glass-secondary">{f.message}</span></span></li>))}</ul>
+        <h3 className="font-bold mb-3">What to do today</h3>
+        {todo.length === 0 ? <div className="text-sm" style={{ color: '#1E7B34' }}>All good. Nothing needs you right now.</div> : (
+          <ul className="space-y-2">
+            {todo.map((a, i) => (
+              <li key={i} className="flex items-center gap-3 p-3 rounded-2xl" style={{ background: `${a.tone}14`, boxShadow: `inset 0 0 0 0.5px ${a.tone}59` }}>
+                <span className="w-9 h-9 rounded-full grid place-items-center text-white shrink-0" style={{ background: a.tone }}><Icon name={a.icon} size={17} /></span>
+                <span className="flex-1 min-w-0"><span className="block text-sm font-semibold text-glass-primary">{a.text}</span>
+                  {a.sub && <span className="block text-xs text-glass-secondary">{a.sub}</span>}</span>
+                {a.btn && <button type="button" className="glass-btn px-3 py-1.5 text-sm shrink-0" onClick={() => go(a.to)}>{a.btn}</button>}
+              </li>
+            ))}
+          </ul>
         )}
       </div>
-      <div className="grid md:grid-cols-2 gap-3">
-        <div className="glass-card p-4">
-          <h3 className="font-bold mb-2">Account health</h3>
-          {h ? (
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div>Order defect rate <b>{pct(h.odr)}</b> <span className="text-glass-muted">(&lt;1%)</span></div>
-              <div>Cancellation <b>{pct(h.cancel_rate)}</b> <span className="text-glass-muted">(&lt;2.5%)</span></div>
-              <div>Late shipment <b>{pct(h.late_ship_rate)}</b> <span className="text-glass-muted">(&lt;4%)</span></div>
-              <div>Valid tracking <b>{pct(h.valid_tracking_rate)}</b> <span className="text-glass-muted">(&gt;95%)</span></div>
-            </div>
-          ) : <div className="text-sm text-glass-muted">No health report yet (arrives with the hourly report sync).</div>}
-        </div>
+      {o.top_findings.length > 0 && (
         <div className="glass-card p-4">
           <div className="flex justify-between items-center mb-2">
-            <h3 className="font-bold">Data freshness</h3>
-            {access.is_admin && <button disabled={syncing} onClick={sync} className="glass-btn px-3 py-1.5 text-sm inline-flex items-center gap-1.5"><Icon name="refresh" size={14} />{syncing ? 'Syncing…' : 'Sync now'}</button>}
+            <h3 className="font-bold">Fix these first</h3>
+            <button className="text-sm font-semibold" style={{ color: 'var(--accent)' }} onClick={() => go('audit')}>See all</button>
           </div>
-          <ul className="text-sm space-y-1">
-            {['listings', 'pricing', 'reports', 'finances', 'execute'].map((j) => (
-              <li key={j} className="flex justify-between"><span className="capitalize text-glass-secondary">{j}</span>
-                <span>{o.last_sync?.[j] ? `${o.last_sync[j].status} · ${ageText(o.last_sync[j].at)}` : 'never'}</span></li>))}
-          </ul>
-          {o.waiting_requests > 0 && <div className="text-xs text-glass-muted mt-2">{o.waiting_requests} question(s) waiting for Claude.</div>}
+          <ul className="space-y-3">{o.top_findings.map((f) => {
+            const [what, how] = plain(f.rule_code, f.message);
+            return (
+              <li key={f.id} className="text-sm">
+                <div className="font-semibold text-glass-primary">{what}</div>
+                <div className="text-xs text-glass-secondary truncate">{f.sku ? (names[f.sku] || f.asin) : 'Whole account'}</div>
+                {how && <div className="text-xs text-glass-muted">{how}</div>}
+              </li>
+            );
+          })}</ul>
         </div>
+      )}
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-glass-muted px-1">
+        <span>Data from Amazon updated {lastAt ? ageText(lastAt) : 'never'}{o.waiting_requests > 0 ? ` · ${o.waiting_requests} question(s) waiting for Claude` : ''}</span>
+        {access.is_admin && <button disabled={syncing} onClick={sync} className="glass-btn-ghost px-3 py-1.5 text-xs inline-flex items-center gap-1.5"><Icon name="refresh" size={13} />{syncing ? 'Updating…' : 'Update now'}</button>}
       </div>
     </div>
   );
 }
 
-// ---------------------------------------------------------------- Products & Listings
-function Listings({ openStudio }) {
-  const [rows, , err] = useLoad(() => rpc('api_amz_listings'));
+// ---------------------------------------------------------------- Delivery speed (all products)
+function DeliverySpeed({ listings, go }) {
+  const [days, setDays] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const kids = (listings || []).filter((l) => !l.is_parent);
+  const count = (fn) => kids.filter(fn).length;
+  const apply = async () => {
+    const word = dispatchText(days).toLowerCase();
+    const ok = await confirmDialog(`Set ${word} dispatch for all ${kids.length} products?`, {
+      message: days === 0
+        ? 'You must pack and hand over every order on the day it comes in. Book the Easy Ship pickup before 12 noon. Late dispatches hurt your account.\n\nThis makes one change per product. You approve them in Approve Changes.'
+        : 'This makes one change per product. You approve them in Approve Changes.',
+      confirmText: 'Yes, prepare it' });
+    if (!ok) return;
+    setBusy(true);
+    const r = await run(rpc('api_amz_dispatch_all', { p_days: days }));
+    setBusy(false);
+    if (!r) return;
+    if (r.drafted === 0) showToast(`All products are already set to ${word} (or waiting for your OK).`, 'success');
+    else { showToast(`${r.drafted} change${r.drafted > 1 ? 's' : ''} ready. Approve them to go live.`, 'success'); go('approve'); }
+  };
+  return (
+    <div className="glass-card p-4 space-y-3">
+      <div className="flex items-start gap-3">
+        <span className="w-10 h-10 rounded-[12px] grid place-items-center text-white shrink-0" style={{ background: 'linear-gradient(160deg,#3D9BFF,#007AFF)' }}><Icon name="zap" size={20} /></span>
+        <div className="min-w-0">
+          <h3 className="font-bold">Delivery speed</h3>
+          <p className="text-xs text-glass-secondary">How fast you hand orders to Easy Ship. Faster dispatch shows customers an earlier delivery date.</p>
+        </div>
+      </div>
+      <div className="text-xs text-glass-secondary">Now: <b>{count((l) => Number(l.handling_days) === 0 && l.handling_days != null)}</b> same day · <b>{count((l) => Number(l.handling_days) === 1)}</b> next day · <b>{count((l) => l.handling_days != null && Number(l.handling_days) > 1)}</b> slower · <b>{count((l) => l.handling_days == null)}</b> not known yet</div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Seg label="Dispatch time" value={days} onChange={setDays} options={[[0, 'Same day'], [1, 'Next day']]} />
+        <button type="button" className="glass-btn px-4 py-2 text-sm" disabled={busy || !kids.length} onClick={apply}>{busy ? 'Preparing…' : 'Apply to all products'}</button>
+      </div>
+      <details className="text-xs text-glass-muted">
+        <summary className="cursor-pointer">Good to know</summary>
+        <ul className="list-disc pl-5 mt-1 space-y-1">
+          <li>Amazon decides the delivery date the customer sees. Easy Ship usually delivers in 1 to 3 days; same-day or next-day delivery needs Amazon to offer it in that pin code.</li>
+          <li>Same day: book the Easy Ship pickup before 12 noon. Pickups run 1 pm to 5 pm.</li>
+          <li>Keep late dispatches under 4% or Amazon can limit your account.</li>
+          <li>If Amazon does not allow same day for your account, it will say so here and nothing changes. Then pick Next day.</li>
+        </ul>
+      </details>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- My Products
+function Products({ listings, findings, go, openStudio, reload }) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(null);
-  const [detail, setDetail] = useState(null);
-  useEffect(() => { if (open) rpc('api_amz_listing', { p_sku: open }).then(setDetail).catch((e) => showToast(e.message, 'error')); else setDetail(null); }, [open]);
-  const list = useMemo(() => (rows || []).filter((r) => !q || `${r.sku} ${r.asin} ${r.title}`.toLowerCase().includes(q.toLowerCase())), [rows, q]);
-  if (err) return <Err msg={err} />;
+  const bySku = useMemo(() => {
+    const m = {};
+    (findings || []).forEach((f) => { if (f.sku) (m[f.sku] = m[f.sku] || []).push(f); });
+    return m;
+  }, [findings]);
+  const list = useMemo(() => (listings || []).filter((r) => !q || `${r.sku} ${r.asin} ${r.title}`.toLowerCase().includes(q.toLowerCase())), [listings, q]);
+  const draftPrice = async (r) => {
+    const v = await promptDialog(`New price for ${r.asin}`, { message: `Now ${inr(r.price)}${r.buybox_price ? `. The seller winning "Add to Cart" asks ${inr(r.buybox_price)}` : ''}. Never below ₹299.`, placeholder: 'e.g. 349', required: true });
+    if (!v) return;
+    const c = await run(rpc('api_amz_draft_create', { p_kind: 'price', p_sku: r.sku, p_after: { price: Number(v) }, p_summary: `Price ${inr(r.price)} → ${inr(v)}` }));
+    if (c) showToast(c.guard_result.ok ? 'Price change ready. Approve it in Approve Changes.' : `Not allowed: ${c.guard_result.blockers.map((b) => b.message).join(' ')}`, c.guard_result.ok ? 'success' : 'error');
+  };
+  const draftDispatch = async (r, d) => {
+    const c = await run(rpc('api_amz_draft_create', { p_kind: 'dispatch', p_sku: r.sku, p_after: { handling_days: d }, p_summary: `${dispatchText(d)} dispatch` }));
+    if (c) showToast(c.guard_result.ok ? 'Ready. Approve it in Approve Changes.' : `Not allowed: ${c.guard_result.blockers.map((b) => b.message).join(' ')}`, c.guard_result.ok ? 'success' : 'error');
+    reload();
+  };
   return (
     <div className="space-y-3">
-      <input className="glass-input w-full px-3 py-2 text-sm" placeholder="Search SKU, ASIN or title" value={q} onChange={(e) => setQ(e.target.value)} />
-      {!rows ? <Empty>Loading…</Empty> : list.map((r) => (
-        <div key={r.sku} className="glass-card p-3">
-          <button className="w-full text-left" onClick={() => setOpen(open === r.sku ? null : r.sku)}>
+      <DeliverySpeed listings={listings} go={go} />
+      <input className="glass-input w-full px-3 py-2 text-sm" placeholder="Search your products" value={q} onChange={(e) => setQ(e.target.value)} />
+      {!listings ? <Empty>Loading…</Empty> : list.length === 0 ? <Empty>No products found.</Empty> : list.map((r) => {
+        const probs = bySku[r.sku] || [];
+        const selling = r.status === 'Active';
+        return (
+          <div key={r.sku} className="glass-card p-3" data-sku={r.sku}>
+            <button className="w-full text-left" onClick={() => setOpen(open === r.sku ? null : r.sku)} aria-expanded={open === r.sku}>
+              <div className="font-semibold text-glass-primary text-sm">{r.title || '(no name)'}</div>
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {r.is_parent ? <Chip>Group of sizes / colours</Chip> : <>
+                  {r.price != null && <Chip>{inr(r.price)}</Chip>}
+                  {r.quantity != null && <Chip {...(r.quantity < 3 ? SEV.warning : {})}>{r.quantity} in stock</Chip>}
+                  <Chip {...(Number(r.handling_days) === 0 && r.handling_days != null ? GREEN : {})}>Ships: {dispatchText(r.handling_days)}</Chip>
+                  {r.synced_at && <Chip {...(selling ? GREEN : SEV.blocker)}>{selling ? 'Selling' : 'Not selling'}</Chip>}
+                  {r.has_buybox === true && <Chip {...GREEN}>You win "Add to Cart"</Chip>}
+                  {r.has_buybox === false && <Chip {...SEV.blocker}>Another seller wins "Add to Cart"</Chip>}
+                </>}
+                {probs.length > 0 && <Chip {...SEV.warning}>{probs.length} to fix</Chip>}
+              </div>
+            </button>
+            {open === r.sku && (
+              <div className="mt-3 pt-3 border-t space-y-3 text-sm" style={{ borderColor: 'var(--border-subtle)' }}>
+                {probs.length > 0 && <ul className="space-y-1.5">{probs.map((f) => { const [what, how] = plain(f.rule_code, f.message); return <li key={f.id}><b className="text-glass-primary">{what}.</b> <span className="text-glass-secondary">{how}</span></li>; })}</ul>}
+                {!r.is_parent && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-glass-muted">Dispatch time:</span>
+                    <button className="glass-btn-ghost px-3 py-1.5 text-xs" onClick={() => draftDispatch(r, 0)}>Same day</button>
+                    <button className="glass-btn-ghost px-3 py-1.5 text-xs" onClick={() => draftDispatch(r, 1)}>Next day</button>
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  {!r.is_parent && <button className="glass-btn px-3 py-1.5 text-sm" onClick={() => draftPrice(r)}>Change price</button>}
+                  <button className="glass-btn-ghost px-3 py-1.5 text-sm" onClick={() => openStudio(r.sku)}>Edit name & text</button>
+                  <button className="glass-btn-ghost px-3 py-1.5 text-sm" onClick={() => go('images')}>Photos</button>
+                </div>
+                <div className="text-[11px] text-glass-muted">{r.asin} · {r.sku}{r.synced_at ? ` · updated ${ageText(r.synced_at)}` : ' · not yet updated from Amazon'}</div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- Approve Changes
+const DONE_MSG = { live: 'Live on Amazon.', executing: 'Sent. Amazon is still applying it.', skipped: 'Already running.',
+  failed: 'Amazon said no. See the reason on the card.', stale: 'Amazon changed this product meanwhile. Nothing sent.',
+  needs_manual: 'Done in part. One step is left for you (see the card).' };
+
+function Approve({ access, onChange }) {
+  const [status, setStatus] = useState('open');
+  const [rows, load, err] = useLoad(() => rpc('api_amz_queue', { p_status: status === 'all' ? null : status }), [status]);
+  const [busy, setBusy] = useState('');
+  const refresh = () => { load(); onChange?.(); };
+  const send = async (c) => {
+    const a = await run(rpc('api_amz_approve', { p_id: c.id, p_second_confirm: !!c._second }));
+    if (a?.status === 'stale') { showToast('This product changed on Amazon after the change was made. Marked "Out of date".', 'error'); return 'stale'; }
+    if (!a) return 'error';
+    const r = await run(edge('amazon-execute', { id: c.id }));
+    return r?.status || 'approved';
+  };
+  const approve = async (c) => {
+    const d = diffRows(c.before, c.after);
+    if (c.needs_second_confirm) {
+      const msg = `${(c.guard_result.confirms || []).map((x) => x.message).join(' ')}\n\n${d.map((r) => `${r.label}: ${r.before} → ${r.after}`).join('\n')}`;
+      if (!(await confirmDialog(msg, { title: 'Please check again', confirmText: 'Yes, approve', danger: true }))) return;
+      c._second = true;
+    } else if (!(await confirmDialog(`Approve "${c.summary || c.kind}"?`, { message: 'It goes live on Amazon right away.', confirmText: 'Approve' }))) return;
+    setBusy(c.id);
+    const st = await send(c);
+    if (DONE_MSG[st]) showToast(DONE_MSG[st], st === 'failed' ? 'error' : 'success');
+    setBusy(''); refresh();
+  };
+  const ready = (rows || []).filter((c) => c.status === 'pending' && c.guard_result?.ok && !c.needs_second_confirm);
+  const approveAll = async () => {
+    if (!(await confirmDialog(`Approve all ${ready.length} changes?`, { message: 'Each one goes live on Amazon. Changes that need a second look are skipped.', confirmText: 'Approve all' }))) return;
+    setBusy('all');
+    const res = {};
+    for (let i = 0; i < ready.length; i++) {
+      showToast(`Sending ${i + 1} of ${ready.length}…`, 'info');
+      const st = await send(ready[i]); res[st] = (res[st] || 0) + 1;
+    }
+    setBusy('');
+    showToast(Object.entries(res).map(([k, n]) => `${n} ${(STATUS_STYLE[k]?.label || k).toLowerCase()}`).join(', '), res.failed ? 'error' : 'success');
+    refresh();
+  };
+  const reject = async (c) => {
+    const reason = await promptDialog('Why say no?', { message: 'Claude reads this before suggesting again.', required: true });
+    if (reason) { await run(rpc('api_amz_reject', { p_id: c.id, p_reason: reason }), 'Rejected'); refresh(); }
+  };
+  const act = async (fn, c, msg) => { await run(rpc(fn, { p_id: c.id }), msg); refresh(); };
+  return (
+    <div className="space-y-3">
+      <div className="glass-card p-3 text-xs text-glass-secondary">Nothing changes on Amazon until you approve it here. You can undo a live change any time.</div>
+      <div className="flex flex-wrap justify-between gap-2 items-center">
+        <Seg label="Show" value={status} onChange={setStatus} options={[['open', 'To do'], ['live', 'Done'], ['rejected', 'Said no'], ['all', 'All']]} />
+        {access.can_approve && ready.length > 1 && status !== 'live' && status !== 'rejected' && (
+          <button className="glass-btn px-4 py-2 text-sm" disabled={!!busy} onClick={approveAll}>{busy === 'all' ? 'Sending…' : `Approve all (${ready.length})`}</button>)}
+      </div>
+      <Err msg={err} />
+      {!rows ? <Empty>Loading…</Empty> : rows.length === 0 ? <Empty>{status === 'open' ? 'Nothing waiting. All done.' : 'Nothing here.'}</Empty> : rows.map((c) => {
+        const st = STATUS_STYLE[c.status] || {};
+        return (
+          <div key={c.id} className="glass-card p-4 text-sm">
             <div className="flex flex-wrap justify-between gap-2">
-              <div className="min-w-0">
-                <div className="font-semibold text-glass-primary text-sm">{r.title || '(no title)'}</div>
-                <div className="text-xs text-glass-muted mt-0.5">{r.asin} · {r.sku}{r.is_parent ? ' · parent' : ''} · {r.status}</div>
-              </div>
-              <div className="flex flex-wrap gap-1.5 items-start">
-                <Chip {...(r.title_chars > 75 ? SEV.blocker : {})}>{r.title_chars}/75</Chip>
-                {r.price != null && <Chip>{inr(r.price)}</Chip>}
-                {r.has_buybox === false && <Chip {...SEV.blocker}>Buy Box lost · {inr(r.buybox_price)}</Chip>}
-                {r.has_buybox === true && <Chip bg="rgba(52,199,89,0.14)" fg="#1E7B34">Buy Box</Chip>}
-                {r.has_buybox == null && !r.is_parent && <Chip {...SEV.warning}>No Buy Box</Chip>}
-                {r.quantity != null && <Chip>{r.quantity} in stock</Chip>}
-              </div>
+              <div className="min-w-0"><div className="font-semibold text-glass-primary">{c.summary || c.kind}</div>
+                <div className="text-xs text-glass-muted truncate">{c.before?.title || c.asin || '—'} · suggested by {c.created_by_type === 'claude' ? 'Claude' : c.created_by_type === 'system' ? 'the CRM' : 'you'} · {ageText(c.created_at)}</div></div>
+              <Chip bg={st.bg} fg={st.fg}>{st.label || c.status}</Chip>
             </div>
-            <div className="mt-2"><Score s={r.score} /></div>
-          </button>
-          {open === r.sku && detail && (
-            <div className="mt-3 pt-3 border-t space-y-2 text-sm" style={{ borderColor: 'var(--border-subtle)' }}>
-              {detail.findings.length > 0 && <ul className="space-y-1">{detail.findings.map((f) => <li key={f.id} className="flex gap-2"><Chip {...SEV[f.severity]}>{f.severity}</Chip><span className="text-glass-secondary">{f.message}</span></li>)}</ul>}
-              <div><span className="text-glass-muted">Bullets:</span> {(detail.bullets || []).length || 'none in the CRM yet'}</div>
-              <div><span className="text-glass-muted">Country of origin / MRP / manufacturer / net quantity:</span> {[detail.country_of_origin, detail.mrp && inr(detail.mrp), detail.manufacturer, detail.net_quantity].map((v) => v || '—').join(' · ')}</div>
-              <div><span className="text-glass-muted">Synced from Amazon:</span> {detail.synced_at ? ageText(detail.synced_at) : 'not yet (imported from your CSV)'}</div>
-              <div><span className="text-glass-muted">Versions:</span> {detail.versions.map((v) => `v${v.version} ${v.source}`).join(', ')}</div>
-              <button className="glass-btn px-3 py-1.5 text-sm" onClick={() => openStudio(r.sku)}>Edit in Content Studio</button>
+            <div className="mt-3 grid gap-2">
+              {diffRows(c.before, c.after).map((r) => (
+                <div key={r.key} className="grid sm:grid-cols-[130px_1fr_1fr] gap-1 sm:gap-3 text-xs">
+                  <div className="text-glass-muted">{r.label}</div>
+                  <div className="whitespace-pre-wrap line-through decoration-1 opacity-60"><span className="sr-only">Now: </span>{r.before}</div>
+                  <div className="whitespace-pre-wrap font-medium"><span className="sr-only">New: </span>{r.after}</div>
+                </div>
+              ))}
             </div>
-          )}
-        </div>
-      ))}
+            <GuardList g={c.guard_result} />
+            {c.preview_result?.preview?.issues?.length > 0 && <div className="text-xs mt-2 text-glass-secondary">Amazon says: {c.preview_result.preview.issues.map((i) => i.message).join(' | ')}</div>}
+            {c.error && <div className="text-xs mt-2" style={{ color: c.status === 'needs_manual' ? '#7A2EA8' : '#C4261D' }}>{c.error}</div>}
+            {c.reject_reason && <div className="text-xs mt-2 text-glass-muted">Said no: {c.reject_reason}</div>}
+            <div className="flex flex-wrap gap-2 mt-3">
+              {c.status === 'pending' && access.can_approve && <button disabled={!!busy || !c.guard_result?.ok} className="glass-btn px-4 py-1.5 text-sm" onClick={() => approve(c)}>{busy === c.id ? 'Sending…' : 'Approve'}</button>}
+              {['pending', 'stale'].includes(c.status) && access.can_approve && <button className="glass-btn-ghost px-3 py-1.5 text-sm" onClick={() => reject(c)}>Say no</button>}
+              {['failed', 'stale'].includes(c.status) && <button className="glass-btn-ghost px-3 py-1.5 text-sm" onClick={() => act('api_amz_resubmit', c, 'Checked again and put back in the list')}>Check again</button>}
+              {c.status === 'needs_manual' && access.can_approve && <button className="glass-btn-ghost px-3 py-1.5 text-sm" onClick={() => act('api_amz_manual_done', c, 'Marked done')}>I did it in Seller Central</button>}
+              {['live', 'needs_manual'].includes(c.status) && c.kind !== 'ads_budget' && <button className="glass-btn-ghost px-3 py-1.5 text-sm" onClick={() => act('api_amz_rollback', c, 'Undo prepared: approve it to undo')}>Undo</button>}
+              {c.batch_id && ['pending', 'approved'].includes(c.status) && access.can_approve && <button className="glass-btn-ghost px-3 py-1.5 text-sm" style={{ color: '#C4261D' }}
+                onClick={async () => { if (await confirmDialog('Cancel every waiting change in this group?', { danger: true, confirmText: 'Cancel group' })) { const n = await run(rpc('api_amz_cancel_batch', { p_batch: c.batch_id })); if (n !== undefined) showToast(`${n} cancelled`, 'success'); refresh(); } }}>Cancel group</button>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- Sales
+function Sales({ listings }) {
+  const [days, setDays] = useState(30);
+  const [d, , err] = useLoad(() => rpc('api_amz_sales', { p_days: days }), [days]);
+  const names = useMemo(() => Object.fromEntries((listings || []).map((l) => [l.sku, l.title])), [listings]);
+  const max = Math.max(1, ...((d?.daily || []).map((x) => Number(x.revenue))));
+  const total = (d?.daily || []).reduce((a, x) => ({ rev: a.rev + Number(x.revenue), units: a.units + Number(x.units) }), { rev: 0, units: 0 });
+  return (
+    <div className="space-y-3">
+      <Seg label="Period" value={days} onChange={setDays} options={[[7, 'Last 7 days'], [30, 'Last 30 days'], [90, 'Last 90 days']]} />
+      <Err msg={err} />
+      {!d ? <Empty>Loading…</Empty> : d.daily.length === 0 ? <Empty>No sales data yet. It comes from Amazon every hour (yesterday's sales show today).</Empty> : (
+        <>
+          <div className="grid grid-cols-2 gap-3"><Stat label="Money from sales" value={inr(total.rev)} /><Stat label="Items sold" value={total.units} /></div>
+          <div className="glass-card p-4">
+            <div className="text-xs text-glass-muted mb-2">Sales per day</div>
+            <div className="flex items-end gap-[2px] h-32" role="img" aria-label="Sales per day">
+              {d.daily.map((x) => <div key={x.day} title={`${x.day}: ${inr(x.revenue)}, ${x.units} sold`} className="flex-1 rounded-t" style={{ height: `${(Number(x.revenue) / max) * 100}%`, minHeight: 2, background: 'var(--accent)' }} />)}
+            </div>
+            <div className="flex justify-between text-[10px] text-glass-muted mt-1"><span>{d.daily[0].day}</span><span>{d.daily[d.daily.length - 1].day}</span></div>
+          </div>
+          <div className="glass-card divide-y" style={{ borderColor: 'var(--border-subtle)' }}>
+            <div className="px-3 py-2 text-xs text-glass-muted">Best sellers</div>
+            {d.by_sku.map((r) => (
+              <div key={r.sku} className="px-3 py-2 text-sm flex items-center gap-3">
+                <div className="flex-1 min-w-0"><div className="truncate font-medium">{names[r.sku] || r.sku}</div>
+                  <div className="text-[11px] text-glass-muted">{r.sessions != null ? `${r.sessions} visitors · ${pct(r.conversion_pct)} bought` : r.asin}</div></div>
+                <div className="text-right shrink-0"><div className="font-semibold">{inr(r.revenue)}</div><div className="text-[11px] text-glass-muted">{r.units} sold</div></div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -217,31 +426,33 @@ function Audit({ access }) {
   const [status, setStatus] = useState('open');
   const [rows, load, err] = useLoad(() => rpc('api_amz_findings', { p_status: status }), [status]);
   const dismiss = async (f) => {
-    const reason = await promptDialog('Dismiss this finding?', { message: f.message, placeholder: 'Why (kept in the log)', required: true });
-    if (reason) { await run(rpc('api_amz_finding_dismiss', { p_id: f.id, p_reason: reason }), 'Dismissed'); load(); }
+    const reason = await promptDialog('Ignore this?', { message: f.message, placeholder: 'Why (kept in the log)', required: true });
+    if (reason) { await run(rpc('api_amz_finding_dismiss', { p_id: f.id, p_reason: reason }), 'Ignored'); load(); }
   };
   const askFix = async (f) => {
     await run(rpc('api_amz_request_create', { p_question: `Draft a fix for finding #${f.id} on ${f.asin || 'the account'} (${f.sku || ''}): ${f.message}` }),
-      'Sent to Claude. The draft will appear in the Change Queue after the next run.');
+      'Sent to Claude. The fix will show up in Approve Changes after Claude\'s next run.');
   };
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-2 justify-between">
         <div className="flex gap-1 p-1 rounded-xl" style={{ background: 'rgba(118,118,128,0.12)' }}>
-          {['open', 'fixed', 'dismissed'].map((s) => <button key={s} onClick={() => setStatus(s)} className={`px-3 py-1.5 rounded-lg text-sm capitalize ${status === s ? 'bg-white font-semibold shadow-sm' : ''}`}>{s}</button>)}
+          {[['open', 'To fix'], ['fixed', 'Fixed'], ['dismissed', 'Ignored']].map(([s, l]) => <button key={s} onClick={() => setStatus(s)} className={`px-3 py-1.5 rounded-lg text-sm ${status === s ? 'bg-white font-semibold shadow-sm' : ''}`}>{l}</button>)}
         </div>
-        <button className="glass-btn px-3 py-1.5 text-sm" onClick={async () => { const n = await run(rpc('api_amz_audit_run')); if (n !== undefined) showToast(`Audit done: ${n} failing checks`, 'success'); load(); }}>Run audit now</button>
+        <button className="glass-btn px-3 py-1.5 text-sm" onClick={async () => { const n = await run(rpc('api_amz_audit_run')); if (n !== undefined) showToast(`Checked: ${n} thing(s) to fix`, 'success'); load(); }}>Check again now</button>
       </div>
       <Err msg={err} />
-      {!rows ? <Empty>Loading…</Empty> : rows.length === 0 ? <Empty>No {status} findings.</Empty> : rows.map((f) => (
+      {!rows ? <Empty>Loading…</Empty> : rows.length === 0 ? <Empty>{status === 'open' ? 'Nothing to fix. Well done.' : 'Nothing here.'}</Empty> : rows.map((f) => (
         <div key={f.id} className="glass-card p-3 text-sm">
-          <div className="flex flex-wrap gap-2 items-center"><Chip {...SEV[f.severity]}>{f.severity}</Chip><b>{f.asin || 'Account'}</b><span className="text-glass-muted text-xs">{f.sku} · {f.rule_code} · {ageText(f.created_at)}</span></div>
-          <div className="mt-1 text-glass-secondary">{f.message}</div>
+          <div className="flex flex-wrap gap-2 items-center"><Chip {...SEV[f.severity]}>{SEV_WORD[f.severity] || f.severity}</Chip><b>{plain(f.rule_code, f.message)[0]}</b></div>
+          {plain(f.rule_code)[1] && <div className="mt-1 text-glass-primary">{plain(f.rule_code)[1]}</div>}
+          <div className="mt-1 text-xs text-glass-secondary">{f.message}</div>
+          <div className="text-[11px] text-glass-muted mt-0.5">{f.asin || 'Whole account'} · {f.sku} · {ageText(f.created_at)}</div>
           {f.dismiss_reason && <div className="text-xs text-glass-muted mt-1">Dismissed: {f.dismiss_reason}</div>}
           {status === 'open' && access.can_view && (
             <div className="flex gap-2 mt-2">
-              <button className="glass-btn px-3 py-1 text-xs" onClick={() => askFix(f)}>Ask Claude to draft a fix</button>
-              <button className="glass-btn-ghost px-3 py-1 text-xs" onClick={() => dismiss(f)}>Dismiss</button>
+              <button className="glass-btn px-3 py-1 text-xs" onClick={() => askFix(f)}>Ask Claude to fix it</button>
+              <button className="glass-btn-ghost px-3 py-1 text-xs" onClick={() => dismiss(f)}>Ignore</button>
             </div>
           )}
         </div>
@@ -365,10 +576,10 @@ function ContentStudio({ skus, initialSku }) {
   }, [after, sku]);
   const set = (k, v) => { setF((x) => ({ ...x, [k]: v })); setTouched((t) => ({ ...t, [k]: true })); };
   const submit = async () => {
-    const summary = await promptDialog('What does this change do?', { placeholder: 'e.g. Title to 75 chars, keyword "personalised diary 2027" first', required: true });
+    const summary = await promptDialog('What does this change do?', { placeholder: 'e.g. Shorter product name with "personalised diary 2027" first', required: true });
     if (!summary) return;
     const r = await run(rpc('api_amz_draft_create', { p_kind: 'listing', p_sku: sku, p_after: after, p_summary: summary }));
-    if (r) { showToast(r.guard_result.ok ? 'Sent to the Change Queue for approval.' : 'Saved, but it has blockers; fix them before it can be approved.', r.guard_result.ok ? 'success' : 'error'); setTouched({}); }
+    if (r) { showToast(r.guard_result.ok ? 'Sent to Approve Changes.' : 'Saved, but something must be fixed before it can be approved.', r.guard_result.ok ? 'success' : 'error'); setTouched({}); }
   };
   const saveBrief = async () => {
     await run(rpc('api_amz_facts_set', { p_asin: base.asin, p_buyer: brief.buyer, p_use_cases: brief.use_cases,
@@ -378,19 +589,19 @@ function ContentStudio({ skus, initialSku }) {
   return (
     <div className="space-y-3">
       <select className={inp} value={sku} onChange={(e) => setSku(e.target.value)}>
-        <option value="">Pick a listing…</option>{skus.map((s) => <option key={s.sku} value={s.sku}>{s.asin} · {s.sku} · {(s.title || '').slice(0, 60)}</option>)}
+        <option value="">Pick a product…</option>{skus.map((s) => <option key={s.sku} value={s.sku}>{(s.title || s.sku).slice(0, 70)} · {s.sku}</option>)}
       </select>
       {base && (
         <div className="grid lg:grid-cols-[1fr_320px] gap-3">
           <div className="glass-card p-4 space-y-3">
             {base.is_parent && <div className="text-xs" style={{ color: '#7A2EA8' }}>Parent listing: changes affect all variations and need a second confirm.</div>}
-            <Field label="Title" count={chars(f.title)} max={75}><input className={inp} value={f.title} onChange={(e) => set('title', e.target.value)} /></Field>
-            <Field label="Item Highlights (shown under the title)" count={chars(f.item_highlights)} max={125}><input className={inp} value={f.item_highlights} onChange={(e) => set('item_highlights', e.target.value)} /></Field>
+            <Field label="Product name" count={chars(f.title)} max={75}><input className={inp} value={f.title} onChange={(e) => set('title', e.target.value)} /></Field>
+            <Field label="Short highlight (shown under the name)" count={chars(f.item_highlights)} max={125}><input className={inp} value={f.item_highlights} onChange={(e) => set('item_highlights', e.target.value)} /></Field>
             {f.bullets.map((b, i) => (
-              <Field key={i} label={`Bullet ${i + 1}`} count={chars(b)}><textarea rows={2} className={inp} value={b} onChange={(e) => set('bullets', f.bullets.map((x, j) => (j === i ? e.target.value : x)))} /></Field>
+              <Field key={i} label={`Key point ${i + 1}`} count={chars(b)}><textarea rows={2} className={inp} value={b} onChange={(e) => set('bullets', f.bullets.map((x, j) => (j === i ? e.target.value : x)))} /></Field>
             ))}
             <Field label="Description" count={chars(f.description)}><textarea rows={4} className={inp} value={f.description} onChange={(e) => set('description', e.target.value)} /></Field>
-            <Field label="Backend search terms" count={utf8Bytes(f.backend_terms)} max={249} unit="bytes"><textarea rows={2} className={inp} value={f.backend_terms} onChange={(e) => set('backend_terms', e.target.value)} /></Field>
+            <Field label="Hidden search words (buyers don't see these)" count={utf8Bytes(f.backend_terms)} max={249} unit="bytes"><textarea rows={2} className={inp} value={f.backend_terms} onChange={(e) => set('backend_terms', e.target.value)} /></Field>
             <div className="grid sm:grid-cols-2 gap-3">
               <Field label="MRP (₹)"><input type="number" className={inp} value={f.mrp} onChange={(e) => set('mrp', e.target.value)} /></Field>
               <Field label="Country of origin (e.g. IN)"><input className={inp} value={f.country_of_origin} onChange={(e) => set('country_of_origin', e.target.value.toUpperCase())} /></Field>
@@ -401,10 +612,10 @@ function ContentStudio({ skus, initialSku }) {
           </div>
           <div className="space-y-3">
             <div className="glass-card p-4">
-              <h3 className="font-bold text-sm">Checks</h3>
+              <h3 className="font-bold text-sm">Amazon rules check</h3>
               {Object.keys(after).length ? <GuardList g={guard} /> : <div className="text-xs text-glass-muted mt-1">Change a field to see the checks.</div>}
               <button className="glass-btn w-full mt-3 py-2 text-sm" disabled={!Object.keys(after).length} onClick={submit}>Send for approval</button>
-              <div className="text-[11px] text-glass-muted mt-2">Nothing goes to Amazon until it is approved in the Change Queue. Item Highlights and net quantity are set by hand in Seller Central after approval.</div>
+              <div className="text-[11px] text-glass-muted mt-2">Nothing goes to Amazon until it is approved in Approve Changes. The short highlight and quantity in the box are set by hand in Seller Central after approval.</div>
             </div>
             <div className="glass-card p-4 space-y-2">
               <h3 className="font-bold text-sm">Product Brief · {base.asin}</h3>
@@ -446,7 +657,7 @@ function Images({ skus }) {
   return (
     <div className="space-y-3">
       <select className="glass-input w-full px-3 py-2 text-sm" value={sku} onChange={(e) => setSku(e.target.value)}>
-        <option value="">Pick a listing…</option>{skus.map((s) => <option key={s.sku} value={s.sku}>{s.asin} · {(s.title || '').slice(0, 70)}</option>)}
+        <option value="">Pick a product…</option>{skus.map((s) => <option key={s.sku} value={s.sku}>{(s.title || s.sku).slice(0, 70)}</option>)}
       </select>
       {l && (
         <>
@@ -471,158 +682,23 @@ function Images({ skus }) {
   );
 }
 
-// ---------------------------------------------------------------- Change Queue
-function ChangeQueue({ access }) {
-  const [status, setStatus] = useState('open');
-  const [rows, load, err] = useLoad(() => rpc('api_amz_queue', { p_status: status === 'all' ? null : status }), [status]);
-  const [busy, setBusy] = useState('');
-  const approve = async (c) => {
-    let second = false;
-    const d = diffRows(c.before, c.after);
-    if (c.needs_second_confirm) {
-      const msg = `${(c.guard_result.confirms || []).map((x) => x.message).join(' ')}\n\n${d.map((r) => `${r.label}: ${r.before} → ${r.after}`).join('\n')}`;
-      if (!(await confirmDialog(msg, { title: 'Second confirmation', confirmText: 'Yes, approve', danger: true }))) return;
-      second = true;
-    } else if (!(await confirmDialog(`Approve "${c.summary || c.kind}" for ${c.asin || c.sku}?`, { confirmText: 'Approve' }))) return;
-    setBusy(c.id);
-    const a = await run(rpc('api_amz_approve', { p_id: c.id, p_second_confirm: second }));
-    if (a?.status === 'stale') { showToast('The listing changed since this draft. Marked Stale: review and re-submit.', 'error'); setBusy(''); load(); return; }
-    if (a) {
-      const r = await run(edge('amazon-execute', { id: c.id }));
-      if (r) showToast({ live: 'Live on Amazon.', executing: 'Sent. Amazon is still applying it; the CRM will confirm.', skipped: 'Already running.',
-        failed: 'Amazon rejected it. See the reason on the card.', stale: 'Amazon changed this listing meanwhile. Nothing sent.',
-        needs_manual: 'Done in part. One step is left for you (see the card).' }[r.status] || r.status, r.status === 'failed' ? 'error' : 'success');
-    }
-    setBusy(''); load();
-  };
-  const reject = async (c) => {
-    const reason = await promptDialog('Why reject?', { message: 'Claude reads this before drafting again.', required: true });
-    if (reason) { await run(rpc('api_amz_reject', { p_id: c.id, p_reason: reason }), 'Rejected'); load(); }
-  };
-  const act = async (fn, c, msg) => { await run(rpc(fn, { p_id: c.id }), msg); load(); };
-  return (
-    <div className="space-y-3">
-      <div className="flex gap-1 p-1 rounded-xl overflow-x-auto" style={{ background: 'rgba(118,118,128,0.12)' }}>
-        {[['open', 'Open'], ['pending', 'Waiting'], ['live', 'Live'], ['rejected', 'Rejected'], ['all', 'All']].map(([s, l]) => (
-          <button key={s} onClick={() => setStatus(s)} className={`px-3 py-1.5 rounded-lg text-sm whitespace-nowrap ${status === s ? 'bg-white font-semibold shadow-sm' : ''}`}>{l}</button>))}
-      </div>
-      <Err msg={err} />
-      {!rows ? <Empty>Loading…</Empty> : rows.length === 0 ? <Empty>Nothing here.</Empty> : rows.map((c) => {
-        const st = STATUS_STYLE[c.status] || {};
-        return (
-          <div key={c.id} className="glass-card p-4 text-sm">
-            <div className="flex flex-wrap justify-between gap-2">
-              <div><div className="font-semibold text-glass-primary">{c.summary || c.kind}</div>
-                <div className="text-xs text-glass-muted">{c.asin || '—'} · {c.sku || ''} · by {c.created_by_type} · {ageText(c.created_at)}{c.batch_id ? ' · batch' : ''}</div></div>
-              <Chip bg={st.bg} fg={st.fg}>{st.label || c.status}</Chip>
-            </div>
-            <div className="mt-3 grid gap-2">
-              {diffRows(c.before, c.after).map((r) => (
-                <div key={r.key} className="grid sm:grid-cols-[130px_1fr_1fr] gap-1 sm:gap-3 text-xs">
-                  <div className="text-glass-muted">{r.label}</div>
-                  <div className="whitespace-pre-wrap line-through decoration-1 opacity-60">{r.before}</div>
-                  <div className="whitespace-pre-wrap font-medium">{r.after}</div>
-                </div>
-              ))}
-            </div>
-            <GuardList g={c.guard_result} />
-            {c.preview_result?.preview?.issues?.length > 0 && <div className="text-xs mt-2 text-glass-secondary">Amazon preview: {c.preview_result.preview.issues.map((i) => i.message).join(' | ')}</div>}
-            {c.error && <div className="text-xs mt-2" style={{ color: c.status === 'needs_manual' ? '#7A2EA8' : '#C4261D' }}>{c.error}</div>}
-            {c.reject_reason && <div className="text-xs mt-2 text-glass-muted">Rejected: {c.reject_reason}</div>}
-            <div className="flex flex-wrap gap-2 mt-3">
-              {c.status === 'pending' && access.can_approve && <button disabled={busy === c.id || !c.guard_result?.ok} className="glass-btn px-3 py-1.5 text-xs" onClick={() => approve(c)}>{busy === c.id ? 'Working…' : c.needs_second_confirm ? 'Approve (needs 2nd confirm)' : 'Approve & send'}</button>}
-              {['pending', 'stale'].includes(c.status) && access.can_approve && <button className="glass-btn-ghost px-3 py-1.5 text-xs" onClick={() => reject(c)}>Reject</button>}
-              {['failed', 'stale'].includes(c.status) && <button className="glass-btn-ghost px-3 py-1.5 text-xs" onClick={() => act('api_amz_resubmit', c, 'Back in the queue')}>Re-check & resubmit</button>}
-              {c.status === 'needs_manual' && access.can_approve && <button className="glass-btn-ghost px-3 py-1.5 text-xs" onClick={() => act('api_amz_manual_done', c, 'Marked done')}>I did it in Seller Central</button>}
-              {['live', 'needs_manual'].includes(c.status) && c.kind !== 'ads_budget' && <button className="glass-btn-ghost px-3 py-1.5 text-xs" onClick={() => act('api_amz_rollback', c, 'Rollback drafted: approve it to undo')}>Roll back</button>}
-              {c.batch_id && ['pending', 'approved'].includes(c.status) && access.can_approve && <button className="glass-btn-ghost px-3 py-1.5 text-xs" style={{ color: '#C4261D' }}
-                onClick={async () => { if (await confirmDialog('Cancel every waiting change in this batch?', { danger: true, confirmText: 'Cancel batch' })) { const n = await run(rpc('api_amz_cancel_batch', { p_batch: c.batch_id })); if (n !== undefined) showToast(`${n} cancelled`, 'success'); load(); } }}>Cancel batch</button>}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------- Sales
-function Sales() {
-  const [days, setDays] = useState(30);
-  const [d, , err] = useLoad(() => rpc('api_amz_sales', { p_days: days }), [days]);
-  const max = Math.max(1, ...((d?.daily || []).map((x) => Number(x.revenue))));
-  const total = (d?.daily || []).reduce((a, x) => ({ rev: a.rev + Number(x.revenue), units: a.units + Number(x.units) }), { rev: 0, units: 0 });
-  return (
-    <div className="space-y-3">
-      <div className="flex gap-1 p-1 rounded-xl w-max" style={{ background: 'rgba(118,118,128,0.12)' }}>
-        {[7, 30, 90].map((n) => <button key={n} onClick={() => setDays(n)} className={`px-3 py-1.5 rounded-lg text-sm ${days === n ? 'bg-white font-semibold shadow-sm' : ''}`}>{n} days</button>)}
-      </div>
-      <Err msg={err} />
-      {!d ? <Empty>Loading…</Empty> : d.daily.length === 0 ? <Empty>No sales data yet. It arrives with the hourly report sync (one day behind, IST days).</Empty> : (
-        <>
-          <div className="grid grid-cols-2 gap-3"><Stat label={`Revenue, ${days} days`} value={inr(total.rev)} /><Stat label="Units" value={total.units} /></div>
-          <div className="glass-card p-4">
-            <div className="text-xs text-glass-muted mb-2">Ordered revenue per day (IST)</div>
-            <div className="flex items-end gap-[2px] h-32" role="img" aria-label="Revenue per day">
-              {d.daily.map((x) => <div key={x.day} title={`${x.day}: ${inr(x.revenue)}, ${x.units} units`} className="flex-1 rounded-t" style={{ height: `${(Number(x.revenue) / max) * 100}%`, minHeight: 2, background: 'var(--accent)' }} />)}
-            </div>
-            <div className="flex justify-between text-[10px] text-glass-muted mt-1"><span>{d.daily[0].day}</span><span>{d.daily[d.daily.length - 1].day}</span></div>
-          </div>
-          <div className="glass-card overflow-x-auto">
-            <table className="w-full text-sm"><thead><tr className="text-left text-xs text-glass-muted"><th className="p-2">SKU</th><th className="p-2">ASIN</th><th className="p-2 text-right">Units</th><th className="p-2 text-right">Revenue</th><th className="p-2 text-right">Sessions</th><th className="p-2 text-right">Conversion</th></tr></thead>
-              <tbody>{d.by_sku.map((r) => <tr key={r.sku} className="border-t" style={{ borderColor: 'var(--border-subtle)' }}><td className="p-2">{r.sku}</td><td className="p-2">{r.asin}</td><td className="p-2 text-right">{r.units}</td><td className="p-2 text-right">{inr(r.revenue)}</td><td className="p-2 text-right">{r.sessions ?? '—'}</td><td className="p-2 text-right">{pct(r.conversion_pct)}</td></tr>)}</tbody>
-            </table>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------- Account health
 function Health() {
   const [d, , err] = useLoad(() => rpc('api_amz_health', { p_days: 90 }));
-  const rows = [['odr', 'Order defect rate', 1, false], ['cancel_rate', 'Cancellation rate', 2.5, false], ['late_ship_rate', 'Late shipment rate', 4, false], ['valid_tracking_rate', 'Valid tracking rate', 95, true]];
+  const rows = [['odr', 'Unhappy orders (complaints, A-to-z claims)', 1, false], ['cancel_rate', 'Orders you cancelled', 2.5, false], ['late_ship_rate', 'Orders dispatched late', 4, false], ['valid_tracking_rate', 'Orders with tracking', 95, true]];
   const last = d?.days?.[d.days.length - 1];
   return (
     <div className="space-y-3">
       <Err msg={err} />
-      {!d ? <Empty>Loading…</Empty> : !last ? <Empty>No health report yet.</Empty> : (
+      {!d ? <Empty>Loading…</Empty> : !last ? <Empty>No health report yet. It comes from Amazon once connected.</Empty> : (
         <div className="grid md:grid-cols-2 gap-3">
           {rows.map(([k, label, limit, higherIsBetter]) => {
             const v = last[k]; const warn = d.warn?.[k];
             const bad = v != null && (higherIsBetter ? v <= warn : v >= warn);
-            return <Stat key={k} label={`${label} (Amazon ${higherIsBetter ? 'min' : 'max'} ${limit}%, CRM warns at ${warn}%)`} value={pct(v)} tone={bad ? '#C4261D' : '#1E7B34'} sub={`as of ${last.day}`} />;
+            return <Stat key={k} label={`${label}: must be ${higherIsBetter ? 'above' : 'under'} ${limit}%`} value={pct(v)} tone={bad ? '#C4261D' : '#1E7B34'} sub={`as of ${last.day}`} />;
           })}
         </div>
       )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------- Inventory & Pricing
-function Inventory() {
-  const [rows, , err] = useLoad(() => rpc('api_amz_inventory'));
-  const draftPrice = async (r) => {
-    const v = await promptDialog(`New price for ${r.asin}`, { message: `Now ${inr(r.price)}${r.buybox_price ? `, Buy Box ${inr(r.buybox_price)}` : ''}. Never below the floor (₹299).`, placeholder: 'e.g. 349', required: true });
-    if (!v) return;
-    const c = await run(rpc('api_amz_draft_create', { p_kind: 'price', p_sku: r.sku, p_after: { price: Number(v) }, p_summary: `Price ${inr(r.price)} → ${inr(v)}` }));
-    if (c) showToast(c.guard_result.ok ? 'Price change sent for approval' : `Blocked: ${c.guard_result.blockers.map((b) => b.message).join(' ')}`, c.guard_result.ok ? 'success' : 'error');
-  };
-  return (
-    <div className="space-y-2">
-      <Err msg={err} />
-      {!rows ? <Empty>Loading…</Empty> : rows.map((r) => (
-        <div key={r.sku} className="glass-card p-3 text-sm flex flex-wrap justify-between gap-2">
-          <div className="min-w-0"><div className="font-semibold truncate max-w-[520px]">{r.title}</div><div className="text-xs text-glass-muted">{r.asin} · {r.sku} · {r.fulfillment}</div></div>
-          <div className="flex flex-wrap gap-1.5 items-center">
-            <Chip>{r.quantity ?? '—'} in stock</Chip>
-            <Chip {...(r.days_of_cover != null && r.days_of_cover < 14 ? SEV.blocker : {})}>{r.days_of_cover != null ? `${r.days_of_cover} days of cover` : 'no sales yet'}</Chip>
-            <Chip>{inr(r.price)}</Chip>
-            {r.has_buybox === false && <Chip {...SEV.blocker}>Buy Box {inr(r.buybox_price)}</Chip>}
-            <button className="text-xs font-semibold" style={{ color: 'var(--accent)' }} onClick={() => draftPrice(r)}>Change price</button>
-          </div>
-        </div>
-      ))}
     </div>
   );
 }
@@ -780,59 +856,90 @@ function Settings() {
 }
 
 // ---------------------------------------------------------------- page
+const TABS = [
+  { id: 'home', label: 'Home', icon: 'chart' },
+  { id: 'products', label: 'My Products', icon: 'list' },
+  { id: 'approve', label: 'Approve Changes', short: 'Approve', icon: 'check' },
+  { id: 'sales', label: 'Sales', icon: 'tag' },
+  { id: 'more', label: 'More', icon: 'more' },
+];
+const MORE = [
+  { id: 'audit', label: 'Things to fix', hint: 'Every problem on your products', icon: 'shield' },
+  { id: 'content', label: 'Edit name & text', hint: 'Product name, key points, description', icon: 'form' },
+  { id: 'images', label: 'Photos', hint: 'Check a new main photo', icon: 'image' },
+  { id: 'keywords', label: 'Search words', hint: 'Words buyers type on Amazon', icon: 'search' },
+  { id: 'competitors', label: 'Competitors', hint: 'Watch other sellers\' prices', icon: 'globe' },
+  { id: 'health', label: 'Account health', hint: 'Late dispatch, cancels, complaints', icon: 'heart' },
+  { id: 'strategy', label: 'To-do list', hint: 'Plans and reminders', icon: 'calendar' },
+  { id: 'ask', label: 'Ask Claude', hint: 'Ask a question, get an answer later', icon: 'sparkles' },
+  { id: 'activity', label: 'History', hint: 'Who changed what, and when', icon: 'clock' },
+  { id: 'settings', label: 'Settings', hint: 'Amazon keys, limits, who can use this', icon: 'settings', admin: true },
+];
+// Old links keep working.
+const ALIAS = { overview: 'home', listings: 'products', inventory: 'products', queue: 'approve' };
+
 export default function Amazon({ access }) {
   const route = useRoute();
-  const view = (route.tab === 'amazon' && route.section) || 'overview';
+  const raw = (route.tab === 'amazon' && route.section) || 'home';
+  const view = ALIAS[raw] || raw;
   const [studioSku, setStudioSku] = useState('');
   const [listings, reloadListings] = useLoad(() => rpc('api_amz_listings'));
-  const [queue] = useLoad(() => rpc('api_amz_queue', { p_status: 'pending' }), [view]);
-  const [findings] = useLoad(() => rpc('api_amz_findings', { p_status: 'open' }), [view]);
-  useEffect(() => { if (view === 'listings') reloadListings(); }, [view, reloadListings]);
+  const [queue, reloadQueue] = useLoad(() => rpc('api_amz_queue', { p_status: 'pending' }), [view]);
+  const [findings, reloadFindings] = useLoad(() => rpc('api_amz_findings', { p_status: 'open' }), [view]);
+  useEffect(() => { if (view === 'products') reloadListings(); }, [view, reloadListings]);
+  const reloadAll = () => { reloadListings(); reloadQueue(); reloadFindings(); };
   const skus = (listings || []).map((l) => ({ sku: l.sku, asin: l.asin, title: l.title }));
   const myAsins = [...new Set(skus.map((s) => s.asin).filter(Boolean))];
   const go = (v) => navigate('amazon', v);
-  const GROUPS = [
-    { label: 'Today', items: [
-      { id: 'overview', label: 'Overview', hint: 'Sales, alerts, what to fix first', icon: 'chart' },
-      { id: 'queue', label: 'Change Queue', hint: 'Approve before anything goes live', icon: 'check', count: queue?.length || 0 },
-      { id: 'ask', label: 'Ask Claude', hint: 'Questions and tasks for Claude', icon: 'sparkles' },
-    ] },
-    { label: 'Listings', items: [
-      { id: 'listings', label: 'Products & Listings', hint: 'Every SKU with its scorecard', icon: 'list' },
-      { id: 'audit', label: 'Audit', hint: 'Rule failures by listing', icon: 'shield', count: (findings || []).filter((f) => f.severity === 'blocker').length },
-      { id: 'content', label: 'Content Studio', hint: 'Title, bullets, backend terms, brief', icon: 'form' },
-      { id: 'images', label: 'Images', hint: 'Main image checks', icon: 'image' },
-    ] },
-    { label: 'Growth', items: [
-      { id: 'keywords', label: 'Keywords', hint: 'Keyword bank', icon: 'search' },
-      { id: 'competitors', label: 'Competitors', hint: 'Rival ASINs side by side', icon: 'globe' },
-      { id: 'inventory', label: 'Inventory & Pricing', hint: 'Buy Box, days of cover', icon: 'tag' },
-      { id: 'strategy', label: 'Strategy & Calendar', hint: 'Plan and tasks', icon: 'calendar' },
-    ] },
-    { label: 'Results', items: [
-      { id: 'sales', label: 'Sales', hint: 'Revenue and units by day and SKU', icon: 'chart' },
-      { id: 'health', label: 'Account Health', hint: 'ODR, cancellations, late shipments', icon: 'heart' },
-      { id: 'activity', label: 'Activity Log', hint: 'Who changed what', icon: 'clock' },
-      access.is_admin && { id: 'settings', label: 'Settings', hint: 'Keys, guards, access', icon: 'settings' },
-    ].filter(Boolean) },
-  ];
+  const more = MORE.filter((m) => !m.admin || access.is_admin);
+  const sub = more.find((m) => m.id === view);
+  const tab = sub ? 'more' : (TABS.find((t) => t.id === view) ? view : 'home');
+  const count = { approve: queue?.length || 0 };
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap justify-between items-center gap-2">
-        <div><h2 className="text-xl font-bold text-glass-primary">Amazon</h2><div className="text-xs text-glass-muted">Nitaniya · Amazon.in · Easy Ship (FBM)</div></div>
+      <div>
+        <h2 className="text-xl font-bold text-glass-primary">Amazon</h2>
+        <div className="text-xs text-glass-muted">Nitaniya · Amazon.in · Easy Ship</div>
       </div>
-      <SectionNav groups={GROUPS} value={view} onChange={go} />
-      {view === 'overview' && <Overview access={access} go={go} />}
-      {view === 'listings' && <Listings openStudio={(sku) => { setStudioSku(sku); go('content'); }} />}
+      <div role="tablist" aria-label="Amazon" className="glass-card p-1 grid grid-cols-5 gap-1">
+        {TABS.map((t) => {
+          const active = tab === t.id;
+          return (
+            <button key={t.id} role="tab" aria-selected={active} aria-label={`${t.label}${count[t.id] ? ` ${count[t.id]}` : ''}`} onClick={() => go(t.id)}
+              className="relative flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 rounded-xl py-2 px-1 text-[11px] sm:text-sm min-h-[52px]"
+              style={active ? { background: '#007AFF', color: '#fff', fontWeight: 600 } : undefined}>
+              <Icon name={t.icon} size={18} />
+              <span className="leading-tight text-center"><span className="sm:hidden">{t.short || t.label}</span><span className="hidden sm:inline">{t.label}</span></span>
+              {count[t.id] > 0 && <span className="absolute top-1 right-1 sm:static min-w-[1.2rem] h-[1.2rem] px-1 rounded-full text-[10px] font-bold inline-flex items-center justify-center"
+                style={{ background: active ? '#fff' : '#FF3B30', color: active ? '#007AFF' : '#fff' }}>{count[t.id]}</span>}
+            </button>
+          );
+        })}
+      </div>
+      {sub && <button type="button" onClick={() => go('more')} className="text-sm font-semibold inline-flex items-center gap-1" style={{ color: 'var(--accent)' }}><Icon name="chevronLeft" size={16} />More</button>}
+      {sub && <h3 className="text-lg font-bold text-glass-primary -mt-2">{sub.label}</h3>}
+      {view === 'more' && (
+        <div className="grid sm:grid-cols-2 gap-2">
+          {more.map((m) => (
+            <button key={m.id} type="button" onClick={() => go(m.id)} className="glass-card p-3 flex items-center gap-3 text-left min-h-[64px]">
+              <span className="h-10 w-10 rounded-[12px] inline-flex items-center justify-center shrink-0" style={{ background: 'rgba(0,122,255,0.12)', color: '#007AFF' }}><Icon name={m.icon} size={20} /></span>
+              <span className="min-w-0 flex-1"><span className="block font-semibold text-glass-primary">{m.label}</span><span className="block text-xs text-glass-secondary">{m.hint}</span></span>
+              {m.id === 'audit' && (findings || []).length > 0 && <Chip {...SEV.warning}>{findings.length}</Chip>}
+              <Icon name="chevronRight" size={16} />
+            </button>
+          ))}
+        </div>
+      )}
+      {tab === 'home' && <Home access={access} go={go} listings={listings} reloadAll={reloadAll} />}
+      {tab === 'products' && <Products listings={listings} findings={findings} go={go} reload={reloadAll} openStudio={(s) => { setStudioSku(s); go('content'); }} />}
+      {tab === 'approve' && <Approve access={access} onChange={reloadAll} />}
+      {tab === 'sales' && <Sales listings={listings} />}
       {view === 'audit' && <Audit access={access} />}
       {view === 'keywords' && <Keywords />}
       {view === 'competitors' && <Competitors myAsins={myAsins} />}
       {view === 'content' && <ContentStudio skus={skus} initialSku={studioSku} />}
       {view === 'images' && <Images skus={skus} />}
-      {view === 'queue' && <ChangeQueue access={access} />}
-      {view === 'sales' && <Sales />}
       {view === 'health' && <Health />}
-      {view === 'inventory' && <Inventory />}
       {view === 'strategy' && <Strategy />}
       {view === 'ask' && <AskClaude />}
       {view === 'activity' && <Activity />}

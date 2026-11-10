@@ -246,3 +246,22 @@ describe("execute one approved change", () => {
     expect(staleFields({ price: 449 }, { price: 399 }, { price: 429 })).toEqual(["price"]);
   });
 });
+
+describe("dispatch speed", () => {
+  test("handling_days becomes a merge patch that leaves stock alone", () => {
+    const { patches, notPushed } = buildPatches({ handling_days: 0 }, "A21TJRUUN4KGV", "en_IN");
+    expect(notPushed).toEqual([]);
+    expect(patches).toEqual([{ op: "merge", path: "/attributes/fulfillment_availability",
+      value: [{ fulfillment_channel_code: "DEFAULT", lead_time_to_ship_max_days: 0 }] }]);
+    expect(JSON.stringify(patches)).not.toContain("quantity");
+  });
+  test("parseListing reads the dispatch time; missing stays null", () => {
+    const base = { sku: "S", summaries: [{ asin: "B0X", status: ["BUYABLE"] }] };
+    expect(parseListing({ ...base, attributes: { fulfillment_availability: [{ fulfillment_channel_code: "DEFAULT", lead_time_to_ship_max_days: 1 }] } }).handling_days).toBe(1);
+    expect(parseListing({ ...base, attributes: {} }).handling_days).toBeNull();
+  });
+  test("staleFields treats dispatch days as numbers", () => {
+    expect(staleFields({ handling_days: 2 }, { handling_days: 0 }, { handling_days: "2" })).toEqual([]);
+    expect(staleFields({ handling_days: 2 }, { handling_days: 0 }, { handling_days: 3 })).toEqual(["handling_days"]);
+  });
+});

@@ -37,6 +37,8 @@ async function listings(api: SpApi, s: Record<string, string>, t0: number) {
     if (!token) break;
   }
   const res = await rpc("svc_amz_upsert_listings", { p_items: items });
+  const dispatch = items.filter((i) => i.handling_days != null).map((i) => ({ sku: i.sku, handling_days: i.handling_days }));
+  if (dispatch.length) await rpc("svc_amz_upsert_dispatch", { p_items: dispatch });
   return { items: items.length, detail: `drift ${res?.drift ?? 0}` };
 }
 
