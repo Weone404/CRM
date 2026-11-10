@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../api';
 import { countryName, timeAgo } from '../utils/country';
+import LinkTile from './ui/LinkTile';
 
 // FlightBridge AI > School Detector: the whole-world search, live.
 // The engine (Mac Mini) searches the world square by square inside Google's free monthly allowance. This screen shows
@@ -46,13 +47,13 @@ function Label({ children, color = C.accent }) {
   return <div className="text-[11px] uppercase tracking-[0.12em] font-semibold" style={{ color, fontFamily: MONO }}>{children}</div>;
 }
 
-function Stat({ label, value, sub, color = C.ink }) {
+function Stat({ label, value, sub, color = C.ink, to }) {
   return (
-    <div className="rounded-xl p-3" style={{ background: C.soft, border: `1px solid ${C.line}` }}>
+    <LinkTile to={to} className="rounded-xl p-3" style={{ background: C.soft, border: `1px solid ${C.line}` }}>
       <Label>{label}</Label>
       <div className="text-2xl font-bold tnum mt-1" style={{ color }}>{value}</div>
       {sub && <div className="text-xs mt-0.5" style={{ color: C.sub }}>{sub}</div>}
-    </div>
+    </LinkTile>
   );
 }
 
@@ -236,10 +237,10 @@ export default function FlightBridgeDetector() {
         {/* ---------------- numbers */}
         <div className="space-y-4 min-w-0">
           <div className="grid grid-cols-2 gap-3">
-            <Stat label="Schools in CRM" value={(tot.all_schools ?? 0).toLocaleString()} />
-            <Stat label="New in 24 hours" value={(tot.new_24h ?? 0).toLocaleString()} color="#248A3D" />
-            <Stat label="Found by world search" value={(tot.schools_found ?? 0).toLocaleString()} sub={`${(tot.schools_new ?? 0).toLocaleString()} were new`} />
-            <Stat label="Countries finished" value={`${tot.countries_done ?? 0} / ${tot.countries ?? 0}`} />
+            <Stat label="Schools in CRM" to={['partnerships', 'schools']} value={(tot.all_schools ?? 0).toLocaleString()} />
+            <Stat label="New in 24 hours" to={['partnerships', 'schools']} value={(tot.new_24h ?? 0).toLocaleString()} color="#248A3D" />
+            <Stat label="Found by world search" to={['partnerships', 'schools']} value={(tot.schools_found ?? 0).toLocaleString()} sub={`${(tot.schools_new ?? 0).toLocaleString()} were new`} />
+            <Stat label="Countries finished" to={['partnerships', 'areas']} value={`${tot.countries_done ?? 0} / ${tot.countries ?? 0}`} />
           </div>
 
           <div className="rounded-xl p-3 space-y-2" style={{ background: 'rgba(255,59,48,0.08)', border: '1px solid rgba(255,59,48,0.25)' }}>

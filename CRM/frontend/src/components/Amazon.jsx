@@ -4,6 +4,8 @@ import { showToast } from '../utils/toast';
 import { confirmDialog, promptDialog } from './ui/dialogs';
 import SectionNav from './SectionNav';
 import Icon from './icons';
+import LinkTile from './ui/LinkTile';
+import { useRoute, navigate } from '../utils/route';
 import { chars, utf8Bytes, inr, pct, diffRows, measureImage, STATUS_STYLE, ageText } from '../utils/amazon';
 
 // CRM > Amazon (Nitaniya on Amazon.in). Admin, plus people Admin grants in Settings.
@@ -46,12 +48,12 @@ function useLoad(fn, deps = []) {
 const Chip = ({ children, bg = 'rgba(118,118,128,0.14)', fg = '#3C3C43' }) => (
   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap" style={{ background: bg, color: fg }}>{children}</span>
 );
-const Stat = ({ label, value, sub, tone }) => (
-  <div className="glass-card p-3">
+const Stat = ({ label, value, sub, tone, to }) => (
+  <LinkTile to={to} className="glass-card p-3">
     <div className="text-xs text-glass-muted">{label}</div>
     <div className="text-2xl font-bold" style={tone ? { color: tone } : undefined}>{value}</div>
     {sub && <div className="text-[11px] text-glass-muted mt-0.5">{sub}</div>}
-  </div>
+  </LinkTile>
 );
 const Empty = ({ children }) => <div className="text-center text-glass-muted py-10 text-sm">{children}</div>;
 const Err = ({ msg }) => (msg ? <div className="glass-card p-3 text-sm" style={{ color: '#C4261D' }}>{msg}</div> : null);
@@ -118,10 +120,10 @@ function Overview({ access, go }) {
         </button>
       ))}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Stat label="Sales today" value={inr(o.sales_today.revenue)} sub={`${o.sales_today.units} units`} />
-        <Stat label="Last 7 days" value={inr(o.sales_7d.revenue)} sub={`${o.sales_7d.units} units`} />
-        <Stat label="Waiting for approval" value={o.pending} tone={o.pending ? '#B25E00' : undefined} />
-        <Stat label="Open problems" value={o.open_findings.blocker} sub={`${o.open_findings.warning} warnings`} tone={o.open_findings.blocker ? '#C4261D' : undefined} />
+        <Stat label="Sales today" to={['amazon', 'sales']} value={inr(o.sales_today.revenue)} sub={`${o.sales_today.units} units`} />
+        <Stat label="Last 7 days" to={['amazon', 'sales']} value={inr(o.sales_7d.revenue)} sub={`${o.sales_7d.units} units`} />
+        <Stat label="Waiting for approval" to={['amazon', 'queue']} value={o.pending} tone={o.pending ? '#B25E00' : undefined} />
+        <Stat label="Open problems" to={['amazon', 'audit']} value={o.open_findings.blocker} sub={`${o.open_findings.warning} warnings`} tone={o.open_findings.blocker ? '#C4261D' : undefined} />
       </div>
       <div className="glass-card p-4">
         <div className="flex justify-between items-center mb-2">
@@ -779,7 +781,8 @@ function Settings() {
 
 // ---------------------------------------------------------------- page
 export default function Amazon({ access }) {
-  const [view, setView] = useState('overview');
+  const route = useRoute();
+  const view = (route.tab === 'amazon' && route.section) || 'overview';
   const [studioSku, setStudioSku] = useState('');
   const [listings, reloadListings] = useLoad(() => rpc('api_amz_listings'));
   const [queue] = useLoad(() => rpc('api_amz_queue', { p_status: 'pending' }), [view]);
@@ -787,7 +790,7 @@ export default function Amazon({ access }) {
   useEffect(() => { if (view === 'listings') reloadListings(); }, [view, reloadListings]);
   const skus = (listings || []).map((l) => ({ sku: l.sku, asin: l.asin, title: l.title }));
   const myAsins = [...new Set(skus.map((s) => s.asin).filter(Boolean))];
-  const go = (v) => { setView(v); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  const go = (v) => navigate('amazon', v);
   const GROUPS = [
     { label: 'Today', items: [
       { id: 'overview', label: 'Overview', hint: 'Sales, alerts, what to fix first', icon: 'chart' },

@@ -10,9 +10,16 @@ import { Areas, Automation, Team } from './FlightBridgeOps';
 import { AutoPilot, Pipeline, autopilotIssues, TemplateEditor, deleteTemplate, EditIcon, DeleteIcon } from './FlightBridgeAutopilot';
 import { confirmDialog, promptDialog, choiceDialog, alertDialog } from './ui/dialogs';
 import AppleSelect from './ui/AppleSelect';
+import LinkTile, { GoLink } from './ui/LinkTile';
+import { useRoute, navigate, setParams } from '../utils/route';
 
 // FlightBridge partnership module (Admin only). This screen records human decisions.
 // It never sends email: the central FlightBridge service runs compliance checks and is the only sender.
+
+// Outbound & checks filters (?show=...)
+const OUT_GROUP = { attention: ['blocked', 'needs_review'], test: ['dry_run_rendered'], sent: ['sent', 'send_unknown'],
+  waiting: ['pending_checks', 'authorized', 'sending'], stopped: ['cancelled', 'failed'] };
+const OUT_FILTERS = [['all', 'All'], ['attention', 'Need a look'], ['sent', 'Sent'], ['waiting', 'In progress'], ['test', 'Test'], ['stopped', 'Stopped']];
 
 const RISK_STYLE = { RED: 'bg-red-100 text-red-800', AMBER: 'bg-yellow-100 text-yellow-800', GREEN: 'bg-green-100 text-green-800' };
 const OUT_STYLE = {
@@ -449,7 +456,9 @@ function Templates() {
 
 function Inbox() {
   const [rows, setRows] = useState([]);
-  const [risk, setRisk] = useState('');
+  const route = useRoute();
+  const risk = route.params.risk || '';
+  const setRisk = (v) => setParams({ risk: v || undefined });
   const [unmatched, setUnmatched] = useState(false);
   const load = useCallback(async () => {
     try { setRows(await call(`/inbox?${risk ? `risk=${risk}&` : ''}${unmatched ? 'unmatched=true' : ''}`)); } catch (e) { showToast(e.message, 'error'); }
@@ -466,7 +475,7 @@ function Inbox() {
       {rows.map((m) => (
         <div key={m.id} className="glass-card p-3">
           <div className="flex justify-between gap-2 flex-wrap">
-            <div className="font-semibold">{m.org_name || 'Unknown sender'} · <span className="text-sm font-normal">{m.from_address}</span></div>
+            <div className="font-semibold">{m.org_name ? <GoLink to={['partnerships', 'pipeline', { q: m.org_name }]} title="Open in the Pipeline">{m.org_name}</GoLink> : 'Unknown sender'} · <span className="text-sm font-normal">{m.from_address}</span></div>
             <div className="flex gap-1">{m.risk && <Badge text={m.risk} style={RISK_STYLE[m.risk]} />}{m.is_unsubscribe && <Badge text="unsubscribed" />}{m.is_bounce && <Badge text="bounce" />}{m.is_auto_reply && <Badge text="auto-reply" />}{m.injection && <Badge text="injection attempt" style="bg-red-100 text-red-800" />}</div>
           </div>
           <div className="text-sm">{m.subject}</div>
@@ -495,18 +504,18 @@ function Metrics() {
     } catch (e) { showToast(e.message, 'error'); }
   };
   if (!m) return <div className="text-glass-muted p-6">Loading…</div>;
-  const tile = (label, value, hint) => (<div className="glass-card p-3"><div className="text-xs text-glass-muted">{label}</div><div className="text-2xl font-bold" style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</div>{hint && <div className="text-xs text-glass-muted">{hint}</div>}</div>);
+  const tile = (label, value, hint, to) => (<LinkTile key={label} to={to} className="glass-card p-3"><div className="text-xs text-glass-muted">{label}</div><div className="text-2xl font-bold" style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</div>{hint && <div className="text-xs text-glass-muted">{hint}</div>}</LinkTile>);
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {tile('Schools contacted', m.schools_contacted, 'first email actually sent')}
-        {tile('Schools replied', m.schools_replied, 'excludes auto-replies and bounces')}
-        {tile('Response rate', m.response_rate == null ? '—' : `${Math.round(m.response_rate * 100)}%`, 'replied ÷ contacted')}
-        {tile('Bounces', m.bounces)}
-        {tile('Waiting for you', m.approvals_open)}
-        {tile('Approved', m.approvals_approved, `${m.approvals_edited} edited by a person`)}
-        {tile('Rejected drafts', m.approvals_rejected)}
-        {tile('Replies by risk', `${m.inbound_by_risk.GREEN || 0} / ${m.inbound_by_risk.AMBER || 0} / ${m.inbound_by_risk.RED || 0}`, 'green / amber / red')}
+        {tile('Schools contacted', m.schools_contacted, 'first email actually sent', ['partnerships', 'outbound', { show: 'sent' }])}
+        {tile('Schools replied', m.schools_replied, 'excludes auto-replies and bounces', ['partnerships', 'pipeline', { stage: 'replied' }])}
+        {tile('Response rate', m.response_rate == null ? '—' : `${Math.round(m.response_rate * 100)}%`, 'replied ÷ contacted', ['partnerships', 'pipeline', { stage: 'replied' }])}
+        {tile('Bounces', m.bounces, null, ['partnerships', 'inbox'])}
+        {tile('Waiting for you', m.approvals_open, null, ['partnerships', 'queue'])}
+        {tile('Approved', m.approvals_approved, `${m.approvals_edited} edited by a person`, ['partnerships', 'queue', { status: 'approved' }])}
+        {tile('Rejected drafts', m.approvals_rejected, null, ['partnerships', 'queue', { status: 'rejected' }])}
+        {tile('Replies by risk', `${m.inbound_by_risk.GREEN || 0} / ${m.inbound_by_risk.AMBER || 0} / ${m.inbound_by_risk.RED || 0}`, 'green / amber / red', ['partnerships', 'inbox'])}
       </div>
       <div className="text-xs text-glass-muted">Email opens are not tracked: a tracking pixel cannot prove an email was read.</div>
       <div className="glass-card p-4 space-y-2">
@@ -843,13 +852,19 @@ function Settings() {
 }
 
 export default function FlightBridge() {
-  const [view, setView] = useState('detector');
+  // Section, filters and the open approval live in the address: #/partnerships/<section>?status=..&show=..&open=..
+  const route = useRoute();
+  const view = (route.tab === 'partnerships' && route.section) || 'detector';
+  const setView = (v) => navigate('partnerships', v);
   const [me, setMe] = useState(null);
   const [summary, setSummary] = useState(null);
   const [tasks, setTasks] = useState([]);
-  const [statusFilter, setStatusFilter] = useState('open');
+  const statusFilter = route.params.status || 'open';
+  const setStatusFilter = (v) => setParams({ status: v === 'open' ? undefined : v });
+  const show = route.params.show || 'all';
   const [outbound, setOutbound] = useState([]);
-  const [selected, setSelected] = useState(null);
+  const selected = view === 'queue' ? route.params.open || null : null;
+  const setSelected = (id) => navigate('partnerships', 'queue', { status: route.params.status, open: id || undefined });
   const [error, setError] = useState(null);
   const [supp, setSupp] = useState({ scope: 'contact', value: '', reason: 'manual' });
   const [ap, setAp] = useState(null);
@@ -939,10 +954,10 @@ export default function FlightBridge() {
 
       {summary && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="glass-card p-3"><div className="text-xs text-glass-muted">Schools</div><div className="text-2xl font-bold">{Object.values(summary.organisations).reduce((a, b) => a + b, 0)}</div></div>
-          <div className="glass-card p-3"><div className="text-xs text-glass-muted">Awaiting approval</div><div className="text-2xl font-bold">{summary.approvals.open || 0}</div></div>
-          <div className="glass-card p-3"><div className="text-xs text-glass-muted">Test emails (not sent)</div><div className="text-2xl font-bold">{summary.outbound.dry_run_rendered || 0}</div></div>
-          <div className="glass-card p-3"><div className="text-xs text-glass-muted">Need a look</div><div className="text-2xl font-bold">{(summary.outbound.blocked || 0) + (summary.outbound.needs_review || 0)}</div></div>
+          <LinkTile to={['partnerships', 'schools']} className="glass-card p-3" title="Open every school"><div className="text-xs text-glass-muted">Schools</div><div className="text-2xl font-bold">{Object.values(summary.organisations).reduce((a, b) => a + b, 0)}</div></LinkTile>
+          <LinkTile to={['partnerships', 'queue']} className="glass-card p-3" title="Open the Approval queue"><div className="text-xs text-glass-muted">Awaiting approval</div><div className="text-2xl font-bold">{summary.approvals.open || 0}</div></LinkTile>
+          <LinkTile to={['partnerships', 'outbound', { show: 'test' }]} className="glass-card p-3" title="Show the test emails"><div className="text-xs text-glass-muted">Test emails (not sent)</div><div className="text-2xl font-bold">{summary.outbound.dry_run_rendered || 0}</div></LinkTile>
+          <LinkTile to={['partnerships', 'outbound', { show: 'attention' }]} className="glass-card p-3" title="Show the emails that need a look"><div className="text-xs text-glass-muted">Need a look</div><div className="text-2xl font-bold">{(summary.outbound.blocked || 0) + (summary.outbound.needs_review || 0)}</div></LinkTile>
         </div>
       )}
 
@@ -957,7 +972,7 @@ export default function FlightBridge() {
           <span className="glass-capsule shrink-0" style={{ color: '#C4261D' }}>Fix</span>
         </button>
       )}
-      <SectionNav groups={GROUPS} value={view} onChange={(v) => { setView(v); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
+      <SectionNav groups={GROUPS} value={view} onChange={setView} />
 
       {view === 'detector' && <FlightBridgeDetector />}
 
@@ -990,16 +1005,30 @@ export default function FlightBridge() {
 
       {view === 'outbound' && (
         <div className="space-y-2">
-          {outbound.map((m) => (
+          <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1" style={{ scrollbarWidth: 'none' }} role="tablist" aria-label="Show">
+            {OUT_FILTERS.map(([k, l]) => {
+              const n = k === 'all' ? Object.values(summary?.outbound || {}).reduce((a, b) => a + b, 0)
+                : OUT_GROUP[k].reduce((a, st) => a + (summary?.outbound?.[st] || 0), 0);
+              const on = show === k;
+              return (
+                <button key={k} role="tab" aria-selected={on} onClick={() => setParams({ show: k === 'all' ? undefined : k })}
+                  className="shrink-0 px-3.5 py-2 rounded-full text-sm font-medium inline-flex items-center gap-1.5 transition"
+                  style={on ? { background: '#007AFF', color: '#fff' } : { background: 'rgba(118,118,128,0.12)', color: '#3C3C43' }}>
+                  {l}<span className="tabular-nums text-[12px] px-1.5 rounded-full" style={{ background: on ? 'rgba(255,255,255,0.25)' : 'rgba(118,118,128,0.16)' }}>{n}</span>
+                </button>
+              );
+            })}
+          </div>
+          {outbound.filter((m) => show === 'all' || OUT_GROUP[show]?.includes(m.status)).map((m) => (
             <div key={m.id} className="glass-card p-3">
-              <div className="flex justify-between"><div className="font-semibold">{m.org_name} · {m.email}</div><Badge text={m.status} style={OUT_STYLE[m.status]} /></div>
+              <div className="flex justify-between"><div className="font-semibold"><GoLink to={['partnerships', 'pipeline', { q: m.org_name }]} title="Open in the Pipeline">{m.org_name}</GoLink> · {m.email}</div><Badge text={m.status} style={OUT_STYLE[m.status]} /></div>
               <div className="text-sm text-glass-secondary">{m.subject} <span className="text-xs text-glass-muted">({m.ref_token})</span></div>
               <div className="text-xs mt-1">Jurisdiction: <b>{m.jurisdiction || '—'}</b> · Content: <b>{m.content || '—'}</b></div>
               <Reasons list={[...(m.jurisdiction_reasons || []), ...(m.content_reasons || [])]} />
               {m.status === 'needs_review' && <button onClick={() => recheck(m.id)} className="glass-btn px-3 py-1 text-xs mt-2">Re-run checks</button>}
             </div>
           ))}
-          {outbound.length === 0 && <div className="text-center text-glass-muted py-10">No outbound messages yet.</div>}
+          {outbound.filter((m) => show === 'all' || OUT_GROUP[show]?.includes(m.status)).length === 0 && <div className="text-center text-glass-muted py-10">{outbound.length ? 'Nothing here right now.' : 'No outbound messages yet.'}</div>}
         </div>
       )}
 

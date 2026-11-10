@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useRoute, setParams } from '../utils/route';
 import { displayPhone } from '../utils/formatters';
 import { CLOSURE, charterRef, closureLabel, isPositiveClosure, tripSummary } from '../utils/charter';
 
@@ -16,14 +17,22 @@ function bucketOf(l) {
 const TRACK_TABS = new Set(['ppl', 'flying']);
 
 export default function LeadList({ leads, onSelectLead, segment = 'aviation' }) {
-  const [filter, setFilter] = useState('all');
+  // The filter lives in the address (#/leads?filter=pending), so the counts above the list can link straight to it.
+  const route = useRoute();
+  const filter = route.params.filter || 'all';
+  const setFilter = (f) => setParams({ filter: f === 'all' ? undefined : f });
   const [closedSub, setClosedSub] = useState('positive');
   const isCharter = segment === 'charter';
   const closure = CLOSURE[segment];
 
   // Switching segment resets the filter, so a Charter view never opens on a
-  // tab (PPL, Flying) that does not exist for it.
-  useEffect(() => { setFilter('all'); setClosedSub('positive'); }, [segment]);
+  // tab (PPL, Flying) that does not exist for it. (Not on first load: a link may have chosen the filter.)
+  const lastSegment = useRef(segment);
+  useEffect(() => {
+    if (lastSegment.current === segment) return;
+    lastSegment.current = segment;
+    setFilter('all'); setClosedSub('positive');
+  }, [segment]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const buckets = leads.reduce((acc, l) => { const b = bucketOf(l); (acc[b] = acc[b] || []).push(l); return acc; }, {});
   const count = (b) => (buckets[b] || []).length;

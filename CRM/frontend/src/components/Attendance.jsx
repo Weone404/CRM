@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, Fragment } from 'react';
 import { API_URL } from '../api';
 import AppleSelect from './ui/AppleSelect';
+import { useRoute, navigate } from '../utils/route';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const thisMonthStr = () => new Date().toISOString().slice(0, 7);
@@ -69,7 +70,9 @@ const OVERRIDE_OPTIONS = [
 ];
 
 export default function Attendance() {
-  const [view, setView] = useState('day'); // 'day' | 'month' | 'devices'
+  const route = useRoute();                // #/attendance/<day|month|devices>
+  const view = ['day', 'month', 'devices'].includes(route.section) ? route.section : 'day';
+  const setView = (v) => navigate('attendance', v === 'day' ? '' : v, undefined, { replace: true });
 
   return (
     <div className="space-y-4 animate-glass-in">

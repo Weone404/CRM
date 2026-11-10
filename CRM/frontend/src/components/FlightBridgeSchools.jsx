@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRoute, setParams } from '../utils/route';
 import { apiFetch } from '../api';
 import { showToast } from '../utils/toast';
 import { countryName } from '../utils/country';
@@ -362,9 +363,14 @@ export default function FlightBridgeSchools() {
   const [regions, setRegions] = useState([]);
   const [sel, setSel] = useState({});
   const [list, setList] = useState(null);
-  const [section, setSection] = useState(null);
-  const [q, setQ] = useState('');
-  const [openId, setOpenId] = useState(null);
+  // Links can open this page on a search (?q=), a list (?list=eligible_verified) or one school's window (?school=<id>).
+  const route = useRoute();
+  const [section, setSection] = useState(route.params.list || null);
+  const wantList = useRef(route.params.list || null);
+  const [q, setQ] = useState(route.params.q || '');
+  useEffect(() => { if ((route.params.q || '') !== q.trim()) setQ(route.params.q || ''); }, [route.params.q]); // eslint-disable-line react-hooks/exhaustive-deps
+  const openId = route.params.school || null;
+  const setOpenId = (id) => setParams({ school: id || undefined });
   const loadTree = useCallback(() => call('/regions').then(setRegions, (e) => showToast(e.message, 'error')), []);
   // Counts come from the server for the whole filter; the list loads one section at a time (up to 1,000 rows),
   // and search runs on the server so it finds schools beyond the first 1,000.
@@ -386,7 +392,7 @@ export default function FlightBridgeSchools() {
     .then(setList, (e) => showToast(e.message, 'error')) : Promise.resolve()), [params, active, countsReady]);
   useEffect(() => { loadTree(); }, [loadTree]);
   useEffect(() => { const k = (e) => e.key === 'Escape' && setOpenId(null); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, []);
-  useEffect(() => { setSection(null); setCounts(undefined); loadCounts(); }, [loadCounts]);
+  useEffect(() => { setSection(wantList.current); wantList.current = null; setCounts(undefined); loadCounts(); }, [loadCounts]);
   useEffect(() => { setList(null); loadList(); }, [loadList]);
 
   const rows = list || [];
@@ -438,10 +444,10 @@ export default function FlightBridgeSchools() {
                 </tbody>
               </table>
             </div>
-            {openId && <SchoolWindow ids={rows.map((r) => r.id)} openId={openId} setOpenId={setOpenId}
-              onChanged={() => { loadList(); loadCounts(); loadTree(); }} />}
           </div>
         )}
+        {openId && <SchoolWindow ids={rows.map((r) => r.id)} openId={openId} setOpenId={setOpenId}
+          onChanged={() => { loadList(); loadCounts(); loadTree(); }} />}
       </div>
     </div>
   );

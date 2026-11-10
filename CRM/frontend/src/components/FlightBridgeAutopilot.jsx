@@ -9,6 +9,8 @@ import { CloseButton } from './ui/QuickActions';
 import AppleSelect from './ui/AppleSelect';
 import { Switch } from './ui/AppleControls';
 import GlassPopover from './ui/GlassPopover';
+import LinkTile, { GoLink } from './ui/LinkTile';
+import { useRoute, setParams } from '../utils/route';
 
 // Email Auto-Pilot and the outreach Pipeline.
 // The engine on the Mac Mini does the sending (flightbridge/autosend.py): this screen only stores the owner's choices
@@ -77,7 +79,7 @@ export function autopilotIssues(d) {
     out.push({ id: 'server', label: 'Sending is switched off on the Mac (DRY_RUN)', fix: 'In ~/FlightBridgeEngine/.env set these two lines, then run install.sh:', code: 'DRY_RUN=false\nOUTBOUND_ENABLED=true' });
   }
   if (d.kill_switch_engaged) out.push({ id: 'kill_switch', label: 'The kill switch is on', fix: 'It blocks every email.', action: 'kill' });
-  if (!d.templates?.initial) out.push({ id: 'template_initial', label: 'No first email approved', fix: 'Approve a version in Email templates.' });
+  if (!d.templates?.initial) out.push({ id: 'template_initial', label: 'No first email approved', fix: 'Approve a version in Email templates.', to: ['partnerships', 'templates'] });
   for (const c of st.preflight?.checks || []) {
     if (c.status === 'fail' && !['server', 'kill_switch', 'template_initial'].includes(c.id)) out.push({ id: c.id, label: c.label, fix: c.fix || c.detail, detail: c.detail });
   }
@@ -114,14 +116,14 @@ function statusLine(d) {
   }
 }
 
-function Stat({ label, value, sub, children }) {
+function Stat({ label, value, sub, children, to, title }) {
   return (
-    <div className="glass-subtle rounded-2xl p-3 min-w-0">
+    <LinkTile to={to} title={title} className="glass-subtle rounded-2xl p-3 min-w-0">
       <div className="text-[12px] text-glass-muted">{label}</div>
       <div className="text-xl font-bold text-glass-primary tabular-nums">{value}</div>
       {children}
       {sub && <div className="text-[11px] text-glass-muted mt-0.5">{sub}</div>}
-    </div>
+    </LinkTile>
   );
 }
 
@@ -542,6 +544,7 @@ export function AutoPilot({ isAdmin }) {
                       )}
                     </div>
                     {isAdmin && it.action === 'kill' && <button type="button" className="glass-capsule glass-capsule-blue shrink-0 self-center" disabled={busy} onClick={releaseKill}>Release</button>}
+                    {it.to && <LinkTile to={it.to} chevron={false} className="glass-capsule glass-capsule-blue shrink-0 self-center">Open</LinkTile>}
                     {isAdmin && it.action === 'resume' && <button type="button" className="glass-capsule glass-capsule-blue shrink-0 self-center" disabled={busy} onClick={() => save({ resume: true }, 'Resumed')}>Resume</button>}
                   </li>
                 ))}
@@ -551,14 +554,14 @@ export function AutoPilot({ isAdmin }) {
           <Switch on={!!cfg.enabled} disabled={!isAdmin || busy} onChange={toggle} label="Email Auto-Pilot" />
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <Stat label="Sent today" value={`${sent} / ${limit}`} sub={today?.warmup_week ? `Warm-up week ${today.warmup_week}` : (cfg.warmup !== false ? 'Warm-up' : 'Fixed pace')}>
+          <Stat label="Sent today" to={['partnerships', 'pipeline', { stage: 'sent' }]} title="Open Pipeline > Sent" value={`${sent} / ${limit}`} sub={today?.warmup_week ? `Warm-up week ${today.warmup_week}` : (cfg.warmup !== false ? 'Warm-up' : 'Fixed pace')}>
             <div className="h-1.5 rounded-full mt-1.5 overflow-hidden" style={{ background: 'rgba(120,120,128,0.18)' }}>
               <div className="h-full rounded-full" style={{ width: `${Math.min(100, (sent / Math.max(limit, 1)) * 100)}%`, background: '#34C759' }} />
             </div>
           </Stat>
-          <Stat label="Ready to send" value={d.ready} sub={`${d.eligible_with_email} Eligible schools have an email`} />
-          <Stat label="Follow-ups due" value={d.followups_waiting} sub="Sent when the school hasn't replied" />
-          <Stat label="Sent so far" value={d.sent_total} sub={d.enabled_by && cfg.enabled ? `On since ${day(cfg.since)} · ${d.enabled_by}` : ' '} />
+          <Stat label="Ready to send" to={['partnerships', 'pipeline', { stage: 'queued' }]} title="Open Pipeline > Queued" value={d.ready} sub={`${d.eligible_with_email} Eligible schools have an email`} />
+          <Stat label="Follow-ups due" to={['partnerships', 'pipeline', { stage: 'followup' }]} title="Open Pipeline > Follow-up" value={d.followups_waiting} sub="Sent when the school hasn't replied" />
+          <Stat label="Sent so far" to={['partnerships', 'outbound', { show: 'sent' }]} title="Open every email sent" value={d.sent_total} sub={d.enabled_by && cfg.enabled ? `On since ${day(cfg.since)} · ${d.enabled_by}` : ' '} />
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-glass-muted">
           <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: d.engine_online ? '#34C759' : '#FF9500' }} />Mac Mini {d.engine_online ? 'online' : 'offline'}{d.engine?.at ? ` · ${ago(d.engine.at)}` : ''}</span>
@@ -739,7 +742,7 @@ export function AutoPilot({ isAdmin }) {
               <li key={r.id} className="py-2 flex items-center gap-3 text-sm">
                 <span style={{ color: r.status === 'sent' ? '#34C759' : r.status === 'failed' ? '#FF3B30' : '#FF9500' }}><Icon name={r.status === 'sent' ? 'send' : 'alert'} size={16} /></span>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-glass-primary">{r.name} <span className="text-glass-muted">· {countryName(r.country)}</span></div>
+                  <div className="truncate text-glass-primary"><GoLink to={['partnerships', 'pipeline', { q: r.name }]} title="Open in the Pipeline">{r.name}</GoLink> <span className="text-glass-muted">· {countryName(r.country)}</span></div>
                   <div className="truncate text-[12px] text-glass-muted">{r.kind === 'followup' ? 'Follow-up' : 'First email'} · {r.subject}</div>
                 </div>
                 <span className="text-[12px] text-glass-muted shrink-0">{when(r.at)}</span>
@@ -775,13 +778,13 @@ function PipelineRow({ r, onMove }) {
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold text-glass-primary truncate">{r.name}</span>
+            <GoLink to={['partnerships', 'schools', { q: r.name, school: r.org_id }]} className="font-semibold text-glass-primary truncate" title="Open the school's details">{r.name}</GoLink>
             <span className="px-2 py-0.5 rounded-full text-[12px] font-medium" style={{ background: t.bg, color: t.fg }}>{r.note}</span>
             {r.via === 'autopilot' && <span className="text-[11px] text-glass-muted inline-flex items-center gap-1"><Icon name="rocket" size={12} />Auto-Pilot</span>}
           </div>
           <div className="text-[13px] text-glass-secondary truncate">{[r.city, countryName(r.country)].filter(Boolean).join(', ')}{r.email ? ` · ${r.email}` : ''}</div>
           {steps.length > 0 && <div className="text-[12px] text-glass-muted mt-0.5">{steps.join(' · ')}</div>}
-          {r.reply_snippet && <div className="text-[13px] mt-1.5 p-2 rounded-xl glass-subtle text-glass-secondary line-clamp-2">“{r.reply_snippet}”</div>}
+          {r.reply_snippet && <LinkTile to={['partnerships', 'inbox']} chevron={false} title="Open the Inbox" className="text-[13px] mt-1.5 p-2 rounded-xl glass-subtle text-glass-secondary line-clamp-2">“{r.reply_snippet}”</LinkTile>}
         </div>
       </div>
       <div className="flex flex-wrap gap-1.5 mt-2.5">
@@ -795,8 +798,16 @@ function PipelineRow({ r, onMove }) {
 }
 
 export function Pipeline() {
-  const [stage, setStage] = useState('all');
-  const [q, setQ] = useState('');
+  // Stage and search live in the address (#/partnerships/pipeline?stage=sent&q=...), so other screens link here.
+  const route = useRoute();
+  const stage = route.params.stage || 'all';
+  const setStage = (k) => setParams({ stage: k === 'all' ? undefined : k });
+  const [q, setQ] = useState(route.params.q || '');
+  useEffect(() => { if ((route.params.q || '') !== q.trim()) setQ(route.params.q || ''); }, [route.params.q]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const t = setTimeout(() => { if (q.trim() !== (route.params.q || '')) setParams({ q: q.trim() || undefined }); }, 500);
+    return () => clearTimeout(t);
+  }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
   const [data, setData] = useState(null);
   const load = useCallback(async () => {
     try {

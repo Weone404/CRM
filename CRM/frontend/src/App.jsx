@@ -13,6 +13,8 @@ import { signOutSupabase } from './backend/router';
 import { USE_SUPABASE } from './backend/mode';
 import { modalProps } from './components/ui/overlay';
 import { showToast } from './utils/toast';
+import { useRoute, navigate } from './utils/route';
+import LinkTile from './components/ui/LinkTile';
 
 // Code-split everything that isn't needed for the first paint. Each of these
 // tabs/modals now ships as its own chunk fetched on demand, so a Sales user
@@ -49,7 +51,10 @@ export default function App() {
   const [showOutbox, setShowOutbox] = useState(false);
   const [showAddQuery, setShowAddQuery] = useState(false);
   const [config, setConfig] = useState({});
-  const [activeTab, setActiveTab] = useState('leads');
+  // Where we are comes from the address (#/tab/section?filters), so links, Back/Forward and refresh all work.
+  const route = useRoute();
+  const routeTab = route.tab || 'leads';
+  useEffect(() => { window.scrollTo({ top: 0 }); }, [route.tab, route.section]);
   // Aviation (pilot training) or Charter (Book My Charter). Remembered per
   // browser so a charter desk stays on Charter; falls back safely if storage
   // is unavailable.
@@ -216,8 +221,9 @@ export default function App() {
   const BAR = Math.min(4, tabs.length);
   const barTabs = tabs.slice(0, BAR);
   const moreTabs = tabs.slice(BAR);
+  const activeTab = tabs.some((t) => t.id === routeTab) ? routeTab : (tabs[0]?.id || 'tasks');
+  const go = (id) => { setShowMore(false); navigate(id); };
   const moreActive = moreTabs.some((t) => t.id === activeTab);
-  const go = (id) => { setActiveTab(id); setShowMore(false); window.scrollTo({ top: 0 }); };
 
   return (
     <div className="min-h-screen pb-24 md:pb-0">
@@ -324,12 +330,15 @@ export default function App() {
               })}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <div className="glass-stat p-4"><div className="text-sm text-glass-secondary">{segment === 'charter' ? 'Charter Enquiries' : 'Total Leads'}</div><div className="text-2xl font-bold text-glass-primary">{segmentLeads.length}</div></div>
-              <div className="glass-stat p-4"><div className="text-sm text-glass-secondary">Untouched</div><div className="text-2xl font-bold text-orange-600">{untouched(segmentLeads)}</div></div>
-              <div className="glass-stat p-4"><div className="text-sm text-glass-secondary">Pending Follow-ups</div><div className="text-2xl font-bold text-blue-600">{segmentFollowups.length}</div></div>
+              <LinkTile to={['leads', '', { filter: 'all' }]} className="glass-stat p-4" title="Show every lead"><div className="text-sm text-glass-secondary">{segment === 'charter' ? 'Charter Enquiries' : 'Total Leads'}</div><div className="text-2xl font-bold text-glass-primary">{segmentLeads.length}</div></LinkTile>
+              <LinkTile to={['leads', '', { filter: 'pending' }]} className="glass-stat p-4" title="Show leads nobody has contacted yet"><div className="text-sm text-glass-secondary">Untouched</div><div className="text-2xl font-bold text-orange-600">{untouched(segmentLeads)}</div></LinkTile>
+              <button type="button" className="tile-link glass-stat p-4 text-left" title="Show the follow-ups due"
+                onClick={() => document.getElementById('lead-followups')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>
+                <div className="text-sm text-glass-secondary">Pending Follow-ups</div><div className="text-2xl font-bold text-blue-600">{segmentFollowups.length}</div>
+              </button>
             </div>
             {segmentFollowups.length > 0 && (
-              <div className="glass-card p-4 mb-4" style={{ background: 'rgba(255,149,0,0.10)', borderColor: 'rgba(255,204,0,0.45)' }}>
+              <div id="lead-followups" className="glass-card p-4 mb-4" style={{ background: 'rgba(255,149,0,0.10)', borderColor: 'rgba(255,204,0,0.45)' }}>
                 <h3 className="font-semibold mb-2 text-glass-primary inline-flex items-center gap-2"><Icon name="clock" size={16} />Follow-ups due</h3>
                 <div className="space-y-2">
                   {segmentFollowups.slice(0, 3).map(f => (
