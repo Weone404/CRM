@@ -225,8 +225,11 @@ export function parseListing(item: any, sellerSkuFallback?: string) {
   const a = item?.attributes || {};
   const offer = (item?.offers || []).find((o: any) => o.offerType === "B2C") || first(item?.offers);
   const fa = first(item?.fulfillmentAvailability) || {};
-  const price = offer?.price?.amount ?? first(first(a.purchasable_offer)?.our_price)?.schedule?.[0]?.value_with_tax;
-  const mrp = first(a.list_price)?.value_with_tax ?? first(a.list_price)?.value ?? val(a.maximum_retail_price);
+  // India keeps MRP inside the offer (purchasable_offer.maximum_retail_price); list_price is the fallback elsewhere.
+  const allOffer = (a.purchasable_offer || []).find((o: any) => (o?.audience ?? "ALL") === "ALL") || first(a.purchasable_offer);
+  const price = offer?.price?.amount ?? first(allOffer?.our_price)?.schedule?.[0]?.value_with_tax;
+  const mrp = first(allOffer?.maximum_retail_price)?.schedule?.[0]?.value_with_tax
+    ?? first(a.list_price)?.value_with_tax ?? first(a.list_price)?.value ?? val(a.maximum_retail_price);
   const status: string[] = s.status || [];
   const rel = first(item?.relationships)?.relationships || [];
   const isParent = rel.some((x: any) => Array.isArray(x.childSkus) && x.childSkus.length > 0);
@@ -261,7 +264,9 @@ export function parseListing(item: any, sellerSkuFallback?: string) {
     fulfillment: fa.fulfillmentChannelCode && fa.fulfillmentChannelCode !== "DEFAULT" ? "FBA" : "FBM",
     country_of_origin: val(a.country_of_origin) ?? null,
     manufacturer: val(a.manufacturer) ?? null,
-    net_quantity: val(a.net_content) ?? val(a.item_package_quantity)?.toString() ?? null,
+    net_quantity: val(a.net_content)
+      ?? (first(a.unit_count)?.value != null ? `${first(a.unit_count).value} ${first(a.unit_count)?.type?.value ?? "count"}` : null)
+      ?? val(a.number_of_items)?.toString() ?? val(a.item_package_quantity)?.toString() ?? null,
     attributes: a,
     images,
     issues: (item?.issues || []).map((i: any) => ({ code: i.code, message: i.message, severity: i.severity })),
@@ -277,6 +282,14 @@ export function buildPatches(after: Record<string, any>, mk: string, lang: strin
   if (after.handling_days != null) fa.lead_time_to_ship_max_days = Number(after.handling_days);
   if (after.quantity != null) fa.quantity = Number(after.quantity);
   if (Object.keys(fa).length > 1) patches.push({ op: "merge", path: "/attributes/fulfillment_availability", value: [fa] });
+  // Price and MRP live in the same consumer offer (audience ALL). A merge changes only these values and keeps
+  // everything else (the B2B offer, start date ...); a replace would wipe them.
+  if (after.price != null || after.mrp != null) {
+    const offer: Record<string, unknown> = { marketplace_id: mk, currency: "INR", audience: "ALL" };
+    if (after.price != null) offer.our_price = [{ schedule: [{ value_with_tax: Number(after.price) }] }];
+    if (after.mrp != null) offer.maximum_retail_price = [{ schedule: [{ value_with_tax: Number(after.mrp) }] }];
+    patches.push({ op: "merge", path: "/attributes/purchasable_offer", value: [offer] });
+  }
   const text = (name: string, v: string) => patches.push({ op: "replace", path: `/attributes/${name}`,
     value: [{ value: v, language_tag: lang, marketplace_id: mk }] });
   for (const [k, v] of Object.entries(after)) {
@@ -290,14 +303,7 @@ export function buildPatches(after: Record<string, any>, mk: string, lang: strin
         patches.push({ op: "replace", path: "/attributes/bullet_point",
           value: (v as string[]).map((b) => ({ value: b, language_tag: lang, marketplace_id: mk })) });
         break;
-      case "price":
-        patches.push({ op: "replace", path: "/attributes/purchasable_offer", value: [{ marketplace_id: mk, currency: "INR",
-          our_price: [{ schedule: [{ value_with_tax: Number(v) }] }] }] });
-        break;
-      case "mrp":
-        patches.push({ op: "replace", path: "/attributes/list_price",
-          value: [{ marketplace_id: mk, currency: "INR", value_with_tax: Number(v) }] });
-        break;
+      case "price": case "mrp": break;               // sent above as one purchasable_offer merge
       case "country_of_origin":
         patches.push({ op: "replace", path: "/attributes/country_of_origin", value: [{ value: String(v), marketplace_id: mk }] });
         break;

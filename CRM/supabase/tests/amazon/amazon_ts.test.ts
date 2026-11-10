@@ -104,9 +104,9 @@ describe("Test Connection (Settings)", () => {
 describe("listing mapping", () => {
   test("buildPatches maps fields for India and reports what the API cannot set", () => {
     const { patches, notPushed } = buildPatches({ title: "T", price: 399, bullets: ["a", "b"], item_highlights: "h", claims: ["x"] }, "A21TJRUUN4KGV", "en_IN");
-    expect(patches.map((p) => p.path)).toEqual(["/attributes/item_name", "/attributes/purchasable_offer", "/attributes/bullet_point"]);
-    expect(patches[0].value[0]).toEqual({ value: "T", language_tag: "en_IN", marketplace_id: "A21TJRUUN4KGV" });
-    expect(patches[1].value[0].our_price[0].schedule[0].value_with_tax).toBe(399);
+    expect(patches.map((p) => p.path)).toEqual(["/attributes/purchasable_offer", "/attributes/item_name", "/attributes/bullet_point"]);
+    expect(patches[1].value[0]).toEqual({ value: "T", language_tag: "en_IN", marketplace_id: "A21TJRUUN4KGV" });
+    expect(patches[0].value[0].our_price[0].schedule[0].value_with_tax).toBe(399);
     expect(notPushed).toEqual(["item_highlights"]);
   });
   test("parseListing reads summaries, price, FBM quantity and issues", () => {
@@ -301,5 +301,21 @@ describe("product editor patches", () => {
     expect(patches).toEqual([
       { op: "replace", path: "/attributes/color", value: [{ value: "Brown", language_tag: "en_IN", marketplace_id: "M" }] },
       { op: "delete", path: "/attributes/pattern", value: [{ marketplace_id: "M", language_tag: "en_IN" }] }]);
+  });
+});
+
+describe("India offer (price + MRP)", () => {
+  test("price and MRP go out as ONE merge on the consumer offer, never a replace", () => {
+    const { patches } = buildPatches({ price: 449, mrp: 799 }, "M", "en_IN");
+    expect(patches).toEqual([{ op: "merge", path: "/attributes/purchasable_offer", value: [{ marketplace_id: "M", currency: "INR", audience: "ALL",
+      our_price: [{ schedule: [{ value_with_tax: 449 }] }], maximum_retail_price: [{ schedule: [{ value_with_tax: 799 }] }] }] }]);
+    expect(patches.some((p: any) => p.op === "replace" || p.path === "/attributes/list_price")).toBe(false);
+  });
+  test("MRP and quantity in the box are read from India's attributes; B2B price is ignored", () => {
+    const l = parseListing({ sku: "S", summaries: [{ asin: "B" }], attributes: {
+      purchasable_offer: [{ audience: "B2B", our_price: [{ schedule: [{ value_with_tax: 426.54 }] }] },
+        { audience: "ALL", our_price: [{ schedule: [{ value_with_tax: 449 }] }], maximum_retail_price: [{ schedule: [{ value_with_tax: 799 }] }] }],
+      unit_count: [{ type: { value: "count" }, value: 1 }] } });
+    expect([l.price, l.mrp, l.net_quantity]).toEqual([449, 799, "1 count"]);
   });
 });

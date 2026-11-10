@@ -383,4 +383,20 @@ BEGIN
 END $$;
 RESET ROLE;
 
+-- F: 077 legal fields soft for existing listings
+SET ROLE authenticated; SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+DO $$
+DECLARE g jsonb;
+BEGIN
+  RESET ROLE;
+  UPDATE public.amazon_listings SET synced_at = now(), mrp = NULL, manufacturer = NULL WHERE sku = '69-E0DG-L8W8';
+  SET ROLE authenticated;
+  g := public.api_amz_check('listing', '69-E0DG-L8W8', '{"description": "A ruled diary."}');
+  PERFORM pg_temp.ok((g->>'ok')::boolean AND g->'warnings' @> '[{"code":"legal_fields"}]',
+    'L01 synced listing missing MRP/maker: edits allowed, shown as a warning');
+  g := public.api_amz_check('create', 'NEW-SKU-2', '{"title": "Nitaniya 2027 Diary A5"}');
+  PERFORM pg_temp.ok(NOT (g->>'ok')::boolean AND g->'blockers' @> '[{"code":"legal_fields"}]', 'L02 new listings still need the legal fields');
+END $$;
+RESET ROLE;
+
 \echo ALL SQL TESTS PASSED
