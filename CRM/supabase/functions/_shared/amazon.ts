@@ -365,6 +365,30 @@ export function parseSalesTraffic(doc: any, day: string) {
   })).filter((x: any) => x.sku);
 }
 
+// GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL (tab-separated) -> units and sales per SKU per IST day.
+// Used instead of the Sales & Traffic report, which needs the Brand Analytics role (Brand Registry only).
+// Cancelled lines count as 0 but still produce a row, so a later cancellation overwrites the earlier count.
+export function parseOrdersReport(tsv: string) {
+  const lines = String(tsv || "").replace(/\r/g, "").split("\n").filter((l) => l.trim());
+  if (lines.length < 2) return [];
+  const head = lines[0].split("\t");
+  const col = (n: string) => head.indexOf(n);
+  const [iDate, iSku, iAsin, iQty, iPrice, iOs, iIs] = ["purchase-date", "sku", "asin", "quantity", "item-price", "order-status", "item-status"].map(col);
+  const agg = new Map<string, { day: string; sku: string; asin: string; units: number; revenue: number }>();
+  for (const line of lines.slice(1)) {
+    const c = line.split("\t");
+    const sku = c[iSku]; const when = c[iDate];
+    if (!sku || !when) continue;
+    const day = istDay(when);
+    const k = `${day}|${sku}`;
+    const r = agg.get(k) || { day, sku, asin: c[iAsin] || "", units: 0, revenue: 0 };
+    const cancelled = /cancel/i.test(c[iOs] || "") || /cancel/i.test(c[iIs] || "");
+    if (!cancelled) { r.units += Number(c[iQty]) || 0; r.revenue += Number(c[iPrice]) || 0; }
+    agg.set(k, r);
+  }
+  return [...agg.values()].map((r) => ({ ...r, revenue: Math.round(r.revenue * 100) / 100 }));
+}
+
 // GET_V2_SELLER_PERFORMANCE_REPORT -> percentages (seller-fulfilled figures; this account is FBM only).
 export function parsePerformance(doc: any) {
   const m = first(doc?.performanceMetrics) || {};

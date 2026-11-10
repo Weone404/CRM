@@ -395,7 +395,7 @@ function Sales({ listings }) {
     <div className="space-y-3">
       <Seg label="Period" value={days} onChange={setDays} options={[[7, 'Last 7 days'], [30, 'Last 30 days'], [90, 'Last 90 days']]} />
       <Err msg={err} />
-      {!d ? <Empty>Loading…</Empty> : d.daily.length === 0 ? <Empty>No sales data yet. It comes from Amazon every hour (yesterday's sales show today).</Empty> : (
+      {!d ? <Empty>Loading…</Empty> : d.daily.length === 0 ? <Empty>No sales yet in this period. Orders come from Amazon every hour.</Empty> : (
         <>
           <div className="grid grid-cols-2 gap-3"><Stat label="Money from sales" value={inr(total.rev)} /><Stat label="Items sold" value={total.units} /></div>
           <div className="glass-card p-4">

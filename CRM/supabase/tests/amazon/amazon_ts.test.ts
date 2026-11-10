@@ -2,7 +2,7 @@
 // Amazon is replaced by a scripted fake; nothing here calls the real API.
 import { describe, expect, test } from "bun:test";
 import { SpApi, LwaError, testConnection, buildPatches, parseListing, parseCompetitiveSummary, parseSalesTraffic,
-  parsePerformance, istDayRange, istDay } from "../../functions/_shared/amazon.ts";
+  parseOrdersReport, parsePerformance, istDayRange, istDay } from "../../functions/_shared/amazon.ts";
 import { execute, reconcile, staleFields } from "../../functions/_shared/amazon_exec.ts";
 
 type Step = { status: number; body?: unknown; headers?: Record<string, string> } | Error;
@@ -263,5 +263,19 @@ describe("dispatch speed", () => {
   test("staleFields treats dispatch days as numbers", () => {
     expect(staleFields({ handling_days: 2 }, { handling_days: 0 }, { handling_days: "2" })).toEqual([]);
     expect(staleFields({ handling_days: 2 }, { handling_days: 0 }, { handling_days: 3 })).toEqual(["handling_days"]);
+  });
+});
+
+describe("orders report", () => {
+  test("sums units and sales per SKU per IST day; cancelled lines count 0 but keep a row", () => {
+    const h = ["amazon-order-id","purchase-date","order-status","sku","asin","item-status","quantity","item-price"].join("\t");
+    const tsv = [h,
+      ["1","2026-11-09T20:00:00+00:00","Shipped","A","B01","Shipped","2","798"].join("\t"),   // 10 Nov IST
+      ["2","2026-11-10T05:00:00+00:00","Pending","A","B01","Unshipped","1","399"].join("\t"),
+      ["3","2026-11-10T06:00:00+00:00","Cancelled","B","B02","Cancelled","1","349"].join("\t")].join("\n");
+    const rows = parseOrdersReport(tsv);
+    expect(rows.find((r) => r.sku === "A")).toEqual({ day: "2026-11-10", sku: "A", asin: "B01", units: 3, revenue: 1197 });
+    expect(rows.find((r) => r.sku === "B")).toMatchObject({ units: 0, revenue: 0 });
+    expect(parseOrdersReport("")).toEqual([]);
   });
 });

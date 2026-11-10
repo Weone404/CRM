@@ -4,7 +4,7 @@
 // Every job takes its own lock (svc_amz_run_begin), so overlapping runs skip instead of doubling up,
 // and every run is recorded in amazon_sync_runs (the CRM shows data age from it).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { SpApi, SpApiError, LwaError, parseListing, parseCompetitiveSummary, parseCatalog, parseSalesTraffic,
+import { SpApi, SpApiError, LwaError, parseListing, parseCompetitiveSummary, parseCatalog, parseOrdersReport,
   parsePerformance, istDay, istDayRange } from "../_shared/amazon.ts";
 import { execute, reconcile } from "../_shared/amazon_exec.ts";
 import { asUser, cors, cronOk, json, HttpError, loadApi, rpc, scrub } from "../_shared/amazon_deno.ts";
@@ -69,58 +69,69 @@ async function executeJob(api: SpApi, s: Record<string, string>, t0: number) {
   return { items: n + rec.length, detail: `ran ${n}, reconciled ${rec.length}` };
 }
 
-async function download(doc: any) {
+async function download(doc: any, asText = false) {
   const r = await fetch(doc.url);
   if (!r.ok) throw new Error(`report download ${r.status}`);
-  if (doc.compressionAlgorithm === "GZIP") {
-    const text = await new Response(r.body!.pipeThrough(new DecompressionStream("gzip"))).text();
-    return JSON.parse(text);
-  }
-  return await r.json();
+  const text = doc.compressionAlgorithm === "GZIP"
+    ? await new Response(r.body!.pipeThrough(new DecompressionStream("gzip"))).text()
+    : await r.text();
+  return asText ? text : JSON.parse(text);
 }
 
-// One report per IST day (sales & traffic per SKU) + the seller performance report. Each step is resumable:
-// the report id is kept in amazon_config, so a run that times out continues where it stopped.
+// Two reports, each independent (one failing never blocks the other):
+// 1. Orders by order date (last 4 IST days) -> units and sales per SKU. One report is kept "pending" in
+//    amazon_config; each run reads the finished one and asks for a fresh one, so sales are at most ~1 hour old.
+// 2. Seller performance (account health), once per IST day.
 async function reports(api: SpApi, _s: Record<string, string>, t0: number) {
-  let n = 0; const notes: string[] = [];
+  let n = 0; const notes: string[] = []; const errors: string[] = [];
   const today = istDay(new Date());
-  const days = [1, 2, 3].map((d) => istDay(new Date(Date.now() - d * 86400000)));
-  const plan: { key: string; type: string; day: string; options?: Record<string, string> }[] = [
-    ...days.map((day) => ({ key: `report_sales_${day}`, type: "GET_SALES_AND_TRAFFIC_REPORT", day,
-      options: { dateGranularity: "DAY", asinGranularity: "SKU" } })),
-    { key: `report_perf_${today}`, type: "GET_V2_SELLER_PERFORMANCE_REPORT", day: today },
-  ];
-  for (const p of plan) {
-    if (Date.now() - t0 > DEADLINE_MS) break;
-    const state = await rpc("svc_amz_config_get", { p_key: p.key });
-    if (state === "done" || state === "fatal") continue;
+  const step = async (name: string, fn: () => Promise<void>) => {
+    if (Date.now() - t0 > DEADLINE_MS) return;
+    try { await fn(); } catch (e) { errors.push(`${name}: ${e instanceof Error ? e.message : String(e)}`); }
+  };
+  await step("orders", async () => {
+    const key = "report_orders_pending";
+    const id = await rpc("svc_amz_config_get", { p_key: key });
+    if (id) {
+      const rep = await api.getReport(id);
+      if (rep.processingStatus === "IN_QUEUE" || rep.processingStatus === "IN_PROGRESS") { notes.push(`orders ${rep.processingStatus}`); return; }
+      if (rep.processingStatus === "DONE") {
+        const rows = parseOrdersReport(await download(await api.getReportDocument(rep.reportDocumentId), true));
+        n += rows.length ? await rpc("svc_amz_upsert_sales", { p_items: rows }) : 0;
+        notes.push(`orders ${rows.length} rows`);
+      } else notes.push(`orders ${rep.processingStatus}`);
+    }
+    const [start] = istDayRange(istDay(new Date(Date.now() - 3 * 86400000)));
+    const r = await api.createReport("GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL", start, new Date(Date.now() - 120000).toISOString());
+    await rpc("svc_amz_config_set", { p_key: key, p_value: r.reportId });
+  });
+  await step("health", async () => {
+    const key = `report_perf_${today}`;
+    const state = await rpc("svc_amz_config_get", { p_key: key });
+    if (state === "done" || state === "fatal") return;
     if (!state) {
-      const [start, end] = p.type === "GET_V2_SELLER_PERFORMANCE_REPORT" ? istDayRange(days[0]) : istDayRange(p.day);
-      const r = await api.createReport(p.type, start, end, p.options);
-      await rpc("svc_amz_config_set", { p_key: p.key, p_value: r.reportId });
-      notes.push(`${p.key} requested`);
-      continue;
+      const [start, end] = istDayRange(istDay(new Date(Date.now() - 86400000)));
+      const r = await api.createReport("GET_V2_SELLER_PERFORMANCE_REPORT", start, end);
+      await rpc("svc_amz_config_set", { p_key: key, p_value: r.reportId });
+      notes.push("health requested");
+      return;
     }
     const rep = await api.getReport(state);
     if (rep.processingStatus === "CANCELLED" || rep.processingStatus === "FATAL") {
-      // CANCELLED for sales usually means "no data for that day"; record it and stop asking.
-      await rpc("svc_amz_config_set", { p_key: p.key, p_value: rep.processingStatus === "FATAL" ? "fatal" : "done" });
-      notes.push(`${p.key} ${rep.processingStatus}`);
-      continue;
+      await rpc("svc_amz_config_set", { p_key: key, p_value: rep.processingStatus === "FATAL" ? "fatal" : "done" });
+      notes.push(`health ${rep.processingStatus}`);
+      return;
     }
-    if (rep.processingStatus !== "DONE") { notes.push(`${p.key} ${rep.processingStatus}`); continue; }
+    if (rep.processingStatus !== "DONE") { notes.push(`health ${rep.processingStatus}`); return; }
     const doc = await download(await api.getReportDocument(rep.reportDocumentId));
-    if (p.type === "GET_SALES_AND_TRAFFIC_REPORT") {
-      n += await rpc("svc_amz_upsert_sales", { p_items: parseSalesTraffic(doc, p.day) });
-    } else {
-      const h = parsePerformance(doc);
-      await rpc("svc_amz_upsert_health", { p_day: p.day, p_odr: h.odr, p_cancel: h.cancel_rate, p_late: h.late_ship_rate,
-        p_vtr: h.valid_tracking_rate, p_policy: h.policy_issues, p_raw: doc?.performanceMetrics?.[0] ?? null });
-      n++;
-    }
-    await rpc("svc_amz_config_set", { p_key: p.key, p_value: "done" });
-  }
-  return { items: n, detail: notes.join("; ") };
+    const h = parsePerformance(doc);
+    await rpc("svc_amz_upsert_health", { p_day: today, p_odr: h.odr, p_cancel: h.cancel_rate, p_late: h.late_ship_rate,
+      p_vtr: h.valid_tracking_rate, p_policy: h.policy_issues, p_raw: doc?.performanceMetrics?.[0] ?? null });
+    await rpc("svc_amz_config_set", { p_key: key, p_value: "done" });
+    n++;
+  });
+  if (errors.length) throw new Error([...errors, ...notes].join("; "));   // work already saved stays saved
+  return { items: n, detail: [...notes, ...errors].join("; ") };
 }
 
 // Fees and refunds per SKU per IST day for the last 3 full days (overwrites those days only).
