@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from '../backend/supabaseClient';
 import { showToast } from '../utils/toast';
 import { confirmDialog, promptDialog } from './ui/dialogs';
 import Icon from './icons';
 import { useRoute, navigate } from '../utils/route';
-import { chars, utf8Bytes, inr, pct, diffRows, measureImage, STATUS_STYLE, ageText, dispatchText, plain } from '../utils/amazon';
+import { ProductGallery, ProductEditor } from './AmazonEditor';
+import { inr, pct, diffRows, STATUS_STYLE, ageText, dispatchText, plain } from '../utils/amazon';
 
 // CRM > Amazon (Nitaniya on Amazon.in). Admin, plus people Admin grants in Settings.
 // Built for a non-technical seller: 4 tabs (Home, My Products, Approve Changes, Sales) and everything else under More.
@@ -44,7 +45,6 @@ function useLoad(fn, deps = []) {
   return [data, load, error];
 }
 
-const GREEN = { bg: 'rgba(52,199,89,0.14)', fg: '#1E7B34' };
 const Chip = ({ children, bg = 'rgba(118,118,128,0.14)', fg = '#3C3C43' }) => (
   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap" style={{ background: bg, color: fg }}>{children}</span>
 );
@@ -221,71 +221,16 @@ function DeliverySpeed({ listings, go }) {
   );
 }
 
-// ---------------------------------------------------------------- My Products
-function Products({ listings, findings, go, openStudio, reload }) {
+// ---------------------------------------------------------------- My Products (gallery + editor)
+function Products({ access, listings, findings, go, reload, openSku, setOpenSku }) {
   const [q, setQ] = useState('');
-  const [open, setOpen] = useState(null);
-  const bySku = useMemo(() => {
-    const m = {};
-    (findings || []).forEach((f) => { if (f.sku) (m[f.sku] = m[f.sku] || []).push(f); });
-    return m;
-  }, [findings]);
-  const list = useMemo(() => (listings || []).filter((r) => !q || `${r.sku} ${r.asin} ${r.title}`.toLowerCase().includes(q.toLowerCase())), [listings, q]);
-  const draftPrice = async (r) => {
-    const v = await promptDialog(`New price for ${r.asin}`, { message: `Now ${inr(r.price)}${r.buybox_price ? `. The seller winning "Add to Cart" asks ${inr(r.buybox_price)}` : ''}. Never below ₹299.`, placeholder: 'e.g. 349', required: true });
-    if (!v) return;
-    const c = await run(rpc('api_amz_draft_create', { p_kind: 'price', p_sku: r.sku, p_after: { price: Number(v) }, p_summary: `Price ${inr(r.price)} → ${inr(v)}` }));
-    if (c) showToast(c.guard_result.ok ? 'Price change ready. Approve it in Approve Changes.' : `Not allowed: ${c.guard_result.blockers.map((b) => b.message).join(' ')}`, c.guard_result.ok ? 'success' : 'error');
-  };
-  const draftDispatch = async (r, d) => {
-    const c = await run(rpc('api_amz_draft_create', { p_kind: 'dispatch', p_sku: r.sku, p_after: { handling_days: d }, p_summary: `${dispatchText(d)} dispatch` }));
-    if (c) showToast(c.guard_result.ok ? 'Ready. Approve it in Approve Changes.' : `Not allowed: ${c.guard_result.blockers.map((b) => b.message).join(' ')}`, c.guard_result.ok ? 'success' : 'error');
-    reload();
-  };
+  const open = (listings || []).find((l) => l.sku === openSku);
+  if (open) return <ProductEditor key={open.sku + open.version} listing={open} access={access} onClose={() => setOpenSku('')} onSaved={reload} />;
   return (
     <div className="space-y-3">
       <DeliverySpeed listings={listings} go={go} />
       <input className="glass-input w-full px-3 py-2 text-sm" placeholder="Search your products" value={q} onChange={(e) => setQ(e.target.value)} />
-      {!listings ? <Empty>Loading…</Empty> : list.length === 0 ? <Empty>No products found.</Empty> : list.map((r) => {
-        const probs = bySku[r.sku] || [];
-        const selling = r.status === 'Active';
-        return (
-          <div key={r.sku} className="glass-card p-3" data-sku={r.sku}>
-            <button className="w-full text-left" onClick={() => setOpen(open === r.sku ? null : r.sku)} aria-expanded={open === r.sku}>
-              <div className="font-semibold text-glass-primary text-sm">{r.title || '(no name)'}</div>
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                {r.is_parent ? <Chip>Group of sizes / colours</Chip> : <>
-                  {r.price != null && <Chip>{inr(r.price)}</Chip>}
-                  {r.quantity != null && <Chip {...(r.quantity < 3 ? SEV.warning : {})}>{r.quantity} in stock</Chip>}
-                  <Chip {...(Number(r.handling_days) === 0 && r.handling_days != null ? GREEN : {})}>Ships: {dispatchText(r.handling_days)}</Chip>
-                  {r.synced_at && <Chip {...(selling ? GREEN : SEV.blocker)}>{selling ? 'Selling' : 'Not selling'}</Chip>}
-                  {r.has_buybox === true && <Chip {...GREEN}>You win "Add to Cart"</Chip>}
-                  {r.has_buybox === false && <Chip {...SEV.blocker}>Another seller wins "Add to Cart"</Chip>}
-                </>}
-                {probs.length > 0 && <Chip {...SEV.warning}>{probs.length} to fix</Chip>}
-              </div>
-            </button>
-            {open === r.sku && (
-              <div className="mt-3 pt-3 border-t space-y-3 text-sm" style={{ borderColor: 'var(--border-subtle)' }}>
-                {probs.length > 0 && <ul className="space-y-1.5">{probs.map((f) => { const [what, how] = plain(f.rule_code, f.message); return <li key={f.id}><b className="text-glass-primary">{what}.</b> <span className="text-glass-secondary">{how}</span></li>; })}</ul>}
-                {!r.is_parent && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-glass-muted">Dispatch time:</span>
-                    <button className="glass-btn-ghost px-3 py-1.5 text-xs" onClick={() => draftDispatch(r, 0)}>Same day</button>
-                    <button className="glass-btn-ghost px-3 py-1.5 text-xs" onClick={() => draftDispatch(r, 1)}>Next day</button>
-                  </div>
-                )}
-                <div className="flex flex-wrap gap-2">
-                  {!r.is_parent && <button className="glass-btn px-3 py-1.5 text-sm" onClick={() => draftPrice(r)}>Change price</button>}
-                  <button className="glass-btn-ghost px-3 py-1.5 text-sm" onClick={() => openStudio(r.sku)}>Edit name & text</button>
-                  <button className="glass-btn-ghost px-3 py-1.5 text-sm" onClick={() => go('images')}>Photos</button>
-                </div>
-                <div className="text-[11px] text-glass-muted">{r.asin} · {r.sku}{r.synced_at ? ` · updated ${ageText(r.synced_at)}` : ' · not yet updated from Amazon'}</div>
-              </div>
-            )}
-          </div>
-        );
-      })}
+      {!listings ? <Empty>Loading…</Empty> : <ProductGallery listings={listings} findings={findings} q={q} onOpen={setOpenSku} />}
     </div>
   );
 }
@@ -528,160 +473,6 @@ function Competitors({ myAsins }) {
   );
 }
 
-// ---------------------------------------------------------------- Content Studio (+ Product Brief)
-function Field({ label, children, count, max, unit = 'characters' }) {
-  return (
-    <label className="block">
-      <span className="flex justify-between text-xs text-glass-secondary mb-1"><span>{label}</span>
-        {count != null && <span style={{ color: max && count > max ? '#C4261D' : undefined }}>{count}{max ? `/${max}` : ''} {unit}</span>}</span>
-      {children}
-    </label>
-  );
-}
-
-function ContentStudio({ skus, initialSku }) {
-  const [sku, setSku] = useState(initialSku || '');
-  const [base, setBase] = useState(null);
-  const [f, setF] = useState({});
-  const [touched, setTouched] = useState({});
-  const [guard, setGuard] = useState(null);
-  const [brief, setBrief] = useState({ buyer: '', use_cases: '', facts: '' });
-  const timer = useRef(null);
-  useEffect(() => { if (initialSku) setSku(initialSku); }, [initialSku]);
-  useEffect(() => {
-    setTouched({}); setGuard(null);
-    if (!sku) { setBase(null); return; }
-    rpc('api_amz_listing', { p_sku: sku }).then((l) => {
-      setBase(l);
-      setF({ title: l.title || '', item_highlights: l.item_highlights || '', bullets: [...(l.bullets || []), '', '', '', '', ''].slice(0, 5),
-             description: l.description || '', backend_terms: l.backend_terms || '', country_of_origin: l.country_of_origin || '',
-             manufacturer: l.manufacturer || '', net_quantity: l.net_quantity || '', mrp: l.mrp ?? '', claims: '' });
-      setBrief({ buyer: l.facts?.buyer || '', use_cases: l.facts?.use_cases || '', facts: (l.facts?.facts || []).join('\n') });
-    }).catch((e) => showToast(e.message, 'error'));
-  }, [sku]);
-  const after = useMemo(() => {
-    const a = {};
-    Object.keys(touched).forEach((k) => {
-      if (k === 'bullets') a.bullets = f.bullets.map((b) => b.trim()).filter(Boolean);
-      else if (k === 'claims') a.claims = f.claims.split('\n').map((c) => c.trim()).filter(Boolean);
-      else a[k] = typeof f[k] === 'string' ? f[k].trim() : f[k];
-    });
-    return a;
-  }, [f, touched]);
-  useEffect(() => {
-    clearTimeout(timer.current);
-    if (!sku || !Object.keys(after).length) { setGuard(null); return undefined; }
-    timer.current = setTimeout(() => rpc('api_amz_check', { p_kind: 'listing', p_sku: sku, p_after: after }).then(setGuard).catch(() => {}), 350);
-    return () => clearTimeout(timer.current);
-  }, [after, sku]);
-  const set = (k, v) => { setF((x) => ({ ...x, [k]: v })); setTouched((t) => ({ ...t, [k]: true })); };
-  const submit = async () => {
-    const summary = await promptDialog('What does this change do?', { placeholder: 'e.g. Shorter product name with "personalised diary 2027" first', required: true });
-    if (!summary) return;
-    const r = await run(rpc('api_amz_draft_create', { p_kind: 'listing', p_sku: sku, p_after: after, p_summary: summary }));
-    if (r) { showToast(r.guard_result.ok ? 'Sent to Approve Changes.' : 'Saved, but something must be fixed before it can be approved.', r.guard_result.ok ? 'success' : 'error'); setTouched({}); }
-  };
-  const saveBrief = async () => {
-    await run(rpc('api_amz_facts_set', { p_asin: base.asin, p_buyer: brief.buyer, p_use_cases: brief.use_cases,
-      p_facts: brief.facts.split('\n').map((x) => x.trim()).filter(Boolean) }), 'Product Brief saved');
-  };
-  const inp = 'glass-input w-full px-3 py-2 text-sm';
-  return (
-    <div className="space-y-3">
-      <select className={inp} value={sku} onChange={(e) => setSku(e.target.value)}>
-        <option value="">Pick a product…</option>{skus.map((s) => <option key={s.sku} value={s.sku}>{(s.title || s.sku).slice(0, 70)} · {s.sku}</option>)}
-      </select>
-      {base && (
-        <div className="grid lg:grid-cols-[1fr_320px] gap-3">
-          <div className="glass-card p-4 space-y-3">
-            {base.is_parent && <div className="text-xs" style={{ color: '#7A2EA8' }}>Parent listing: changes affect all variations and need a second confirm.</div>}
-            <Field label="Product name" count={chars(f.title)} max={75}><input className={inp} value={f.title} onChange={(e) => set('title', e.target.value)} /></Field>
-            <Field label="Short highlight (shown under the name)" count={chars(f.item_highlights)} max={125}><input className={inp} value={f.item_highlights} onChange={(e) => set('item_highlights', e.target.value)} /></Field>
-            {f.bullets.map((b, i) => (
-              <Field key={i} label={`Key point ${i + 1}`} count={chars(b)}><textarea rows={2} className={inp} value={b} onChange={(e) => set('bullets', f.bullets.map((x, j) => (j === i ? e.target.value : x)))} /></Field>
-            ))}
-            <Field label="Description" count={chars(f.description)}><textarea rows={4} className={inp} value={f.description} onChange={(e) => set('description', e.target.value)} /></Field>
-            <Field label="Hidden search words (buyers don't see these)" count={utf8Bytes(f.backend_terms)} max={249} unit="bytes"><textarea rows={2} className={inp} value={f.backend_terms} onChange={(e) => set('backend_terms', e.target.value)} /></Field>
-            <div className="grid sm:grid-cols-2 gap-3">
-              <Field label="MRP (₹)"><input type="number" className={inp} value={f.mrp} onChange={(e) => set('mrp', e.target.value)} /></Field>
-              <Field label="Country of origin (e.g. IN)"><input className={inp} value={f.country_of_origin} onChange={(e) => set('country_of_origin', e.target.value.toUpperCase())} /></Field>
-              <Field label="Manufacturer name & address"><input className={inp} value={f.manufacturer} onChange={(e) => set('manufacturer', e.target.value)} /></Field>
-              <Field label="Net quantity (e.g. 1 diary)"><input className={inp} value={f.net_quantity} onChange={(e) => set('net_quantity', e.target.value)} /></Field>
-            </div>
-            <Field label="Claims this text makes (one per line; each must be in the Product Brief)"><textarea rows={2} className={inp} value={f.claims} onChange={(e) => set('claims', e.target.value)} /></Field>
-          </div>
-          <div className="space-y-3">
-            <div className="glass-card p-4">
-              <h3 className="font-bold text-sm">Amazon rules check</h3>
-              {Object.keys(after).length ? <GuardList g={guard} /> : <div className="text-xs text-glass-muted mt-1">Change a field to see the checks.</div>}
-              <button className="glass-btn w-full mt-3 py-2 text-sm" disabled={!Object.keys(after).length} onClick={submit}>Send for approval</button>
-              <div className="text-[11px] text-glass-muted mt-2">Nothing goes to Amazon until it is approved in Approve Changes. The short highlight and quantity in the box are set by hand in Seller Central after approval.</div>
-            </div>
-            <div className="glass-card p-4 space-y-2">
-              <h3 className="font-bold text-sm">Product Brief · {base.asin}</h3>
-              <div className="text-[11px] text-glass-muted">Claude may only claim what is listed here.</div>
-              <input className={inp} placeholder="Who buys it" value={brief.buyer} onChange={(e) => setBrief({ ...brief, buyer: e.target.value })} />
-              <input className={inp} placeholder="Uses / occasions (office, gifting, students…)" value={brief.use_cases} onChange={(e) => setBrief({ ...brief, use_cases: e.target.value })} />
-              <textarea rows={6} className={inp} placeholder={'Facts, one per line:\n160 lined pages\nPU leather cover\nName printed on cover'} value={brief.facts} onChange={(e) => setBrief({ ...brief, facts: e.target.value })} />
-              <button className="glass-btn-ghost w-full py-2 text-sm" onClick={saveBrief}>Save brief</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------- Images
-function Images({ skus }) {
-  const [sku, setSku] = useState('');
-  const [l, setL] = useState(null);
-  const [meta, setMeta] = useState(null);
-  const [url, setUrl] = useState('');
-  const [noText, setNoText] = useState(false);
-  useEffect(() => { setMeta(null); setUrl(''); setNoText(false); if (sku) rpc('api_amz_listing', { p_sku: sku }).then(setL); else setL(null); }, [sku]);
-  const pick = async (e) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    try { setMeta(await measureImage(file)); } catch { showToast('Could not read that image', 'error'); }
-  };
-  const main = useMemo(() => (meta ? { ...meta, has_text: noText ? false : null, url: url.trim() || undefined } : null), [meta, noText, url]);
-  const [guard, setGuard] = useState(null);
-  useEffect(() => {
-    if (!sku || !main) { setGuard(null); return; }
-    rpc('api_amz_check', { p_kind: 'listing', p_sku: sku, p_after: { main_image: main } }).then(setGuard).catch(() => {});
-  }, [sku, main]);
-  const submit = async () => {
-    const r = await run(rpc('api_amz_draft_create', { p_kind: 'listing', p_sku: sku, p_after: { main_image: main }, p_summary: 'New main image' }));
-    if (r) showToast(r.guard_result.ok ? 'Sent for approval' : 'Saved with blockers', r.guard_result.ok ? 'success' : 'error');
-  };
-  return (
-    <div className="space-y-3">
-      <select className="glass-input w-full px-3 py-2 text-sm" value={sku} onChange={(e) => setSku(e.target.value)}>
-        <option value="">Pick a product…</option>{skus.map((s) => <option key={s.sku} value={s.sku}>{(s.title || s.sku).slice(0, 70)}</option>)}
-      </select>
-      {l && (
-        <>
-          <div className="glass-card p-3">
-            <div className="text-sm font-semibold mb-2">On Amazon now</div>
-            {(l.images || []).length === 0 ? <div className="text-xs text-glass-muted">No images in the CRM yet (arrive with the first sync).</div> : (
-              <div className="flex gap-2 overflow-x-auto">{l.images.map((im) => <div key={im.slot} className="text-center"><img src={im.url} alt={im.slot} className="h-20 w-20 object-contain rounded-lg bg-white" /><div className="text-[10px] text-glass-muted">{im.slot}</div></div>)}</div>
-            )}
-          </div>
-          <div className="glass-card p-4 space-y-2 text-sm">
-            <div className="font-semibold">Check a new main image</div>
-            <input type="file" accept="image/jpeg,image/png" onChange={pick} />
-            {meta && <div className="text-xs">{meta.width}×{meta.height} px · border {meta.white_bg ? 'pure white' : <b style={{ color: '#C4261D' }}>not pure white</b>}</div>}
-            <label className="flex gap-2 items-center text-xs"><input type="checkbox" checked={noText} onChange={(e) => setNoText(e.target.checked)} />No text, logo, watermark or props that aren't included</label>
-            <input className="glass-input w-full px-3 py-2 text-sm" placeholder="Public https link to the image (needed to send it to Amazon)" value={url} onChange={(e) => setUrl(e.target.value)} />
-            {main && <GuardList g={guard} />}
-            <button className="glass-btn px-4 py-2 text-sm" disabled={!meta} onClick={submit}>Send for approval</button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------- Account health
 function Health() {
   const [d, , err] = useLoad(() => rpc('api_amz_health', { p_days: 90 }));
@@ -865,8 +656,6 @@ const TABS = [
 ];
 const MORE = [
   { id: 'audit', label: 'Things to fix', hint: 'Every problem on your products', icon: 'shield' },
-  { id: 'content', label: 'Edit name & text', hint: 'Product name, key points, description', icon: 'form' },
-  { id: 'images', label: 'Photos', hint: 'Check a new main photo', icon: 'image' },
   { id: 'keywords', label: 'Search words', hint: 'Words buyers type on Amazon', icon: 'search' },
   { id: 'competitors', label: 'Competitors', hint: 'Watch other sellers\' prices', icon: 'globe' },
   { id: 'health', label: 'Account health', hint: 'Late dispatch, cancels, complaints', icon: 'heart' },
@@ -876,13 +665,13 @@ const MORE = [
   { id: 'settings', label: 'Settings', hint: 'Amazon keys, limits, who can use this', icon: 'settings', admin: true },
 ];
 // Old links keep working.
-const ALIAS = { overview: 'home', listings: 'products', inventory: 'products', queue: 'approve' };
+const ALIAS = { overview: 'home', listings: 'products', inventory: 'products', queue: 'approve', content: 'products', images: 'products' };
 
 export default function Amazon({ access }) {
   const route = useRoute();
   const raw = (route.tab === 'amazon' && route.section) || 'home';
   const view = ALIAS[raw] || raw;
-  const [studioSku, setStudioSku] = useState('');
+  const [openSku, setOpenSku] = useState('');
   const [listings, reloadListings] = useLoad(() => rpc('api_amz_listings'));
   const [queue, reloadQueue] = useLoad(() => rpc('api_amz_queue', { p_status: 'pending' }), [view]);
   const [findings, reloadFindings] = useLoad(() => rpc('api_amz_findings', { p_status: 'open' }), [view]);
@@ -931,14 +720,12 @@ export default function Amazon({ access }) {
         </div>
       )}
       {tab === 'home' && <Home access={access} go={go} listings={listings} reloadAll={reloadAll} />}
-      {tab === 'products' && <Products listings={listings} findings={findings} go={go} reload={reloadAll} openStudio={(s) => { setStudioSku(s); go('content'); }} />}
+      {tab === 'products' && <Products access={access} listings={listings} findings={findings} go={go} reload={reloadAll} openSku={openSku} setOpenSku={setOpenSku} />}
       {tab === 'approve' && <Approve access={access} onChange={reloadAll} />}
       {tab === 'sales' && <Sales listings={listings} />}
       {view === 'audit' && <Audit access={access} />}
       {view === 'keywords' && <Keywords />}
       {view === 'competitors' && <Competitors myAsins={myAsins} />}
-      {view === 'content' && <ContentStudio skus={skus} initialSku={studioSku} />}
-      {view === 'images' && <Images skus={skus} />}
       {view === 'health' && <Health />}
       {view === 'strategy' && <Strategy />}
       {view === 'ask' && <AskClaude />}

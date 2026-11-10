@@ -20,11 +20,12 @@ http.createServer(async (req, res) => {
   if (url.pathname.startsWith('/__as/')) { sub = url.pathname.slice(6); return send(res, 200, { sub }); }
   if (url.pathname === '/__calls') return send(res, 200, calls);
   let raw = ''; for await (const c of req) raw += c;
-  const args = raw ? JSON.parse(raw) : {};
+  let args = {}; try { args = raw ? JSON.parse(raw) : {}; } catch { args = { multipart: raw.length }; }
   if (url.pathname.startsWith('/functions/v1/')) {
     const fn = url.pathname.split('/').pop(); calls.push({ fn, args });
     if (fn === 'amazon-settings') return send(res, 200, { status: 'Connected', detail: 'All good (UI test stub).' });
     if (fn === 'amazon-execute') return send(res, 200, { status: 'executing' });
+    if (fn === 'amazon-upload') return send(res, 200, { url: `https://example.invalid/amazon-images/test/${calls.length}.png` });
     if (fn === 'amazon-sync') return send(res, 200, { status: 'ok', results: [{ job: 'listings', status: 'ok' }] });
     return send(res, 404, { detail: 'no such function' });
   }

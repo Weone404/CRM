@@ -269,9 +269,14 @@ export function parseListing(item: any, sellerSkuFallback?: string) {
 }
 
 // Fields the module can push, and how. Anything else is reported as notPushed (set by hand in Seller Central).
-export function buildPatches(after: Record<string, any>, mk: string, lang: string) {
+export function buildPatches(after: Record<string, any>, mk: string, lang: string, before: Record<string, any> = {}) {
   const patches: any[] = [];
   const notPushed: string[] = [];
+  // Stock and dispatch time share one attribute; send them together as one merge so nothing else is touched.
+  const fa: Record<string, unknown> = { fulfillment_channel_code: "DEFAULT" };
+  if (after.handling_days != null) fa.lead_time_to_ship_max_days = Number(after.handling_days);
+  if (after.quantity != null) fa.quantity = Number(after.quantity);
+  if (Object.keys(fa).length > 1) patches.push({ op: "merge", path: "/attributes/fulfillment_availability", value: [fa] });
   const text = (name: string, v: string) => patches.push({ op: "replace", path: `/attributes/${name}`,
     value: [{ value: v, language_tag: lang, marketplace_id: mk }] });
   for (const [k, v] of Object.entries(after)) {
@@ -296,10 +301,32 @@ export function buildPatches(after: Record<string, any>, mk: string, lang: strin
       case "country_of_origin":
         patches.push({ op: "replace", path: "/attributes/country_of_origin", value: [{ value: String(v), marketplace_id: mk }] });
         break;
-      case "handling_days":
-        // merge: only the dispatch time changes; stock quantity is left as it is on Amazon.
-        patches.push({ op: "merge", path: "/attributes/fulfillment_availability",
-          value: [{ fulfillment_channel_code: "DEFAULT", lead_time_to_ship_max_days: Number(v) }] });
+      case "handling_days": case "quantity": break;   // sent above as one fulfillment_availability merge
+      case "images": {
+        // Ordered photos; the first is the cover. Slots that had a photo before and are now empty are deleted.
+        const urls = (v as any[]).map((x) => (typeof x === "string" ? x : x?.url)).filter(Boolean).slice(0, 9);
+        const had = Array.isArray(before.images) ? before.images.length : 0;
+        if (urls[0]) patches.push({ op: "replace", path: "/attributes/main_product_image_locator", value: [{ media_location: urls[0], marketplace_id: mk }] });
+        for (let i = 1; i <= 8; i++) {
+          const path = `/attributes/other_product_image_locator_${i}`;
+          if (urls[i]) patches.push({ op: "replace", path, value: [{ media_location: urls[i], marketplace_id: mk }] });
+          else if (i < had) patches.push({ op: "delete", path, value: [{ marketplace_id: mk }] });
+        }
+        break;
+      }
+      case "attributes":
+        // Product details, already in Amazon's own shape ([{value, language_tag?, ...}]). null = remove the detail.
+        for (const [name, val] of Object.entries(v as Record<string, any>)) {
+          if (!/^[a-z][a-z0-9_]{1,63}$/.test(name)) continue;
+          if (val == null) {
+            const old = before.attributes?.[name];
+            patches.push({ op: "delete", path: `/attributes/${name}`,
+              value: Array.isArray(old) && old.length ? old.map((o: any) => ({ marketplace_id: o?.marketplace_id ?? mk, ...(o?.language_tag ? { language_tag: o.language_tag } : {}) })) : [{ marketplace_id: mk }] });
+          } else {
+            patches.push({ op: "replace", path: `/attributes/${name}`,
+              value: (val as any[]).map((o) => ({ ...o, marketplace_id: o?.marketplace_id ?? mk })) });
+          }
+        }
         break;
       case "main_image":
         if ((v as any)?.url) {
@@ -324,6 +351,7 @@ export function verifyApplied(after: Record<string, any>, live: ReturnType<typeo
   if ("description" in after && !same(after.description, live.description)) bad.push("description");
   if ("bullets" in after && JSON.stringify(after.bullets) !== JSON.stringify(live.bullets)) bad.push("bullets");
   if ("handling_days" in after && live.handling_days != null && Number(after.handling_days) !== live.handling_days) bad.push("handling_days");
+  // Not verified on purpose: photos (Amazon re-hosts them, URLs change), stock (orders move it), details (Amazon normalises values).
   return bad;
 }
 

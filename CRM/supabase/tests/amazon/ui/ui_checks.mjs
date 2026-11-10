@@ -37,36 +37,64 @@ await page.screenshot({ path: `${SHOTS}/amz_overview.png`, fullPage: true });
 
 await nav('My Products');
 await page.getByText('Delivery speed').waitFor();
-ok((await page.locator('[data-sku]').count()) === 20, 'UI03 My Products shows all 20 SKUs');
-ok(/Ships: Not known yet/.test(await page.locator('body').innerText()), 'UI03b each product shows its dispatch time');
+ok((await page.locator('[data-sku]').count()) === 20, 'UI03 My Products shows all 20 products as cards');
+ok(/Ships not known yet/.test(await page.locator('body').innerText()), 'UI03b each card shows its dispatch time');
 await page.screenshot({ path: `${SHOTS}/amz_listings.png`, fullPage: false });
 
-await more('Edit name & text');
-await page.locator('select').first().selectOption('69-E0DG-L8W8');
-const title = page.locator('label:has-text("Product name") input').first();
-await title.waitFor();
+// Editor: name & text with AI ideas
+await page.locator('[data-sku="69-E0DG-L8W8"]').click();
+await page.getByRole('tab', { name: 'Name & text' }).click();
+const title = page.getByLabel('Product name', { exact: true });
 await title.fill('Nitaniya B5 PU Leather Diary 2027 Light Tan with Pen Holder and Ribbon Marks');   // 76 chars
-await page.getByText(/Title is 76 characters/).waitFor({ timeout: 5000 }).then(() => ok(true, 'UI04 76-character title flagged as blocker while typing'))
-  .catch(() => ok(false, 'UI04 76-character title flagged as blocker while typing'));
-await title.fill('Nitaniya B5 PU Leather Diary 2027, Light Tan, Pen Holder, 160 Pages');
+await page.getByText(/Title is 76 characters/).waitFor({ timeout: 5000 }).then(() => ok(true, 'UI04 76-character name flagged while typing'))
+  .catch(() => ok(false, 'UI04 76-character name flagged while typing'));
+ok(await page.getByRole('button', { name: 'Save & publish' }).isDisabled(), 'UI04b Save is disabled while a rule fails');
+await page.getByRole('button', { name: 'Generate with AI' }).first().click();
+const ideas = page.getByRole('region', { name: 'AI ideas' });
+await ideas.waitFor();
+const n = await ideas.getByRole('button', { name: 'Use this' }).count();
+ok(n >= 3 && n <= 5, `UI22 Generate with AI gives 3-5 ideas (${n})`);
+await ideas.getByLabel('Idea i0').fill('Nitaniya B5 PU Leather Diary 2027, Light Tan, Pen Holder, 160 Pages');
+await ideas.getByRole('button', { name: 'Use this' }).first().click();
+ok((await title.inputValue()) === 'Nitaniya B5 PU Leather Diary 2027, Light Tan, Pen Holder, 160 Pages', 'UI23 an edited idea is used in the field');
 await page.waitForTimeout(800);
-ok(!(await page.locator('body').innerText()).includes('Title is'), 'UI05 compliant title clears the blocker');
-await page.getByRole('button', { name: 'Send for approval' }).click();
-await page.locator('input[aria-label="What does this change do?"]').fill('Title to 75 chars');
-await dlg().getByRole('button', { name: 'OK' }).click();
-ok(/Sent to Approve Changes/.test(await toast()), 'UI06 draft sent for approval');
+ok(!(await page.locator('body').innerText()).includes('Title is'), 'UI05 compliant name clears the problem');
+await page.getByRole('button', { name: 'Generate with AI' }).first().click();
+await ideas.getByRole('button', { name: 'Ask Claude for better ideas' }).click();
+await page.waitForTimeout(600);
+ok((await rpcAs('api_amz_suggestions', { p_sku: '69-E0DG-L8W8' })).some((r) => r.field === 'title' && r.status === 'waiting'), 'UI24 Ask Claude queues a request for this field');
+await ideas.getByRole('button', { name: 'Close' }).click();
 await page.screenshot({ path: `${SHOTS}/amz_studio.png`, fullPage: false });
-
-await nav('Approve Changes');
-await page.getByText('Title to 75 chars').waitFor();
-await page.screenshot({ path: `${SHOTS}/amz_queue.png`, fullPage: false });
-await page.locator('.glass-card', { hasText: 'Title to 75 chars' }).getByRole('button', { name: 'Approve', exact: true }).click();
-await dlg().getByRole('button', { name: 'Approve', exact: true }).click();
-await page.waitForTimeout(1200);
+await page.getByRole('button', { name: 'Save & publish' }).click();
+await page.waitForTimeout(1500);
 let calls = await (await fetch(`${API}/__calls`)).json();
-ok(calls.some((c) => c.fn === 'api_amz_approve') && calls.some((c) => c.fn === 'amazon-execute'), 'UI07 Approve calls api_amz_approve then amazon-execute');
+ok(calls.some((c) => c.fn === 'api_amz_publish') && calls.some((c) => c.fn === 'amazon-execute'), 'UI06 Admin Save & publish sends the change to Amazon');
 let q = await rpcAs('api_amz_queue', { p_status: 'approved' });
-ok(q.length === 1 && q[0].summary === 'Title to 75 chars', 'UI08 change is approved in the database');
+ok(q.length === 1 && q[0].after.title === 'Nitaniya B5 PU Leather Diary 2027, Light Tan, Pen Holder, 160 Pages', 'UI07 change is approved in the database');
+
+// Photos: upload a white 1200px photo as the new cover
+await page.getByRole('tab', { name: 'Photos' }).click();
+const b64 = await page.evaluate(() => { const c = document.createElement('canvas'); c.width = 1200; c.height = 1200; const x = c.getContext('2d');
+  x.fillStyle = '#fff'; x.fillRect(0, 0, 1200, 1200); x.fillStyle = '#8B5A2B'; x.fillRect(300, 200, 600, 800); return c.toDataURL('image/png').split(',')[1]; });
+await page.getByLabel('Upload photos').setInputFiles({ name: 'cover.png', mimeType: 'image/png', buffer: Buffer.from(b64, 'base64') });
+await page.getByAltText('Photo 1').waitFor({ timeout: 5000 }).catch(() => {});
+ok((await page.getByRole('button', { name: /^Remove photo/ }).count()) >= 1 && (await fetch(`${API}/__calls`).then((r) => r.json())).some((c) => c.fn === 'amazon-upload'),
+  'UI25 a photo is uploaded and shown');
+await page.getByText(/pure white background/).first().click();
+await page.getByRole('button', { name: 'Save & publish' }).click();
+await page.waitForTimeout(1500);
+q = (await rpcAs('api_amz_queue', { p_status: 'approved' })).filter((c) => c.after.images);
+ok(q.length === 1 && q[0].after.images[0].white_bg === true && q[0].after.images[0].has_text === false, 'UI26 new cover published with its checks');
+await page.screenshot({ path: `${SHOTS}/amz_photos.png`, fullPage: false });
+
+// Price below the floor is refused in the editor
+await page.getByRole('tab', { name: 'Price & stock' }).click();
+await page.getByLabel('Price').fill('298');
+await page.getByText(/below the floor of ₹299/).waitFor({ timeout: 5000 }).then(() => ok(true, 'UI09 ₹298 price is refused in the editor'))
+  .catch(() => ok(false, 'UI09 ₹298 price is refused in the editor'));
+await page.getByRole('tab', { name: 'Details' }).click();
+await page.getByRole('button', { name: 'All products' }).click();
+await page.waitForTimeout(400);
 
 // Delivery speed for all products
 await nav('My Products');
@@ -83,7 +111,7 @@ await dlg().getByRole('button', { name: 'Approve all' }).click();
 await page.waitForTimeout(1500 + kids * 250);
 q = (await rpcAs('api_amz_queue', { p_status: 'approved' })).filter((c) => c.kind === 'dispatch');
 calls = await (await fetch(`${API}/__calls`)).json();
-ok(q.length === kids && calls.filter((c) => c.fn === 'amazon-execute').length >= kids + 1, 'UI20 "Approve all" approves and sends every dispatch change');
+ok(q.length === kids && calls.filter((c) => c.fn === 'amazon-execute').length >= kids + 2, 'UI20 "Approve all" approves and sends every dispatch change');
 
 await nav('Sales');
 await nav('Home');
@@ -104,14 +132,7 @@ await page.getByText(/Connected: All good/).first().waitFor({ timeout: 5000 }).t
   .catch(() => ok(false, 'UI13 Test Connection result shown'));
 await page.screenshot({ path: `${SHOTS}/amz_settings.png`, fullPage: true });
 
-await nav('My Products');
-await page.locator('[data-sku="69-E0DG-L8W8"] button[aria-expanded]').click();
-await page.getByRole('button', { name: 'Change price' }).first().click();
-await page.locator('input[aria-label^="New price for"]').fill('298');
-await dlg().getByRole('button', { name: 'OK' }).click();
-ok(/below the floor of ₹299/.test(await toast()), 'UI09 ₹298 price change blocked in the UI');
-
-for (const label of ['Things to fix', 'Search words', 'Competitors', 'Photos', 'Account health', 'To-do list', 'Ask Claude', 'History']) {
+for (const label of ['Things to fix', 'Search words', 'Competitors', 'Account health', 'To-do list', 'Ask Claude', 'History']) {
   await more(label);
 }
 await nav('More');

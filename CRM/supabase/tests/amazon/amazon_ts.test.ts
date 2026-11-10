@@ -279,3 +279,27 @@ describe("orders report", () => {
     expect(parseOrdersReport("")).toEqual([]);
   });
 });
+
+describe("product editor patches", () => {
+  test("stock and dispatch go out as one merge", () => {
+    const { patches } = buildPatches({ quantity: 40, handling_days: 0 }, "M", "en_IN");
+    expect(patches).toEqual([{ op: "merge", path: "/attributes/fulfillment_availability",
+      value: [{ fulfillment_channel_code: "DEFAULT", lead_time_to_ship_max_days: 0, quantity: 40 }] }]);
+  });
+  test("photos: cover + others replaced, emptied slots deleted, nothing marked manual", () => {
+    const before = { images: [1, 2, 3, 4].map((i) => ({ url: `https://a/${i}.jpg` })) };
+    const { patches, notPushed } = buildPatches({ images: [{ url: "https://n/c.jpg" }, "https://n/2.jpg"] }, "M", "en_IN", before);
+    expect(notPushed).toEqual([]);
+    expect(patches[0]).toEqual({ op: "replace", path: "/attributes/main_product_image_locator", value: [{ media_location: "https://n/c.jpg", marketplace_id: "M" }] });
+    expect(patches[1].path).toBe("/attributes/other_product_image_locator_1");
+    expect(patches.filter((p: any) => p.op === "delete").map((p: any) => p.path))
+      .toEqual(["/attributes/other_product_image_locator_2", "/attributes/other_product_image_locator_3"]);
+  });
+  test("details: replace keeps Amazon's shape, null deletes with the old selectors", () => {
+    const { patches } = buildPatches({ attributes: { color: [{ value: "Brown", language_tag: "en_IN" }], pattern: null, "bad name": [] } },
+      "M", "en_IN", { attributes: { pattern: [{ value: "x", language_tag: "en_IN", marketplace_id: "M" }] } });
+    expect(patches).toEqual([
+      { op: "replace", path: "/attributes/color", value: [{ value: "Brown", language_tag: "en_IN", marketplace_id: "M" }] },
+      { op: "delete", path: "/attributes/pattern", value: [{ marketplace_id: "M", language_tag: "en_IN" }] }]);
+  });
+});

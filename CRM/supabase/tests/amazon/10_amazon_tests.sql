@@ -326,4 +326,61 @@ BEGIN
 END $$;
 RESET ROLE;
 
+-- E: product editor (076)
+DO $$
+DECLARE r jsonb; s1 text; s2 text; s3 text; par text; cid uuid; nimg int; sa CONSTANT text := 'SET ROLE authenticated';
+  img jsonb := '[{"url":"https://example.com/a.jpg","width":1500,"height":1500,"white_bg":true,"has_text":false}]';
+BEGIN
+  SELECT sku INTO s1 FROM public.amazon_listings WHERE NOT coalesce(is_parent, false) ORDER BY sku OFFSET 1 LIMIT 1;
+  SELECT sku INTO s2 FROM public.amazon_listings WHERE NOT coalesce(is_parent, false) ORDER BY sku OFFSET 2 LIMIT 1;
+  SELECT sku INTO s3 FROM public.amazon_listings WHERE NOT coalesce(is_parent, false) ORDER BY sku OFFSET 3 LIMIT 1;
+  SELECT sku INTO par FROM public.amazon_listings WHERE is_parent LIMIT 1;
+  EXECUTE sa; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  RESET ROLE;
+  r := jsonb_build_object('price', (SELECT price + 10 FROM public.amazon_listings WHERE sku = s1), 'quantity', 40);
+  EXECUTE sa;
+  r := public.api_amz_publish('price', s1, r, 'Price and stock');
+  PERFORM pg_temp.ok(r->>'status' = 'approved', 'E01 Admin save goes straight to approved (live next) ' || CASE WHEN r->>'status' = 'approved' THEN '' ELSE r::text END);
+  r := public.api_amz_publish('price', s2, '{"price": 298}', 'Too cheap');
+  PERFORM pg_temp.ok(r->>'status' = 'blocked', 'E02 ₹298 is blocked in the editor too');
+  r := public.api_amz_publish('listing', s2, jsonb_build_object('images', (SELECT jsonb_agg(jsonb_build_object('url', 'https://x.com/' || i || '.jpg')) FROM generate_series(1, 10) i)));
+  PERFORM pg_temp.ok(r->>'status' = 'blocked', 'E03 more than 9 photos is blocked');
+  r := public.api_amz_publish('listing', s2, '{"images": [{"url": "http://insecure.com/a.jpg"}]}');
+  PERFORM pg_temp.ok(r->>'status' = 'blocked', 'E04 non-https photo link is blocked');
+  r := public.api_amz_publish('listing', s2, '{"images": [{"url": "https://example.com/new-cover.jpg"}]}');
+  PERFORM pg_temp.ok(r->>'status' = 'confirm', 'E05 a new cover without checks needs a second look');
+  r := public.api_amz_publish('listing', s2, jsonb_build_object('images', img), 'New cover');
+  PERFORM pg_temp.ok(r->>'status' = 'approved', 'E06 a checked white-background cover is published');
+  r := public.api_amz_publish('listing', s3, '{"attributes": {"brand": [{"value": "Nitaniya"}]}}');
+  PERFORM pg_temp.ok(r->>'status' = 'blocked', 'E07 locked detail (brand) cannot be changed');
+  r := public.api_amz_publish('listing', s3, '{"attributes": {"color": [{"value": "Best Seller Tan"}]}}');
+  PERFORM pg_temp.ok(r->>'status' = 'blocked', 'E08 sales words in a detail are blocked');
+  r := public.api_amz_publish('price', par, '{"quantity": 5}');
+  PERFORM pg_temp.ok(r->>'status' = 'blocked', 'E09 stock on a parent listing is blocked');
+  r := public.api_amz_publish('listing', s3, '{"attributes": {"color": [{"value": "Brown", "language_tag": "en_IN"}], "pattern": [{"value": "Plain"}]}}', 'Details');
+  PERFORM pg_temp.ok(r->>'status' = 'approved', 'E10 normal product details are published');
+  cid := (r->>'id')::uuid;
+  PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000c', false);
+  r := public.api_amz_publish('price', s3, '{"quantity": 12}', 'Viewer edit');
+  PERFORM pg_temp.ok(r->>'status' = 'pending', 'E11 a non-admin save waits for approval');
+  r := public.api_amz_suggest(s3, 'title', 'mention 2027');
+  PERFORM pg_temp.ok(r->>'status' = 'waiting' AND (public.api_amz_suggest(s3, 'title')->>'id') = r->>'id', 'E12 asking Claude twice for the same field does not duplicate');
+  RESET ROLE; SET ROLE service_role;
+  PERFORM public.svc_amz_suggest_answer((r->>'id')::bigint, '["A", "B", "C"]');
+  PERFORM public.svc_amz_claim(cid);
+  PERFORM public.svc_amz_finish(cid, 'live', NULL, NULL);
+  RESET ROLE;
+  PERFORM pg_temp.ok((SELECT attributes->'color'->0->>'value' = 'Brown' AND attributes ? 'pattern' FROM public.amazon_listings WHERE sku = s3),
+    'E13 live details update the CRM copy');
+  PERFORM pg_temp.ok((SELECT (SELECT count(*) FROM jsonb_object_keys(before->'attributes')) = 2 FROM public.amazon_change_queue WHERE id = cid),
+    'E14 "before" keeps only the touched details (clean Undo)');
+  EXECUTE sa; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  PERFORM pg_temp.ok((public.api_amz_suggestions(s3)->0->'options') = '["A", "B", "C"]', 'E15 Claude ideas show up for the product');
+  r := public.api_amz_rollback(cid);
+  PERFORM pg_temp.ok((SELECT count(*) FROM jsonb_object_keys(r->'after'->'attributes')) = 2, 'E16 Undo touches only the changed details');
+  RESET ROLE;
+  PERFORM pg_temp.ok(NOT EXISTS (SELECT 1 FROM public.amazon_change_queue WHERE status = 'pending' AND summary IN ('Too cheap', 'New cover') ), 'E17 blocked editor saves leave nothing waiting');
+END $$;
+RESET ROLE;
+
 \echo ALL SQL TESTS PASSED

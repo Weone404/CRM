@@ -49,7 +49,7 @@ export async function execute(rpc: Rpc, api: SpApi, secrets: Record<string, stri
     return { status: "stale", moved };
   }
 
-  const { patches, notPushed } = buildPatches(q.after || {}, mk, lang);
+  const { patches, notPushed } = buildPatches(q.after || {}, mk, lang, q.before || {});
   const productType = q.product_type || live.product_type || "PRODUCT";
   if (!patches.length) {
     await finish("needs_manual", null, `Set by hand in Seller Central: ${notPushed.join(", ")}.`);
