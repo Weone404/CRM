@@ -21,10 +21,10 @@ async function hmacHex(key: string, msg: string) {
 
 function platforms(s: Record<string, string>): { p: Platforms; missing: Record<string, string[]> } {
   const missing: Record<string, string[]> = { google: [], meta: [] };
-  for (const k of ["GOOGLE_ADS_DEVELOPER_TOKEN", "GOOGLE_ADS_CLIENT_ID", "GOOGLE_ADS_CLIENT_SECRET", "GOOGLE_ADS_REFRESH_TOKEN"]) if (!s[k]) missing.google.push(k);
+  for (const k of ["GOOGLE_ADS_CLIENT_ID", "GOOGLE_ADS_CLIENT_SECRET", "GOOGLE_ADS_REFRESH_TOKEN"]) if (!s[k]) missing.google.push(k);
   if (!s.META_ACCESS_TOKEN) missing.meta.push("META_ACCESS_TOKEN");
   const p: Platforms = {};
-  if (!missing.google.length) p.google = new GoogleAds({ developerToken: s.GOOGLE_ADS_DEVELOPER_TOKEN, clientId: s.GOOGLE_ADS_CLIENT_ID,
+  if (!missing.google.length) p.google = new GoogleAds({ clientId: s.GOOGLE_ADS_CLIENT_ID,
     clientSecret: s.GOOGLE_ADS_CLIENT_SECRET, refreshToken: s.GOOGLE_ADS_REFRESH_TOKEN, loginCustomerId: s.GOOGLE_ADS_LOGIN_CUSTOMER_ID,
     version: s.GOOGLE_API_VERSION }, fetch);
   if (!missing.meta.length) p.meta = new MetaAds({ accessToken: s.META_ACCESS_TOKEN, appSecret: s.META_APP_SECRET, version: s.META_API_VERSION, hmac: hmacHex }, fetch);

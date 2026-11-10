@@ -90,9 +90,12 @@ Nothing talks to Google or Meta until these are done. Until then the UI shows "N
 2. ADS > More > Clients: add the client, link "CRM leads" (aviation or charter) and set **Max daily budget per campaign**
    (budget changes are blocked without it) plus any targets you know.
 3. ADS > More > Ad accounts: add the Google Ads customer ID and/or Meta ad account ID, and the utm_source your ads use.
-4. **Google Ads**: needs a developer token from a manager account's API Center (Basic or Standard access to touch real
-   accounts; a test-access token only works with test accounts), an OAuth client (Google Cloud), and a refresh token from a
-   user who can access the accounts. Add the manager ID if accounts sit under an MCC.
+4. **Google Ads** (no developer token: Google retired them on 2026-09-09; access is set per Google Cloud project):
+   in Google Cloud, enable the Google Ads API on a project and check its access level on the Google Ads API page
+   (a new project has Test access, which cannot open live accounts; Explorer or Basic can; Basic needs brand
+   verification). Create an OAuth client in that project, then a refresh token (scope
+   `https://www.googleapis.com/auth/adwords`) signed in as a Google user who can open the ad accounts.
+   Add the manager ID if accounts sit under an MCC.
 5. **Meta**: a System User access token (Business Settings) with `ads_read`; add `ads_management` to change budgets/status.
    The app secret is optional (enables `appsecret_proof`).
 6. Settings > Test connection. Then Home > Sync now.
@@ -103,7 +106,7 @@ API versions are settings (`google_api_version` = v26, `meta_api_version` = v26.
 ## Tests (run 2026-11-10)
 
 - `supabase/tests/ads/run.sh`: 97 SQL checks (076 + 078) (access, secrets, metric math, guards, approvals, execution states, recommendations), migration applied twice.
-- `node --experimental-strip-types --test supabase/tests/ads/ads_core.test.ts`: 22 connector tests with a fake network (paging, headers, auth errors, verify-after-write, network drops, Meta minor units).
+- `node --experimental-strip-types --test supabase/tests/ads/ads_core.test.ts`: 23 connector tests with a fake network (paging, headers, auth errors, verify-after-write, network drops, Meta minor units).
 - `supabase/tests/ads/ui/run_ui.sh`: 37 headless-browser checks of the real UI against the real SQL (phone width included).
 - `deno check supabase/functions/ads-sync/index.ts` and `vite build` pass.
 

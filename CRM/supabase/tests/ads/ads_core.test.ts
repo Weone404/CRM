@@ -94,7 +94,7 @@ test("google search pages through results and sends the right headers", async ()
   const rows = await g.search("1112223333", "SELECT campaign.id FROM campaign");
   assert.equal(rows.length, 2);
   const h = f.calls[1].init!.headers as Record<string, string>;
-  assert.equal(h["developer-token"], "devtok123456"); assert.equal(h["login-customer-id"], "9998887777");
+  assert.equal(h["developer-token"], undefined, "developer token not sent (retired 2026-09-09)"); assert.equal(h["login-customer-id"], "9998887777");
   assert.equal(h.Authorization, "Bearer ya29.token");
   assert.match(f.calls[1].url, /\/v26\/customers\/1112223333\/googleAds:search$/);
   assert.equal(JSON.parse(String(f.calls[2].init!.body)).pageToken, "p2");
@@ -106,8 +106,15 @@ test("google bad refresh token -> auth_required", async () => {
   await assert.rejects(new GoogleAds(G, f.fn).account("1112223333"), (e: AdsError) => e.status === "auth_required" && /revoked/.test(e.message));
 });
 
-test("google missing credentials are refused before any request", () => {
-  assert.throws(() => new GoogleAds({ ...G, developerToken: "" }, fakeFetch([]).fn), /developerToken/);
+test("google missing credentials are refused before any request; developer token is no longer needed", () => {
+  assert.throws(() => new GoogleAds({ ...G, clientId: "" }, fakeFetch([]).fn), /clientId/);
+  assert.doesNotThrow(() => new GoogleAds({ ...G, developerToken: undefined }, fakeFetch([]).fn));
+});
+
+test("google project with only Test access gets a plain explanation", async () => {
+  const f = fakeFetch([TOKEN, [/googleAds:search/, () => ({ status: 403, body: { error: { status: "PERMISSION_DENIED",
+    details: [{ errors: [{ errorCode: { authorizationError: "CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION" }, message: "x" }] }] } } })]]);
+  await assert.rejects(new GoogleAds(G, f.fn).account("1112223333"), (e: AdsError) => e.status === "permission_missing" && /Explorer\/Basic access/.test(e.message));
 });
 
 const W = { id: "q1", kind: "budget" as const, after: { daily_budget: 1500 }, platform: "google" as const,

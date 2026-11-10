@@ -95,10 +95,10 @@ ok(/needs a source URL/.test(t), 'UI17 a verified fact without a source is refus
 await page.goto(`${APP}#/ads/settings`);
 await page.getByText('Emergency stop').waitFor();
 await page.getByRole('button', { name: 'Add' }).first().click();
-await dlg().locator('input').fill('test-developer-token-1234');
+await dlg().locator('input').fill('test9876.apps.googleusercontent.com');
 await dlg().getByRole('button', { name: 'Save' }).click();
 t = await body();
-ok(/••••1234/.test(t) && !/test-developer-token/.test(t), 'UI18 secret saved, only last 4 shown');
+ok(/••••\.com/.test(t) && !/test9876/.test(t), 'UI18 secret saved, only last 4 shown');
 await page.getByRole('button', { name: /Test connection/ }).click();
 t = await body();
 ok(/Not configured/.test(t), 'UI19 Test connection reports the honest result');

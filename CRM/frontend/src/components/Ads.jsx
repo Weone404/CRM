@@ -486,10 +486,10 @@ function Recommendations({ ctx, onChange }) {
 // ---------------------------------------------------------------- Clients
 const PLATFORM_LABEL = { google: 'Google Ads', meta: 'Meta' };
 // mode: list | new | edit | import. Wizard and import screens live in AdsClientWizard.jsx.
-function Clients({ access, clients, reload, initialMode }) {
+function Clients({ access, clients, reload, initialMode, clientsErr }) {
   const [mode, setMode] = useState(initialMode || 'list');
   const [edit, setEdit] = useState(null);
-  const [options] = useLoad(() => rpc('api_ads_options'));
+  const [options, reloadOptions, optErr] = useLoad(() => rpc('api_ads_options'));
   const save = async (data) => {
     const id = await run(rpc('api_ads_client_save', { p_data: data }), data.is_draft ? 'Draft saved.' : 'Client saved.');
     if (id) { setMode('list'); setEdit(null); reload(); }
@@ -513,6 +513,7 @@ function Clients({ access, clients, reload, initialMode }) {
   };
   const m = access.is_admin ? mode : 'list';
   if (m === 'new' || m === 'edit') {
+    if (optErr) return <div className="space-y-2"><Err msg={`Could not load the setup options: ${optErr}`} /><Btn ghost onClick={reloadOptions}>Try again</Btn></div>;
     if (!options) return <Empty>Loading…</Empty>;
     return <ClientWizard key={edit?.id || 'new'} options={options} initial={m === 'edit' ? Object.fromEntries(Object.entries(edit).map(([k, v]) => [k, v ?? ''])) : undefined}
       onSave={save} onCancel={() => { setMode('list'); setEdit(null); }} onImport={() => setMode('import')} />;
@@ -525,7 +526,7 @@ function Clients({ access, clients, reload, initialMode }) {
           <Btn onClick={() => setMode('new')}><Icon name="plus" size={14} />New client</Btn>
           <Btn ghost onClick={() => setMode('import')}><Icon name="search" size={14} />Import existing accounts</Btn>
         </div>)}
-      {!clients ? <Empty>Loading…</Empty> : clients.length === 0 ? <Empty>No clients yet. Create one, or import the Google Ads / Meta accounts you already run.</Empty> : clients.map((c) => (
+      {clientsErr ? <Err msg={clientsErr} /> : !clients ? <Empty>Loading…</Empty> : clients.length === 0 ? <Empty>No clients yet. Create one, or import the Google Ads / Meta accounts you already run.</Empty> : clients.map((c) => (
         <div key={c.id} className="glass-card p-3 flex flex-wrap items-center gap-2">
           <div className="flex-1 min-w-0">
             <div className="font-semibold flex flex-wrap items-center gap-1.5">{c.name}
@@ -666,8 +667,7 @@ function Activity() {
 
 // ---------------------------------------------------------------- Settings (Admin)
 const SECRETS = {
-  google: [['GOOGLE_ADS_DEVELOPER_TOKEN', 'Developer token', 'Google Ads → Tools → API Center (manager account). Needs Basic or Standard access for real accounts.'],
-    ['GOOGLE_ADS_CLIENT_ID', 'OAuth client ID', 'Google Cloud → APIs & Services → Credentials (ends with .apps.googleusercontent.com).'],
+  google: [['GOOGLE_ADS_CLIENT_ID', 'OAuth client ID', 'Google Cloud → APIs & Services → Credentials (ends with .apps.googleusercontent.com). The project needs the Google Ads API enabled and Explorer access or higher to open live accounts (no developer token since 9 Sep 2026).'],
     ['GOOGLE_ADS_CLIENT_SECRET', 'OAuth client secret', ''],
     ['GOOGLE_ADS_REFRESH_TOKEN', 'Refresh token', 'From the OAuth consent of a user who can access the ad accounts (starts with 1//).'],
     ['GOOGLE_ADS_LOGIN_CUSTOMER_ID', 'Manager (MCC) customer ID', 'Only if accounts are reached through a manager account.']],
@@ -775,7 +775,7 @@ export default function Ads({ access }) {
   const route = useRoute();
   const p = route.tab === 'ads' ? route.params : {};
   const view = (route.tab === 'ads' && route.section) || 'home';
-  const [clients, reloadClients] = useLoad(() => rpc('api_ads_clients'));
+  const [clients, reloadClients, clientsErr] = useLoad(() => rpc('api_ads_clients'));
   const [pending, reloadPending] = useLoad(() => rpc('api_ads_queue', { p_status: 'pending' }), [view]);
   const client = (clients || []).find((c) => c.id === p.client);
   const tz = client?.timezone || 'Asia/Kolkata';
@@ -837,7 +837,7 @@ export default function Ads({ access }) {
       {tab === 'leads' && <LeadsRevenue ctx={ctx} access={access} clients={clients} />}
       {tab === 'approvals' && <Approvals access={access} onChange={reloadPending} />}
       {view === 'recommendations' && <Recommendations ctx={ctx} onChange={reloadPending} />}
-      {view === 'clients' && <Clients access={access} clients={clients} reload={reloadClients} />}
+      {view === 'clients' && <Clients access={access} clients={clients} reload={reloadClients} clientsErr={clientsErr} />}
       {view === 'accounts' && <Accounts access={access} clients={clients} ctx={ctx} />}
       {view === 'research' && <Research ctx={ctx} />}
       {view === 'experiments' && <Experiments ctx={ctx} />}

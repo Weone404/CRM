@@ -81,19 +81,24 @@ export function googleErrorStatus(http: number, body: any): ConnStatus {
   const s = JSON.stringify(body ?? {});
   if (http === 401 || /UNAUTHENTICATED|invalid_grant|OAUTH_TOKEN/i.test(s)) return "auth_required";
   if (http === 429 || /RESOURCE_EXHAUSTED|RATE_EXCEEDED/i.test(s)) return "rate_limited";
-  if (http === 403 || /PERMISSION_DENIED|DEVELOPER_TOKEN_NOT_APPROVED|CUSTOMER_NOT_ENABLED/i.test(s)) return "permission_missing";
+  if (http === 403 || /PERMISSION_DENIED|NOT_APPROVED|CUSTOMER_NOT_ENABLED|ACTION_NOT_PERMITTED/i.test(s)) return "permission_missing";
   if (http >= 500) return "unavailable";
   return "sync_failed";
 }
 function googleMessage(body: any): string {
+  if (/CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION/.test(JSON.stringify(body ?? {})))
+    return "Your Google Cloud project only has Test access, which cannot open live accounts. Apply for Explorer/Basic access on the Google Ads API page of the Cloud Console.";
   const e = body?.error ?? (Array.isArray(body) ? body[0]?.error : undefined);
   const detail = e?.details?.[0]?.errors?.[0];
   return [e?.status, detail?.message ?? e?.message ?? body?.error_description ?? body?._text].filter(Boolean).join(": ").slice(0, 400)
     || "Google Ads request failed";
 }
 
+// Google retired developer tokens on 2026-09-09: access is now set per Google Cloud project (the project that owns the
+// OAuth client), and the developer-token header is ignored (a future version will reject it), so it is not sent.
+// https://developers.google.com/google-ads/api/docs/api-policy/access-levels
 export interface GoogleCreds {
-  developerToken: string; clientId: string; clientSecret: string; refreshToken: string; loginCustomerId?: string; version: string;
+  developerToken?: string; clientId: string; clientSecret: string; refreshToken: string; loginCustomerId?: string; version: string;
 }
 
 export interface DiscoveredAccount {
@@ -106,7 +111,7 @@ export class GoogleAds {
   private c: GoogleCreds; private fetchFn: Fetch;
   constructor(c: GoogleCreds, fetchFn: Fetch, tok?: { t: string | null }) {
     this.c = c; this.fetchFn = fetchFn; this.tok = tok ?? { t: null };
-    for (const k of ["developerToken", "clientId", "clientSecret", "refreshToken", "version"] as const) {
+    for (const k of ["clientId", "clientSecret", "refreshToken", "version"] as const) {
       if (!c[k]) throw new AdsError("auth_required", `Google Ads ${k} is not set`);
     }
   }
@@ -129,7 +134,7 @@ export class GoogleAds {
   // Accounts the signed-in Google user can open directly. login-customer-id is ignored by Google here.
   async listAccessible(): Promise<string[]> {
     let r: Response;
-    const headers = { "Authorization": `Bearer ${await this.accessToken()}`, "developer-token": this.c.developerToken };
+    const headers = { "Authorization": `Bearer ${await this.accessToken()}` };
     try { r = await this.fetchFn(`https://googleads.googleapis.com/${this.c.version}/customers:listAccessibleCustomers`, { method: "GET", headers }); }
     catch (e) { throw new AdsError("unavailable", `Network error talking to Google Ads: ${String(e).slice(0, 200)}`); }
     const b = await readJson(r);
@@ -149,8 +154,7 @@ export class GoogleAds {
     }).filter((a) => /^\d{10}$/.test(a.external_id));
   }
   private async call(path: string, body: unknown, mutate = false): Promise<any> {
-    const headers: Record<string, string> = { "Content-Type": "application/json", "Authorization": `Bearer ${await this.accessToken()}`,
-      "developer-token": this.c.developerToken };
+    const headers: Record<string, string> = { "Content-Type": "application/json", "Authorization": `Bearer ${await this.accessToken()}` };
     if (this.c.loginCustomerId) headers["login-customer-id"] = this.c.loginCustomerId;
     let r: Response;
     try {
