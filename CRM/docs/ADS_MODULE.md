@@ -18,6 +18,22 @@ functions for the browser, `svc_*` functions for one Edge Function, secrets in S
 | UI | `frontend/src/components/Ads.jsx`, `frontend/src/utils/ads.js`, nav entry in `frontend/src/App.jsx` |
 | Tests | `supabase/tests/ads/` (SQL, connector unit tests, headless UI) |
 
+## Adding clients (migration 078)
+
+- **New client** is a 3-step wizard: 1) Google Ads, Meta or both; 2) business basics (name, website, industry,
+  country, currency, time zone, CRM leads link); 3) each picked platform's own setup. Industry presets fill sensible
+  starting choices; every one can be changed. **Save draft** keeps a half-finished client ("Setup not finished").
+- Option lists live in `ads_options` with the official source URL on each row, and the database refuses any other value:
+  Google objectives and the campaign types Google offers for each (Google Ads Help 7450050), Google bidding focus,
+  Meta's six `OUTCOME_*` objectives, special ad categories (None / Financial products and services / Employment /
+  Housing / Social issues, elections or politics; a country is required for the last) and bid strategies.
+- **Import existing accounts**: ADS > More > Clients > Import. `ads-sync` job `discover` lists every Google Ads account
+  the saved keys can open (`customers:listAccessibleCustomers`, then each account's `customer_client` tree, managers
+  excluded) and every Meta ad account (`me/adaccounts`). Pick accounts, choose a new or existing client, Import. Name,
+  currency and time zone come from the platform; accounts under a Google manager keep that manager as
+  `login_customer_id` for every later call. Accounts already in the CRM cannot be imported twice. After import the
+  accounts are synced and the wizard opens to finish the client's setup.
+
 ## Who can do what
 
 - **View ADS**: Admin, plus people Admin ticks in ADS > More > Settings > Team access.
@@ -86,9 +102,9 @@ API versions are settings (`google_api_version` = v26, `meta_api_version` = v26.
 
 ## Tests (run 2026-11-10)
 
-- `supabase/tests/ads/run.sh`: 75 SQL checks (access, secrets, metric math, guards, approvals, execution states, recommendations), migration applied twice.
-- `node --experimental-strip-types --test supabase/tests/ads/ads_core.test.ts`: 19 connector tests with a fake network (paging, headers, auth errors, verify-after-write, network drops, Meta minor units).
-- `supabase/tests/ads/ui/run_ui.sh`: 25 headless-browser checks of the real UI against the real SQL (phone width included).
+- `supabase/tests/ads/run.sh`: 97 SQL checks (076 + 078) (access, secrets, metric math, guards, approvals, execution states, recommendations), migration applied twice.
+- `node --experimental-strip-types --test supabase/tests/ads/ads_core.test.ts`: 22 connector tests with a fake network (paging, headers, auth errors, verify-after-write, network drops, Meta minor units).
+- `supabase/tests/ads/ui/run_ui.sh`: 37 headless-browser checks of the real UI against the real SQL (phone width included).
 - `deno check supabase/functions/ads-sync/index.ts` and `vite build` pass.
 
 Not tested against live Google/Meta accounts: no credentials exist yet. First live run = step 6 above.

@@ -3,12 +3,13 @@
 // Body: {jobs: ["test", "sync", "execute"]}
 //   test     Admin. Checks each platform's credentials and every added account; records the result.
 //   sync     Viewer. Account details, campaigns and daily metrics for the last `sync_days`, then recommendations.
+//   discover Admin. Lists every Google Ads / Meta ad account the saved keys can reach (for "Import existing accounts").
 //   execute  Approver. Sends approved changes, reads each campaign back, records verified / failed / outcome_unknown.
 // Every job takes its own lock (svc_ads_run_begin), so overlapping runs skip instead of doubling up.
 // Keys come from Vault through the service role and never leave this function (responses and logs are scrubbed).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { asUser, cors, cronOk, json, HttpError, rpc } from "../_shared/ads_deno.ts";
-import { AdsError, GoogleAds, MetaAds, dateRange, executeOne, scrubSecrets, todayIn, verify, type Platforms, type WorkItem } from "../_shared/ads_core.ts";
+import { AdsError, GoogleAds, MetaAds, dateRange, discover, executeOne, scrubSecrets, todayIn, verify, type Platforms, type WorkItem } from "../_shared/ads_core.ts";
 
 const DEADLINE_MS = 120_000;
 
@@ -45,7 +46,7 @@ async function runJob(name: string, secrets: Record<string, string>, fn: () => P
   }
 }
 
-type Acct = { id: string; platform: "google" | "meta"; external_id: string };
+type Acct = { id: string; platform: "google" | "meta"; external_id: string; login_customer_id?: string | null };
 
 async function test(s: Record<string, string>) {
   const { p, missing } = platforms(s);
@@ -59,7 +60,7 @@ async function test(s: Record<string, string>) {
       const problems: string[] = [];
       for (const a of accts) {
         try {
-          const info = plat === "google" ? await p.google!.account(a.external_id) : await p.meta!.account(a.external_id);
+          const info = plat === "google" ? await p.google!.withLogin(a.login_customer_id).account(a.external_id) : await p.meta!.account(a.external_id);
           await rpc("svc_ads_account_status", { p_account: a.id, p_status: "connected", p_error: null, p_name: info.name, p_currency: info.currency, p_timezone: info.timezone });
         } catch (e) {
           const st = e instanceof AdsError ? e.status : "sync_failed";
@@ -88,11 +89,12 @@ async function sync(s: Record<string, string>, t0: number) {
       try {
         const api = a.platform === "google" ? p.google : p.meta;
         if (!api) throw new AdsError("auth_required", `${a.platform === "google" ? "Google Ads" : "Meta"} keys are not set in ADS > Settings`);
-        const info = a.platform === "google" ? await p.google!.account(a.external_id) : await p.meta!.account(a.external_id);
+        const g = p.google?.withLogin(a.login_customer_id);
+        const info = a.platform === "google" ? await g!.account(a.external_id) : await p.meta!.account(a.external_id);
         const { since, until } = dateRange(days, todayIn(info.timezone ?? "Asia/Kolkata"));
-        const camps = a.platform === "google" ? await p.google!.campaigns(a.external_id) : await p.meta!.campaigns(a.external_id, info.currency);
+        const camps = a.platform === "google" ? await g!.campaigns(a.external_id) : await p.meta!.campaigns(a.external_id, info.currency);
         campaigns += await rpc("svc_ads_upsert_campaigns", { p_account: a.id, p_items: camps });
-        const mets = a.platform === "google" ? await p.google!.metrics(a.external_id, since, until) : await p.meta!.metrics(a.external_id, since, until);
+        const mets = a.platform === "google" ? await g!.metrics(a.external_id, since, until) : await p.meta!.metrics(a.external_id, since, until);
         metrics += await rpc("svc_ads_upsert_metrics", { p_account: a.id, p_items: mets });
         await rpc("svc_ads_account_status", { p_account: a.id, p_status: "connected", p_error: null, p_name: info.name, p_currency: info.currency, p_timezone: info.timezone });
       } catch (e) {
@@ -144,17 +146,22 @@ Deno.serve(async (req) => {
   try {
     let body: { jobs?: string[] } = {};
     try { body = await req.json(); } catch { /* empty body */ }
-    const jobs = (body.jobs ?? ["sync"]).filter((j) => ["test", "sync", "execute"].includes(j));
-    if (!jobs.length) return json(req, 422, { detail: "jobs must include test, sync or execute" });
+    const jobs = (body.jobs ?? ["sync"]).filter((j) => ["test", "discover", "sync", "execute"].includes(j));
+    if (!jobs.length) return json(req, 422, { detail: "jobs must include test, discover, sync or execute" });
     if (!(await cronOk(req))) {
       const access = await asUser(req, "api_ads_access") as { can_view: boolean; can_approve: boolean; is_admin: boolean };
       if (!access?.can_view) throw new HttpError(403, "You do not have access to the ADS section");
-      if (jobs.includes("test") && !access.is_admin) throw new HttpError(403, "Only Admin can test connections");
+      if ((jobs.includes("test") || jobs.includes("discover")) && !access.is_admin) throw new HttpError(403, "Only Admin can test connections or find accounts");
       if (jobs.includes("execute") && !access.can_approve) throw new HttpError(403, "Only approvers can run changes");
     }
     const secrets = (await rpc("svc_ads_secrets")) as Record<string, string>;
     const results: Record<string, unknown> = {};
     if (jobs.includes("test")) results.test = await test(secrets);
+    if (jobs.includes("discover")) {
+      const found = await discover(platforms(secrets).p);
+      for (const k of ["google", "meta"] as const) if (found[k].error) found[k].error = scrubSecrets(found[k].error!, secrets);
+      results.discover = { ...found, known: await rpc("svc_ads_known_accounts") };
+    }
     if (jobs.includes("sync")) results.sync = await sync(secrets, t0);
     if (jobs.includes("execute")) results.execute = await execute(secrets, t0);
     return json(req, 200, { results });

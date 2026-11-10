@@ -192,3 +192,45 @@ test("meta insights paginate via paging.next", async () => {
   assert.deepEqual(rows.map((r) => r.spend), [10, 12]);
   assert.match(decodeURIComponent(f.calls[0].url), /time_range=\{"since":"2026-11-01","until":"2026-11-02"\}/);
 });
+
+// ---------------------------------------------------------------- discovery (Import existing accounts)
+import { discover } from "../../functions/_shared/ads_core.ts";
+
+test("google discovery: accessible accounts + accounts under a manager, managers themselves excluded, direct access preferred", async () => {
+  const f = fakeFetch([TOKEN,
+    [/customers:listAccessibleCustomers/, () => ({ body: { resourceNames: ["customers/9998887777", "customers/1112223333"] } })],
+    [/customers\/9998887777\/googleAds:search/, () => ({ body: { results: [
+      { customerClient: { clientCustomer: "customers/9998887777", descriptiveName: "My MCC", manager: true, status: "ENABLED", level: 0 } },
+      { customerClient: { clientCustomer: "customers/1112223333", descriptiveName: "Client A", manager: false, status: "ENABLED", currencyCode: "INR", timeZone: "Asia/Kolkata", level: 1 } },
+      { customerClient: { clientCustomer: "customers/4445556666", descriptiveName: "Client B", manager: false, status: "CANCELED", currencyCode: "USD", timeZone: "America/New_York", level: 1 } }] } })],
+    [/customers\/1112223333\/googleAds:search/, () => ({ body: { results: [
+      { customerClient: { clientCustomer: "customers/1112223333", descriptiveName: "Client A", manager: false, status: "ENABLED", currencyCode: "INR", timeZone: "Asia/Kolkata", level: 0 } }] } })]]);
+  const r = await discover({ google: new GoogleAds({ ...G, loginCustomerId: undefined }, f.fn) });
+  assert.equal(r.google.ok, true);
+  assert.deepEqual(r.google.accounts.map((a) => [a.external_id, a.active, a.login_customer_id ?? null]),
+    [["1112223333", true, null], ["4445556666", false, "9998887777"]]);
+  const hierCall = f.calls.find((c) => /9998887777\/googleAds:search/.test(c.url))!;
+  assert.equal((hierCall.init!.headers as Record<string, string>)["login-customer-id"], "9998887777", "manager queried through itself");
+  assert.equal(f.calls.filter((c) => /oauth2/.test(c.url)).length, 1, "one sign-in shared by all calls");
+  assert.match(r.meta.error!, /not set/);
+});
+
+test("meta discovery: ad accounts with status; one platform failing does not hide the other", async () => {
+  const f = fakeFetch([[/me\/adaccounts/, () => ({ body: { data: [
+    { account_id: "998877", name: "WOA Meta", currency: "INR", timezone_name: "Asia/Kolkata", account_status: 1, business: { name: "WeOne" } },
+    { account_id: "112233", name: "Old", currency: "INR", timezone_name: "Asia/Kolkata", account_status: 101 }] } })],
+    [/oauth2/, () => ({ status: 400, body: { error: "invalid_grant" } })]]);
+  const r = await discover({ meta: new MetaAds({ accessToken: "EAAtoken1234567", version: "v26.0" }, f.fn), google: new GoogleAds(G, f.fn) });
+  assert.equal(r.meta.ok, true);
+  assert.deepEqual(r.meta.accounts.map((a) => [a.external_id, a.status, a.active, a.business]), [["998877", "ACTIVE", true, "WeOne"], ["112233", "CLOSED", false, null]]);
+  assert.equal(r.google.ok, false); assert.match(r.google.error!, /sign-in failed/);
+});
+
+test("imported account behind a manager: changes go through that manager", async () => {
+  const f = fakeFetch([TOKEN, [/mutate/, () => ({ body: {} })],
+    [/googleAds:search/, () => ({ body: { results: [{ campaign: { status: "PAUSED" }, campaignBudget: { amountMicros: "1000000000" } }] } })]]);
+  const r = await executeOne({ google: new GoogleAds({ ...G, loginCustomerId: undefined }, f.fn) },
+    { id: "q9", kind: "status", after: { status: "PAUSED" }, platform: "google", account_external_id: "4445556666", campaign_external_id: "11", budget_ref: null, login_customer_id: "9998887777" });
+  assert.equal(r.status, "verified");
+  assert.ok(f.calls.filter((c) => /googleads/.test(c.url)).every((c) => (c.init!.headers as Record<string, string>)["login-customer-id"] === "9998887777"));
+});

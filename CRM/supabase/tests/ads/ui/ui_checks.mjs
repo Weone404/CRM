@@ -109,29 +109,82 @@ ok(/ON: nothing is being sent/.test(t), 'UI20 emergency stop turns on');
 await page.screenshot({ path: `${SHOTS}/ads_settings.png`, fullPage: true });
 
 await page.goto(`${APP}#/ads/clients`);
-await page.getByRole('button', { name: /Add client/ }).click();
-await page.getByLabel('Business name').fill('Second Test Client');
-await page.getByLabel('Target CPL').fill('abc');
-await page.getByRole('button', { name: 'Save' }).click();
+await page.getByRole('button', { name: /^New client/ }).click();
+await page.getByRole('button', { name: /^Next/ }).click();
 t = await body();
-ok(/positive number/.test(t), 'UI21 bad economics refused');
-await page.getByLabel('Target CPL').fill('650');
-await page.getByRole('button', { name: 'Save' }).click();
+ok(/Pick Google Ads, Meta or both/.test(t), 'UI21 step 1 asks Google, Meta or both first');
+await page.getByRole('button', { name: /Google Ads/ }).first().click();
+await page.getByRole('button', { name: /^M Meta/ }).click();
+await page.getByRole('button', { name: /^Next/ }).click();
+await page.getByLabel('Business name').fill('Wizard Client');
+await page.getByLabel('Website').fill('weone');
+await page.getByRole('button', { name: /^Next/ }).click();
 t = await body();
-ok(/Second Test Client/.test(t) && /Saved/.test(t), 'UI22 client created');
+ok(/full address/.test(t) && /Platforms/.test(t), 'UI22 step 2 checks the website as you type');
+await page.getByLabel('Website').fill('https://example.org');
+await page.getByLabel('Industry').selectOption('education');
+await page.getByRole('button', { name: /^Next/ }).click();
+await page.getByText('Campaign types').waitFor();
+const gSec = page.getByRole('region', { name: 'Google Ads setup' });
+const mSec = page.getByRole('region', { name: 'Meta setup' });
+ok(await gSec.getByLabel('Campaign objective').inputValue() === 'LEADS' && await mSec.getByLabel('Campaign objective').inputValue() === 'OUTCOME_LEADS',
+  'UI23 education preset pre-fills Leads on Google and Meta');
+ok(await gSec.getByRole('button', { name: 'App' }).isDisabled() && !(await gSec.getByRole('button', { name: 'Display' }).isDisabled()),
+  'UI24 campaign types Google does not offer for Leads (App) cannot be picked');
+ok((await gSec.locator('option').allInnerTexts()).includes('YouTube reach, views, and engagements'), 'UI25 Google objectives use Google\'s own names');
+await page.getByRole('button', { name: 'Create client' }).click();
+t = await body();
+ok(/special ad category|Answer this/i.test(t), 'UI26 Meta special ad category question must be answered');
+await mSec.getByLabel(/Social issues/).check();
+t = await body();
+ok(/limits targeting/.test(t) && /Country these ads run in/.test(t), 'UI27 special category shows Meta\'s targeting warning and country');
+await mSec.getByLabel(/Social issues/).uncheck();
+await mSec.getByLabel('None').check();
+await page.getByRole('button', { name: 'Create client' }).click();
+t = await body();
+ok(/Client saved/.test(t) && /Wizard Client/.test(t), 'UI28 client created through the wizard');
+const wc = (await rpc('api_ads_clients')).find((c) => c.name === 'Wizard Client');
+ok(wc && wc.platforms.join() === 'google,meta' && wc.google_settings.objective === 'LEADS' && wc.google_settings.campaign_types.includes('SEARCH')
+  && wc.meta_settings.special_ad_categories[0] === 'NONE' && wc.preset === 'education', 'UI29 saved with both platforms\' settings');
+
+await page.getByRole('button', { name: /^New client/ }).click();
+await page.getByRole('button', { name: /Google Ads/ }).first().click();
+await page.getByRole('button', { name: /^Next/ }).click();
+await page.getByLabel('Business name').fill('Draft Client');
+await page.getByRole('button', { name: 'Save draft' }).click();
+t = await body();
+ok(/Draft saved/.test(t) && /Setup not finished/.test(t), 'UI30 save as draft, marked "Setup not finished"');
+
+await page.getByRole('button', { name: /Import existing accounts/ }).click();
+await page.getByRole('button', { name: /Find my accounts/ }).click();
+await page.getByText('Pilot School Search').waitFor();
+t = await body();
+ok(/already in CRM \(Test Client A\)/.test(t) && /via manager 999-888-7777/.test(t), 'UI31 found accounts show what is already imported and the manager account');
+await page.getByLabel(/Pilot School Search/).check();
+await page.getByLabel(/Pilot School Meta/).check();
+ok(await page.getByLabel('Client name').inputValue() === 'Pilot School Search', 'UI32 new client name suggested from the account');
+await page.getByLabel('Client name').fill('Pilot School');
+await page.getByRole('button', { name: /^Import 2 accounts/ }).click();
+await page.getByText(/Finish setting up Pilot School/).waitFor({ timeout: 8000 });
+t = await body();
+ok(/Imported 2 accounts/.test(t), 'UI33 import adds both accounts and opens the wizard to finish setup');
+const acc = await rpc('api_ads_accounts', { p_client: null });
+ok(acc.some((a) => a.external_id === '7778889999' && a.login_customer_id === '9998887777') && acc.some((a) => a.external_id === '5554443'),
+  'UI34 imported accounts stored with their manager account');
+await page.screenshot({ path: `${SHOTS}/ads_wizard_finish.png`, fullPage: true });
 
 // phone width: no horizontal page scroll on Home
 await page.setViewportSize({ width: 390, height: 844 });
 await page.goto(`${APP}#/ads/home?client=${CLIENT}`);
 await page.getByText('What needs attention').waitFor();
 const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-ok(overflow <= 1, `UI23 phone width has no horizontal page scroll (${overflow}px)`);
+ok(overflow <= 1, `UI35 phone width has no horizontal page scroll (${overflow}px)`);
 await page.screenshot({ path: `${SHOTS}/ads_phone.png`, fullPage: true });
 
 await as(SALES);
 await page.goto(APP); await page.waitForTimeout(1200);
-ok(await page.locator('#denied').count() === 1, 'UI24 sales user without access is denied');
-ok(errors.length === 0, `UI25 no console errors${errors.length ? `: ${errors.slice(0, 3).join(' | ')}` : ''}`);
+ok(await page.locator('#denied').count() === 1, 'UI36 sales user without access is denied');
+ok(errors.length === 0, `UI37 no console errors${errors.length ? `: ${errors.slice(0, 3).join(' | ')}` : ''}`);
 await browser.close();
 console.log(failed ? `${failed} UI CHECK(S) FAILED` : 'ALL ADS UI CHECKS PASSED');
 process.exit(failed ? 1 : 0);

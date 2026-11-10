@@ -4,6 +4,7 @@ import { showToast } from '../utils/toast';
 import { confirmDialog, promptDialog } from './ui/dialogs';
 import Icon from './icons';
 import { useRoute, navigate, setParams } from '../utils/route';
+import { ClientWizard, ImportAccounts } from './AdsClientWizard';
 import { PERIODS, periodRange, todayIn, money, int, pct, ratio, delta, isNum, LOWER_IS_BETTER, toCsv, STATUS_LABEL } from '../utils/ads';
 
 // CRM > ADS: paid advertising for one or more clients (Google Ads, Meta).
@@ -147,7 +148,7 @@ function Home({ ctx, access, go }) {
   const prev = ctx.client ? o.previous[0] : null;
   const cur = single?.currency || 'INR';
   const todo = [];
-  if (!o.accounts.length) todo.push({ tone: '#FF9500', text: 'No ad accounts added yet.', sub: access.is_admin ? 'Add a client, then its Google Ads / Meta accounts, then save the keys in Settings.' : 'Ask Admin to add accounts.', to: access.is_admin ? 'accounts' : null, btn: 'Add accounts' });
+  if (!o.accounts.length) todo.push({ tone: '#FF9500', text: 'No ad accounts added yet.', sub: access.is_admin ? 'Save the Google / Meta keys in Settings, then import the accounts you already run (Clients > Import existing accounts).' : 'Ask Admin to add accounts.', to: access.is_admin ? 'clients' : null, btn: 'Open Clients' });
   o.accounts.filter((a) => a.status !== 'connected' && a.status !== 'disabled').forEach((a) => todo.push({ tone: '#FF3B30', text: `${a.platform === 'google' ? 'Google Ads' : 'Meta'} ${a.name || a.external_id} (${a.client}): ${STATUS_LABEL[a.status]?.[0] || a.status}.`, sub: a.last_error || 'Open Settings and press Test connection.', to: access.is_admin ? 'settings' : null, btn: 'Settings' }));
   o.accounts.filter((a) => a.status === 'connected' && a.stale).forEach((a) => todo.push({ tone: '#FF9500', text: `${a.name || a.external_id} has not synced recently.`, sub: `Last good sync ${ago(a.last_ok_at)}. Numbers may be out of date.` }));
   if (o.pending_approvals) todo.push({ tone: '#FF9500', text: `${o.pending_approvals} change${o.pending_approvals > 1 ? 's' : ''} waiting for approval.`, sub: 'Nothing is sent to Google or Meta until approved.', to: 'approvals', btn: 'Review' });
@@ -483,50 +484,58 @@ function Recommendations({ ctx, onChange }) {
 }
 
 // ---------------------------------------------------------------- Clients
-const CLIENT_FIELDS = [
-  ['name', 'Business name'], ['website', 'Website'], ['industry', 'Industry'], ['business_model', 'Business model'], ['products', 'Products / services'],
-  ['geography', 'Target geography'], ['audience', 'Target audience'], ['competitors', 'Competitors'], ['objectives', 'Objectives'],
-  ['brand_notes', 'Brand guidelines'], ['restrictions', 'Restrictions / claims to avoid'],
-];
-const ECON_FIELDS = [
-  ['avg_order_value', 'Average order value'], ['gross_margin_pct', 'Gross margin %'], ['target_cpl', 'Target CPL'], ['target_qualified_cpl', 'Target qualified CPL'],
-  ['target_cac', 'Target CAC'], ['max_cac', 'Max acceptable CAC'], ['target_roas', 'Target ROAS (×)'], ['ltv', 'Customer lifetime value'],
-  ['sales_cycle_days', 'Sales cycle (days)'], ['monthly_budget', 'Monthly ad budget'], ['max_daily_budget', 'Max daily budget per campaign'],
-];
-function Clients({ access, clients, reload }) {
+const PLATFORM_LABEL = { google: 'Google Ads', meta: 'Meta' };
+// mode: list | new | edit | import. Wizard and import screens live in AdsClientWizard.jsx.
+function Clients({ access, clients, reload, initialMode }) {
+  const [mode, setMode] = useState(initialMode || 'list');
   const [edit, setEdit] = useState(null);
-  const save = async () => {
-    const id = await run(rpc('api_ads_client_save', { p_data: edit }), 'Saved.');
-    if (id) { setEdit(null); reload(); }
+  const [options] = useLoad(() => rpc('api_ads_options'));
+  const save = async (data) => {
+    const id = await run(rpc('api_ads_client_save', { p_data: data }), data.is_draft ? 'Draft saved.' : 'Client saved.');
+    if (id) { setMode('list'); setEdit(null); reload(); }
   };
-  if (edit) return (
-    <div className="glass-card p-4 space-y-3">
-      <h3 className="font-bold">{edit.id ? 'Edit client' : 'New client'}</h3>
-      <div className="grid sm:grid-cols-2 gap-3">
-        {CLIENT_FIELDS.map(([k, l]) => <Field key={k} label={l}><Input value={edit[k] || ''} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} /></Field>)}
-        <Field label="Currency" hint="3-letter code, e.g. INR"><Input value={edit.currency || 'INR'} maxLength={3} onChange={(e) => setEdit({ ...edit, currency: e.target.value.toUpperCase() })} /></Field>
-        <Field label="Time zone"><Input value={edit.timezone || 'Asia/Kolkata'} onChange={(e) => setEdit({ ...edit, timezone: e.target.value })} /></Field>
-        <Field label="CRM leads" hint="Which leads in this CRM belong to this client. Leave empty for clients whose leads are not in this CRM.">
-          <select className="glass-input w-full px-3 py-2 text-sm" value={edit.crm_segment || ''} onChange={(e) => setEdit({ ...edit, crm_segment: e.target.value })}>
-            <option value="">Not linked</option><option value="aviation">Aviation leads</option><option value="charter">Charter leads</option></select></Field>
-      </div>
-      <h4 className="font-semibold text-sm pt-2">Business economics <span className="text-xs font-normal text-glass-muted">(leave empty if unknown; nothing is assumed)</span></h4>
-      <div className="grid sm:grid-cols-3 gap-3">
-        {ECON_FIELDS.map(([k, l]) => <Field key={k} label={l}><Input inputMode="decimal" value={edit[k] ?? ''} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} /></Field>)}
-      </div>
-      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={edit.active !== false} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} />Active</label>
-      <div className="flex gap-2"><Btn onClick={save}>Save</Btn><Btn ghost onClick={() => setEdit(null)}>Cancel</Btn></div>
-    </div>
-  );
+  const discover = async () => {
+    const r = await run(edge({ jobs: ['discover'] }));
+    return r?.results?.discover;
+  };
+  const doImport = async (payload) => {
+    const r = await run(rpc('api_ads_import', { p_data: payload }));
+    if (!r) return;
+    showToast(`Imported ${r.added} account${r.added === 1 ? '' : 's'}${r.skipped?.length ? `, skipped ${r.skipped.length}` : ''}. Getting their data…`, 'success');
+    await reload();
+    const s = await run(edge({ jobs: ['sync'] }));
+    if (s?.results?.sync) showToast(s.results.sync.detail || s.results.sync.status, s.results.sync.status === 'ok' ? 'success' : 'error');
+    const fresh = await rpc('api_ads_clients').catch(() => null);
+    const c = (fresh || []).find((x) => x.id === r.client_id);
+    reload();
+    if (c?.is_draft) { setEdit(c); setMode('edit'); showToast('Now finish the setup: objectives and targets.', 'info'); }
+    else setMode('list');
+  };
+  const m = access.is_admin ? mode : 'list';
+  if (m === 'new' || m === 'edit') {
+    if (!options) return <Empty>Loading…</Empty>;
+    return <ClientWizard key={edit?.id || 'new'} options={options} initial={m === 'edit' ? Object.fromEntries(Object.entries(edit).map(([k, v]) => [k, v ?? ''])) : undefined}
+      onSave={save} onCancel={() => { setMode('list'); setEdit(null); }} onImport={() => setMode('import')} />;
+  }
+  if (m === 'import') return <ImportAccounts clients={clients} options={options} discover={discover} onImport={doImport} onCancel={() => setMode('list')} goSettings={() => navigate('ads', 'settings')} />;
   return (
     <div className="space-y-2">
-      {access.is_admin && <Btn onClick={() => setEdit({ currency: 'INR', timezone: 'Asia/Kolkata', active: true })}><Icon name="plus" size={14} />Add client</Btn>}
-      {!clients ? <Empty>Loading…</Empty> : clients.length === 0 ? <Empty>No clients yet.</Empty> : clients.map((c) => (
+      {access.is_admin && (
+        <div className="flex flex-wrap gap-2">
+          <Btn onClick={() => setMode('new')}><Icon name="plus" size={14} />New client</Btn>
+          <Btn ghost onClick={() => setMode('import')}><Icon name="search" size={14} />Import existing accounts</Btn>
+        </div>)}
+      {!clients ? <Empty>Loading…</Empty> : clients.length === 0 ? <Empty>No clients yet. Create one, or import the Google Ads / Meta accounts you already run.</Empty> : clients.map((c) => (
         <div key={c.id} className="glass-card p-3 flex flex-wrap items-center gap-2">
-          <div className="flex-1 min-w-0"><div className="font-semibold">{c.name} {!c.active && <Chip>inactive</Chip>}</div>
-            <div className="text-xs text-glass-muted">{[c.industry, c.currency, c.crm_segment ? `CRM: ${c.crm_segment} leads` : 'CRM: not linked', `${c.accounts} account(s)`, c.target_cpl ? `target CPL ${money(c.target_cpl, c.currency)}` : null].filter(Boolean).join(' · ')}</div></div>
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold flex flex-wrap items-center gap-1.5">{c.name}
+              {(c.platforms || []).map((p) => <Chip key={p} bg={p === 'google' ? 'rgba(26,115,232,0.12)' : 'rgba(8,102,255,0.12)'} fg={p === 'google' ? '#1A57B5' : '#0650C2'}>{PLATFORM_LABEL[p]}</Chip>)}
+              {c.is_draft && <Chip bg="rgba(255,149,0,0.14)" fg="#B25E00">Setup not finished</Chip>}
+              {!c.active && <Chip>inactive</Chip>}</div>
+            <div className="text-xs text-glass-muted">{[c.industry, c.currency, c.timezone, c.crm_segment ? `CRM: ${c.crm_segment} leads` : 'CRM: not linked', `${c.accounts} account(s)`,
+              c.target_cpl ? `target CPL ${money(c.target_cpl, c.currency)}` : null].filter(Boolean).join(' · ')}</div></div>
           <Btn ghost onClick={() => setParams({ client: c.id })}>Select</Btn>
-          {access.is_admin && <Btn ghost onClick={() => setEdit(Object.fromEntries(Object.entries(c).map(([k, v]) => [k, v ?? ''])))}>Edit</Btn>}
+          {access.is_admin && <Btn ghost={!c.is_draft} onClick={() => { setEdit(c); setMode('edit'); }}>{c.is_draft ? 'Finish setup' : 'Edit'}</Btn>}
         </div>))}
     </div>
   );

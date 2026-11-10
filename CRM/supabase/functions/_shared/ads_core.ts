@@ -96,17 +96,22 @@ export interface GoogleCreds {
   developerToken: string; clientId: string; clientSecret: string; refreshToken: string; loginCustomerId?: string; version: string;
 }
 
+export interface DiscoveredAccount {
+  platform: "google" | "meta"; external_id: string; name: string | null; currency: string | null; timezone: string | null;
+  status: string; active: boolean; login_customer_id?: string | null; business?: string | null;
+}
+
 export class GoogleAds {
-  private token: string | null = null;
+  private tok: { t: string | null };                 // shared by withLogin() copies, so one sign-in serves every account
   private c: GoogleCreds; private fetchFn: Fetch;
-  constructor(c: GoogleCreds, fetchFn: Fetch) {
-    this.c = c; this.fetchFn = fetchFn;
+  constructor(c: GoogleCreds, fetchFn: Fetch, tok?: { t: string | null }) {
+    this.c = c; this.fetchFn = fetchFn; this.tok = tok ?? { t: null };
     for (const k of ["developerToken", "clientId", "clientSecret", "refreshToken", "version"] as const) {
       if (!c[k]) throw new AdsError("auth_required", `Google Ads ${k} is not set`);
     }
   }
   private async accessToken(): Promise<string> {
-    if (this.token) return this.token;
+    if (this.tok.t) return this.tok.t;
     const r = await this.fetchFn("https://oauth2.googleapis.com/token", {
       method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ grant_type: "refresh_token", client_id: this.c.clientId, client_secret: this.c.clientSecret,
@@ -114,8 +119,34 @@ export class GoogleAds {
     });
     const b = await readJson(r);
     if (!r.ok || !b.access_token) throw new AdsError("auth_required", `Google sign-in failed: ${b.error ?? r.status} ${b.error_description ?? ""}`.trim(), r.status);
-    this.token = b.access_token as string;
-    return this.token;
+    this.tok.t = b.access_token as string;
+    return this.tok.t;
+  }
+  // The same client, calling through a specific manager account (accounts imported from under an MCC).
+  withLogin(login?: string | null): GoogleAds {
+    return login ? new GoogleAds({ ...this.c, loginCustomerId: login }, this.fetchFn, this.tok) : this;
+  }
+  // Accounts the signed-in Google user can open directly. login-customer-id is ignored by Google here.
+  async listAccessible(): Promise<string[]> {
+    let r: Response;
+    const headers = { "Authorization": `Bearer ${await this.accessToken()}`, "developer-token": this.c.developerToken };
+    try { r = await this.fetchFn(`https://googleads.googleapis.com/${this.c.version}/customers:listAccessibleCustomers`, { method: "GET", headers }); }
+    catch (e) { throw new AdsError("unavailable", `Network error talking to Google Ads: ${String(e).slice(0, 200)}`); }
+    const b = await readJson(r);
+    if (!r.ok) throw new AdsError(googleErrorStatus(r.status, b), googleMessage(b), r.status);
+    return (b.resourceNames ?? []).map((n: string) => n.replace(/^customers\//, "")).filter((id: string) => /^\d{10}$/.test(id));
+  }
+  // Every client account reachable from one accessible account (itself, or the accounts under a manager).
+  async hierarchy(rootId: string): Promise<DiscoveredAccount[]> {
+    const rows = await this.withLogin(rootId).search(rootId,
+      "SELECT customer_client.client_customer, customer_client.descriptive_name, customer_client.currency_code, " +
+      "customer_client.time_zone, customer_client.manager, customer_client.status, customer_client.level FROM customer_client " +
+      "WHERE customer_client.level <= 1");
+    return rows.map((r) => r.customerClient ?? {}).filter((c: any) => c.manager !== true).map((c: any) => {
+      const id = String(c.clientCustomer ?? "").replace(/^customers\//, "");
+      return { platform: "google" as const, external_id: id, name: c.descriptiveName ?? null, currency: c.currencyCode ?? null,
+        timezone: c.timeZone ?? null, status: c.status ?? "UNKNOWN", active: c.status === "ENABLED", login_customer_id: id === rootId ? null : rootId };
+    }).filter((a) => /^\d{10}$/.test(a.external_id));
   }
   private async call(path: string, body: unknown, mutate = false): Promise<any> {
     const headers: Record<string, string> = { "Content-Type": "application/json", "Authorization": `Bearer ${await this.accessToken()}`,
@@ -253,6 +284,13 @@ export class MetaAds {
     return out;
   }
   async me() { return this.req("GET", "me", { fields: "id,name" }); }
+  // Ad accounts the token can use (needs ads_read).
+  async adAccounts(): Promise<DiscoveredAccount[]> {
+    const rows = await this.all("me/adaccounts", { fields: "account_id,name,currency,timezone_name,account_status,business{name}", limit: "200" });
+    return rows.map((r) => ({ platform: "meta" as const, external_id: String(r.account_id ?? "").replace(/^act_/, ""), name: r.name ?? null,
+      currency: r.currency ?? null, timezone: r.timezone_name ?? null, status: META_ACCOUNT_STATUS[Number(r.account_status)] ?? `status ${r.account_status}`,
+      active: Number(r.account_status) === 1, business: r.business?.name ?? null })).filter((a) => /^\d{5,25}$/.test(a.external_id));
+  }
   async account(accountId: string): Promise<AccountInfo> {
     const b = await this.req("GET", `act_${accountId}`, { fields: "name,currency,timezone_name,account_status" });
     return { name: b.name ?? null, currency: b.currency ?? null, timezone: b.timezone_name ?? null };
@@ -279,6 +317,10 @@ export class MetaAds {
     return this.req("POST", campaignId, { status: status === "ENABLED" ? "ACTIVE" : "PAUSED" }, true);
   }
 }
+
+// Ad account account_status values (Marketing API, Ad Account reference).
+export const META_ACCOUNT_STATUS: Record<number, string> = { 1: "ACTIVE", 2: "DISABLED", 3: "UNSETTLED", 7: "PENDING_RISK_REVIEW",
+  8: "PENDING_SETTLEMENT", 9: "IN_GRACE_PERIOD", 100: "PENDING_CLOSURE", 101: "CLOSED", 201: "ANY_ACTIVE", 202: "ANY_CLOSED" };
 
 export const normMetaStatus = (s: unknown) => (s === "ACTIVE" ? "ENABLED" : s === "PAUSED" ? "PAUSED" : s === "DELETED" || s === "ARCHIVED" ? "REMOVED" : "OTHER");
 
@@ -311,6 +353,7 @@ export function parseMetaInsight(r: any): MetricRow {
 export interface WorkItem {
   id: string; kind: "budget" | "status"; after: { daily_budget?: number; status?: string };
   platform: "google" | "meta"; account_external_id: string; campaign_external_id: string; budget_ref: string | null;
+  login_customer_id?: string | null;
 }
 export interface Platforms { google?: GoogleAds; meta?: MetaAds; metaCurrency?: (accountExternalId: string) => string | null }
 
@@ -321,7 +364,7 @@ const matches = (w: WorkItem, s: { status: string; daily_budget: number | null }
 export async function readState(p: Platforms, w: WorkItem) {
   if (w.platform === "google") {
     if (!p.google) throw new AdsError("auth_required", "Google Ads is not configured");
-    return p.google.campaignState(w.account_external_id, w.campaign_external_id);
+    return p.google.withLogin(w.login_customer_id).campaignState(w.account_external_id, w.campaign_external_id);
   }
   if (!p.meta) throw new AdsError("auth_required", "Meta is not configured");
   return p.meta.campaignState(w.campaign_external_id, p.metaCurrency?.(w.account_external_id) ?? null);
@@ -336,8 +379,8 @@ export async function executeOne(p: Platforms, w: WorkItem): Promise<{ status: "
       if (!p.google) throw new AdsError("auth_required", "Google Ads is not configured");
       if (w.kind === "budget") {
         if (!w.budget_ref) throw new AdsError("sync_failed", "No campaign budget to change");
-        await p.google.setBudget(w.account_external_id, w.budget_ref, Number(w.after.daily_budget));
-      } else await p.google.setStatus(w.account_external_id, w.campaign_external_id, String(w.after.status).toUpperCase() as "ENABLED" | "PAUSED");
+        await p.google.withLogin(w.login_customer_id).setBudget(w.account_external_id, w.budget_ref, Number(w.after.daily_budget));
+      } else await p.google.withLogin(w.login_customer_id).setStatus(w.account_external_id, w.campaign_external_id, String(w.after.status).toUpperCase() as "ENABLED" | "PAUSED");
     } else {
       if (!p.meta) throw new AdsError("auth_required", "Meta is not configured");
       if (w.kind === "budget") {
@@ -360,4 +403,37 @@ export async function verify(p: Platforms, w: WorkItem): Promise<{ status: "veri
   } catch (e) {
     return { status: "outcome_unknown", error: `Sent, but could not read the campaign back: ${e instanceof Error ? e.message : String(e)}` };
   }
+}
+
+// Finds every Google Ads and Meta ad account the saved keys can reach, for "Import existing accounts".
+// Each platform is independent: one failing (or not configured) never hides the other's results.
+export async function discover(p: Platforms, maxRoots = 20): Promise<Record<"google" | "meta", { ok: boolean; error?: string; accounts: DiscoveredAccount[] }>> {
+  const out = { google: { ok: false, accounts: [] as DiscoveredAccount[] } as { ok: boolean; error?: string; accounts: DiscoveredAccount[] },
+                meta: { ok: false, accounts: [] as DiscoveredAccount[] } as { ok: boolean; error?: string; accounts: DiscoveredAccount[] } };
+  if (!p.google) out.google.error = "Google Ads keys are not set";
+  else {
+    try {
+      const roots = (await p.google.listAccessible()).slice(0, maxRoots);
+      const seen = new Map<string, DiscoveredAccount>();
+      const problems: string[] = [];
+      for (const root of roots) {
+        try {
+          for (const a of await p.google.hierarchy(root)) {
+            const prev = seen.get(a.external_id);
+            if (!prev || (prev.login_customer_id && !a.login_customer_id)) seen.set(a.external_id, a);   // prefer direct access
+          }
+        } catch (e) { problems.push(`${root}: ${e instanceof Error ? e.message : String(e)}`); }
+      }
+      out.google = { ok: true, accounts: [...seen.values()].sort((x, y) => Number(y.active) - Number(x.active) || String(x.name).localeCompare(String(y.name))),
+        ...(problems.length ? { error: problems.slice(0, 3).join(" | ") } : {}) };
+    } catch (e) { out.google.error = e instanceof Error ? e.message : String(e); }
+  }
+  if (!p.meta) out.meta.error = "Meta access token is not set";
+  else {
+    try {
+      const accts = await p.meta.adAccounts();
+      out.meta = { ok: true, accounts: accts.sort((x, y) => Number(y.active) - Number(x.active) || String(x.name).localeCompare(String(y.name))) };
+    } catch (e) { out.meta.error = e instanceof Error ? e.message : String(e); }
+  }
+  return out;
 }

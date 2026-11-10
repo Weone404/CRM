@@ -58,11 +58,11 @@ SELECT pg_temp.fails($$SELECT public.api_ads_settings_save('google_api_version',
 -- ---------------------------------------------------------------- clients / accounts
 CREATE TEMP TABLE ids (k text PRIMARY KEY, v uuid);
 GRANT ALL ON ids TO authenticated, service_role;
-INSERT INTO ids SELECT 'c1', public.api_ads_client_save('{"name":"We One Aviation","crm_segment":"aviation","target_cpl":"500","gross_margin_pct":"40","max_daily_budget":"3000"}');
-INSERT INTO ids SELECT 'c2', public.api_ads_client_save('{"name":"Other Client","currency":"USD"}');
-SELECT pg_temp.fails($$SELECT public.api_ads_client_save('{"name":"Dup","crm_segment":"aviation"}')$$, '%already linked%', 'C01 one client per CRM segment');
-SELECT pg_temp.fails($$SELECT public.api_ads_client_save('{"name":"Bad","target_cpl":"-5"}')$$, '%positive number%', 'C02 negative economics rejected');
-SELECT pg_temp.fails($$SELECT public.api_ads_client_save('{"name":"Bad2","timezone":"Mars/Base"}')$$, '%time zone%', 'C03 unknown time zone rejected');
+INSERT INTO ids SELECT 'c1', public.api_ads_client_save('{"is_draft":true,"name":"We One Aviation","crm_segment":"aviation","target_cpl":"500","gross_margin_pct":"40","max_daily_budget":"3000"}');
+INSERT INTO ids SELECT 'c2', public.api_ads_client_save('{"is_draft":true,"name":"Other Client","currency":"USD"}');
+SELECT pg_temp.fails($$SELECT public.api_ads_client_save('{"is_draft":true,"name":"Dup","crm_segment":"aviation"}')$$, '%already linked%', 'C01 one client per CRM segment');
+SELECT pg_temp.fails($$SELECT public.api_ads_client_save('{"is_draft":true,"name":"Bad","target_cpl":"-5"}')$$, '%positive number%', 'C02 negative economics rejected');
+SELECT pg_temp.fails($$SELECT public.api_ads_client_save('{"is_draft":true,"name":"Bad2","timezone":"Mars/Base"}')$$, '%time zone%', 'C03 unknown time zone rejected');
 SELECT pg_temp.fails(format($$SELECT public.api_ads_account_save('{"client_id":"%s","platform":"google","external_id":"12345"}')$$, (SELECT v FROM ids WHERE k='c1')),
   '%10 digits%', 'C04 Google customer id validated');
 INSERT INTO ids SELECT 'ag', public.api_ads_account_save(jsonb_build_object('client_id', (SELECT v FROM ids WHERE k='c1'), 'platform', 'google', 'external_id', '111-222-3333', 'utm_source', 'google'));

@@ -27,6 +27,13 @@ http.createServer(async (req, res) => {
       const jobs = args.jobs || [];
       const results = {};
       if (jobs.includes('test')) results.test = { google: { job: 'test_google', status: 'error', detail: 'Not configured (UI test stub)' }, meta: { job: 'test_meta', status: 'error', detail: 'Not configured (UI test stub)' } };
+      if (jobs.includes('discover')) results.discover = {
+        google: { ok: true, accounts: [
+          { platform: 'google', external_id: '1112223333', name: 'Test Google', currency: 'INR', timezone: 'Asia/Kolkata', status: 'ENABLED', active: true, login_customer_id: null },
+          { platform: 'google', external_id: '7778889999', name: 'Pilot School Search', currency: 'INR', timezone: 'Asia/Kolkata', status: 'ENABLED', active: true, login_customer_id: '9998887777' }] },
+        meta: { ok: true, accounts: [
+          { platform: 'meta', external_id: '5554443', name: 'Pilot School Meta', currency: 'INR', timezone: 'Asia/Kolkata', status: 'ACTIVE', active: true, business: 'Test Biz' }] },
+        known: [{ platform: 'google', external_id: '1112223333', client: 'Test Client A' }] };
       if (jobs.includes('sync')) results.sync = { job: 'sync', status: 'ok', items: 0, detail: 'UI test stub: platforms not called' };
       if (jobs.includes('execute')) results.execute = { job: 'execute', status: 'ok', items: 0, detail: '0 change(s) processed (UI test stub)' };
       return send(res, 200, { results });
