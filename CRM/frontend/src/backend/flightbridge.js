@@ -102,6 +102,7 @@ export const FLIGHTBRIDGE_ROUTES = [
   ['GET', r('/pipeline'), ({ query }) => rpc('api_fb_pipeline', { p_data: Object.fromEntries(['stage', 'q', 'limit']
     .map((k) => [k, query?.get(k)]).filter(([, v]) => v !== null && v !== undefined && v !== '')) })],
   ['POST', r('/pipeline/move'), ({ body }) => rpc('api_fb_pipeline_move', { p_data: body || {} })],
+  ['GET', r(`/pipeline/${ID}/thread`), ({ params }) => rpc('api_fb_pipeline_thread', { p_org_id: dec(params[0]) })],
   ['GET', r('/automation'), () => rpc('api_fb_automation')],
   ['POST', r('/automation/run'), ({ body }) => rpc('api_fb_run', { p_data: body || {} })],
   ['POST', r('/automation/settings'), ({ body }) => rpc('api_fb_autopilot_set', { p_data: body || {} })],

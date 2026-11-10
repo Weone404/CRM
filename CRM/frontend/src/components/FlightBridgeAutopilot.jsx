@@ -10,7 +10,7 @@ import AppleSelect from './ui/AppleSelect';
 import { Switch } from './ui/AppleControls';
 import GlassPopover from './ui/GlassPopover';
 import LinkTile, { GoLink } from './ui/LinkTile';
-import { useRoute, setParams } from '../utils/route';
+import { useRoute, setParams, navigate } from '../utils/route';
 
 // Email Auto-Pilot and the outreach Pipeline.
 // The engine on the Mac Mini does the sending (flightbridge/autosend.py): this screen only stores the owner's choices
@@ -766,7 +766,79 @@ const STAGES = [
 ];
 const STAGE_OF = Object.fromEntries(STAGES.map(([k, l, t]) => [k, { label: l, tone: t }]));
 
-function PipelineRow({ r, onMove }) {
+// ----------------------------------------------------------------------------- the emails sent to one school
+const MSG_LABEL = { initial: 'First email', followup: 'Follow-up', reply: 'Reply', auto_reply: 'Automatic reply', bounce: 'Bounced' };
+const OUT_STATE = { sent: null, send_unknown: 'Delivery not confirmed', failed: 'Not delivered', sending: 'Sending…', authorized: 'About to send' };
+const full = (iso) => (iso ? new Date(iso).toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
+
+// Opens from a Pipeline card (#/partnerships/pipeline?...&email=<school id>): every email exactly as the school got it,
+// with any replies, oldest first, so the whole conversation reads top to bottom like a mail thread.
+function EmailThread({ orgId, onClose }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState('');
+  const [from, setFrom] = useState('');
+  useEffect(() => {
+    let live = true;
+    call(`/pipeline/${orgId}/thread`).then((x) => live && setD(x), (e) => live && setErr(e.message));
+    call('/send-autopilot').then((x) => live && setFrom((x.mailboxes || []).find((m) => m.selected)?.address || ''), () => {});
+    return () => { live = false; };
+  }, [orgId]);
+  const msgs = d?.messages || [];
+  let fu = 0;
+  return (
+    <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-50" {...modalProps(onClose)}>
+      <div className="apple-card max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="sticky top-0 z-10 px-5 pt-4 pb-3" style={{ background: 'rgba(255,255,255,0.82)', WebkitBackdropFilter: 'blur(20px)', backdropFilter: 'blur(20px)', borderBottom: '0.5px solid var(--hairline)' }}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[12px] font-semibold uppercase tracking-wide" style={{ color: '#007AFF' }}>
+                {d ? `${msgs.filter((m) => m.direction === 'out').length} sent · ${msgs.filter((m) => m.direction === 'in').length} received` : 'Emails'}
+              </div>
+              <h2 className="text-[19px] font-bold text-glass-primary leading-snug mt-0.5 truncate">{d?.school?.name || 'Loading…'}</h2>
+              {d?.school && <div className="text-[13px] text-glass-muted truncate">{[d.school.city, countryName(d.school.country)].filter(Boolean).join(', ')}{d.school.website ? ` · ${d.school.website}` : ''}</div>}
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {d?.school && <GoLink to={['partnerships', 'schools', { q: d.school.name, school: d.school.id }]} className="px-3.5 py-1.5 rounded-full text-[13px] font-semibold"
+                style={{ background: 'rgba(0,122,255,0.12)', color: '#007AFF', textDecoration: 'none' }}>School</GoLink>}
+              <CloseButton onClick={onClose} />
+            </div>
+          </div>
+        </div>
+        <div className="px-4 sm:px-5 py-4 space-y-3" style={{ background: 'rgba(242,242,247,0.9)' }}>
+          {err && <div className="text-sm" style={{ color: '#C4261D' }}>{err}</div>}
+          {!d && !err && <div className="text-sm text-glass-muted py-6 text-center">Loading the emails…</div>}
+          {d && msgs.length === 0 && <div className="text-sm text-glass-muted py-6 text-center">No email has gone to this school yet.</div>}
+          {msgs.map((m) => {
+            const out = m.direction === 'out';
+            const label = m.kind === 'followup' ? `Follow-up ${++fu}` : MSG_LABEL[m.kind] || 'Email';
+            const warn = out ? OUT_STATE[m.status] : m.kind === 'bounce' ? 'The email bounced' : null;
+            return (
+              <article key={m.id} className="rounded-2xl overflow-hidden fb-fade" style={{ background: out ? '#fff' : 'rgba(52,199,89,0.10)', boxShadow: '0 1px 3px rgba(0,0,0,0.06), inset 0 0 0 0.5px rgba(0,0,0,0.06)' }}>
+                <header className="px-4 pt-3 pb-2" style={{ borderBottom: '0.5px solid var(--hairline)' }}>
+                  <div className="flex flex-wrap items-center gap-2 text-[12px]">
+                    <span className="px-2 py-0.5 rounded-full font-semibold" style={out ? { background: TONE.blue.bg, color: TONE.blue.fg } : { background: TONE.green.bg, color: TONE.green.fg }}>{label}</span>
+                    {m.via === 'autopilot' && <span className="text-glass-muted inline-flex items-center gap-1"><Icon name="rocket" size={12} />Auto-Pilot</span>}
+                    {warn && <span className="px-2 py-0.5 rounded-full font-semibold" style={{ background: TONE.orange.bg, color: TONE.orange.fg }}>{warn}</span>}
+                    <span className="text-glass-muted ml-auto">{full(m.at)}</span>
+                  </div>
+                  <div className="mt-1.5 grid grid-cols-[44px_1fr] gap-y-0.5 text-[13px]">
+                    <span className="text-glass-muted">{out ? 'From' : 'From'}</span><span className="text-glass-primary truncate">{out ? `We One Aviation <${from || 'your mailbox'}>` : m.address}</span>
+                    {out && <><span className="text-glass-muted">To</span><span className="text-glass-primary truncate">{m.address}</span></>}
+                  </div>
+                  <div className="font-semibold text-[15px] text-glass-primary mt-1.5 break-words">{m.subject}</div>
+                </header>
+                <div className="px-4 py-3 text-[14.5px] leading-relaxed text-glass-primary whitespace-pre-wrap break-words">{m.body}</div>
+                {m.ref_token && <div className="px-4 pb-3 text-[11px] text-glass-muted">Reference {m.ref_token}</div>}
+              </article>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PipelineRow({ r, onMove, onOpen }) {
   const t = TONE[STAGE_OF[r.stage]?.tone || 'grey'];
   const steps = [];
   if (r.sent_at) steps.push(`First email ${day(r.sent_at)}`);
@@ -774,7 +846,11 @@ function PipelineRow({ r, onMove }) {
   if (r.next_followup_at && !r.reply_at) steps.push(`next ${day(r.next_followup_at)}`);
   if (r.reply_at) steps.push(`replied ${day(r.reply_at)}`);
   return (
-    <li className="glass-card p-3 sm:p-4">
+    <li className={`glass-card p-3 sm:p-4 ${r.sent_at ? 'tile-link' : ''}`} {...(r.sent_at ? {
+      role: 'button', tabIndex: 0, title: 'See the email sent', 'aria-label': `See the emails sent to ${r.name}`,
+      onClick: (e) => { if (!e.target.closest('a,button')) onOpen(r); },
+      onKeyDown: (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); onOpen(r); } },
+    } : {})}>
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -818,6 +894,12 @@ export function Pipeline() {
   useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load, q]);
   const counts = data?.counts || {};
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  // the email preview has its own address (&email=<school id>): Back closes it, a copied link opens it
+  const openedHere = useRef(false);
+  const openEmails = (r) => { openedHere.current = true; navigate('partnerships', 'pipeline', { ...route.params, email: r.org_id }, { scroll: false }); };
+  const closeEmails = () => {
+    if (openedHere.current) { openedHere.current = false; window.history.back(); } else setParams({ email: undefined });
+  };
   const move = async (r, to) => {
     if (to === 'closed' && !(await confirmDialog(`Close ${r.name}?`, { message: 'No more emails go to this school, including follow-ups.', confirmText: 'Close', danger: true }))) return;
     try { await call('/pipeline/move', { method: 'POST', body: JSON.stringify({ org_id: r.org_id, stage: to }) }); showToast(`${r.name}: ${to === 'reopen' ? 'reopened' : `moved to ${STAGE_OF[to]?.label || to}`}`, 'success'); load(); }
@@ -847,7 +929,8 @@ export function Pipeline() {
           <div className="text-sm text-glass-muted mt-1">{total ? 'Pick another stage above.' : 'Approve a first-email template; each Eligible school then appears here, from Queued to Partner.'}</div>
         </div>
       )}
-      {data && data.rows.length > 0 && <ul className="space-y-2">{data.rows.map((r) => <PipelineRow key={r.org_id} r={r} onMove={move} />)}</ul>}
+      {data && data.rows.length > 0 && <ul className="space-y-2">{data.rows.map((r) => <PipelineRow key={r.org_id} r={r} onMove={move} onOpen={openEmails} />)}</ul>}
+      {route.params.email && <EmailThread orgId={route.params.email} onClose={closeEmails} />}
     </div>
   );
 }
