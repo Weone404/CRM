@@ -41,6 +41,24 @@ const TONE = {
   grey: { bg: 'rgba(118,118,128,0.12)', fg: '#3C3C43', dot: '#8E8E93' },
 };
 
+// The Mac Mini's own on-hours (owner's setting 'mac_hours', e.g. Mon-Sat 10:30-17:30 IST). Outside them the Mac being
+// offline is expected, not a fault: sending simply resumes when it wakes.
+const hm = (t) => { const [h, m] = t.split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
+export function macWindow(cfg) {
+  const m = cfg?.mac_hours;
+  if (!m?.from || !m?.to) return null;
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: m.tz || 'Asia/Kolkata', weekday: 'short',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date()).map((x) => [x.type, x.value]));
+  const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday) || 7;     // Mon=1 ... Sun=7
+  const mins = Number(p.hour) * 60 + Number(p.minute);
+  const [fh, fm] = m.from.split(':').map(Number);
+  const [th, tm] = m.to.split(':').map(Number);
+  const days = m.days || [1, 2, 3, 4, 5];
+  const on = days.includes(day) && mins >= fh * 60 + fm && mins < th * 60 + tm;
+  const span = days.length === 6 && days[5] === 6 ? 'Mon–Sat' : days.length === 5 ? 'Mon–Fri' : 'its days';
+  return { on, label: `${span}, ${hm(m.from)} – ${hm(m.to)} IST` };
+}
+
 // Everything that stops Auto-Pilot from sending right now, each with its fix (and a one-tap action where there is one).
 // Live facts (kill switch, the Mac's DRY_RUN, a pause) come first; the rest from the Mac's latest pre-flight check.
 export function autopilotIssues(d) {
@@ -53,7 +71,8 @@ export function autopilotIssues(d) {
   }
   // the cloud sender (GitHub Actions) covers school hours when the Mac is off
   const cloud = d.cloud_ready && d.cloud?.may_send;
-  if (!d.engine_online && !cloud) out.push({ id: 'offline', label: 'The Mac Mini is not reporting', fix: `Last heard ${when(d.engine?.at) || 'never'}. Wake the Mac and make sure it's online (or set up the cloud sender).` });
+  const mw = macWindow(cfg);
+  if (!d.engine_online && !cloud && (!mw || mw.on)) out.push({ id: 'offline', label: 'The Mac Mini is not reporting', fix: `Last heard ${when(d.engine?.at) || 'never'}. It should be on now (${mw ? mw.label : 'its usual hours'}): wake it and check it's online.` });
   if (d.engine && d.engine_online && !(d.engine.dry_run === false && d.engine.outbound_enabled)) {
     out.push({ id: 'server', label: 'Sending is switched off on the Mac (DRY_RUN)', fix: 'In ~/FlightBridgeEngine/.env set these two lines, then run install.sh:', code: 'DRY_RUN=false\nOUTBOUND_ENABLED=true' });
   }
@@ -74,6 +93,10 @@ function statusLine(d) {
   if (issues.length) {
     return { tone: 'red', title: `On · not sending: ${issues.length} to fix`, issues,
       text: 'Auto-Pilot starts by itself the moment these are fixed. Nothing has been sent.' };
+  }
+  const mw = macWindow(cfg);
+  if (!d.engine_online && !(d.cloud_ready && d.cloud?.may_send) && mw && !mw.on) {
+    return { tone: 'grey', title: 'Mac Mini asleep', text: `Sending resumes by itself when it wakes (${mw.label}). Nothing is lost.` };
   }
   if (!d.engine_online && !(d.cloud_ready && d.cloud?.may_send)) return { tone: 'orange', title: 'Waiting for the Mac Mini', text: `The engine hasn't reported since ${when(d.engine?.at) || 'it was installed'}. Wake the Mac or open it.` };
   if (st.paused_at && !(cfg.resume_at && cfg.resume_at > st.paused_at)) return { tone: 'red', title: 'Paused for safety', text: st.pause_reason, paused: true };
@@ -463,7 +486,7 @@ export function AutoPilot({ isAdmin }) {
       const yes = await confirmDialog(issues.length ? `Turn on? ${issues.length} thing${issues.length > 1 ? 's' : ''} to fix first` : 'Turn on Email Auto-Pilot?', {
         message: issues.length
           ? `Nothing will be sent until these are fixed: ${issues.map((it, i) => `${i + 1}) ${it.label}`).join('  ')}. Auto-Pilot then starts by itself.`
-          : `It will email Eligible schools by itself with your approved templates from ${sel?.address || 'the chosen mailbox'}, up to ${limit} today${cfg.warmup !== false ? ' (warm-up)' : ''}, only in each school's business hours. You can turn it off any time.`,
+          : `It will email Eligible schools by itself with your approved templates from ${sel?.address || 'the chosen mailbox'}, up to ${limit} today${cfg.warmup !== false ? ' (warm-up)' : ''}, on school weekdays, timed to reach each school between midnight and noon its local time, so it's waiting when they start work. You can turn it off any time.`,
         confirmText: issues.length ? 'Turn on and wait' : 'Turn on' });
       if (!yes) return;
     }
@@ -539,7 +562,8 @@ export function AutoPilot({ isAdmin }) {
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-glass-muted">
           <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: d.engine_online ? '#34C759' : '#FF9500' }} />Mac Mini {d.engine_online ? 'online' : 'offline'}{d.engine?.at ? ` · ${ago(d.engine.at)}` : ''}</span>
-          <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: d.cloud_online ? '#34C759' : d.cloud_ready ? '#007AFF' : '#8E8E93' }} />Cloud sender: {d.cloud_online ? (d.engine_online ? 'standing by' : 'sending') : d.cloud_ready ? 'ready for school hours' : 'not set up'}{d.cloud?.at ? ` · ${ago(d.cloud.at)}` : ''}</span>
+          {d.cloud_ready && <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: d.cloud_online ? '#34C759' : '#007AFF' }} />Cloud sender: {d.cloud_online ? (d.engine_online ? 'standing by' : 'sending') : 'ready'}{d.cloud?.at ? ` · ${ago(d.cloud.at)}` : ''}</span>}
+          {macWindow(cfg) && <span>Mac on: {macWindow(cfg).label}</span>}
           <span>Server sending: {d.engine?.dry_run === false && d.engine?.outbound_enabled ? 'on' : 'off (DRY_RUN)'}</span>
           <span>Kill switch: {d.kill_switch_engaged ? 'on' : 'released'}</span>
         </div>
