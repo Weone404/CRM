@@ -3,6 +3,7 @@ import { supabase, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from '../backend/sup
 import { showToast } from '../utils/toast';
 import { confirmDialog } from './ui/dialogs';
 import Icon from './icons';
+import OverflowNav from './ui/OverflowNav';
 import { useRoute, navigate } from '../utils/route';
 import { ProductGallery, ProductEditor } from './AmazonEditor';
 import { Decisions, ClaudeChat, MorningSummary, MacConnect, AlertEmails, MyStyle, Profit } from './AmazonDecisions';
@@ -503,22 +504,32 @@ export default function Amazon({ access }) {
         <h2 className="text-xl font-bold text-glass-primary">Amazon</h2>
         <div className="text-xs text-glass-muted">Nitaniya · Amazon.in · Easy Ship</div>
       </div>
-      <div role="tablist" aria-label="Amazon" className="glass-card p-1 grid grid-cols-5 gap-1">
+      {/* Computer: every Amazon page shows when it fits; the rest goes behind ⋯ */}
+      <div className="hidden md:block amz-tabbar p-1">
+        <OverflowNav ariaLabel="Amazon" activeId={view} onSelect={go}
+          items={[...TABS.filter((t) => t.id !== 'more'), ...more].map((t) => ({ ...t, badge: count[t.id] || 0 }))}
+          itemClass={(a) => `amz-tab ${a ? 'is-active' : ''}`}
+          dotsClass={(a) => `nav-dots ${a ? 'is-active' : ''}`}
+          renderItem={(t, a) => <><Icon name={t.icon} size={17} />{t.label}{t.badge > 0 && <span className="amz-badge" style={a ? { background: '#fff', color: '#007AFF' } : undefined}>{t.badge}</span>}</>} />
+      </div>
+      {/* Phone: four main pages and ⋯ */}
+      <div role="tablist" aria-label="Amazon" className="md:hidden glass-card p-1 grid grid-cols-5 gap-1">
         {TABS.map((t) => {
           const active = tab === t.id;
           return (
             <button key={t.id} role="tab" aria-selected={active} aria-label={`${t.label}${count[t.id] ? ` ${count[t.id]}` : ''}`} onClick={() => go(t.id)}
               className="relative flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 rounded-xl py-2 px-1 text-[11px] sm:text-sm min-h-[52px]"
               style={active ? { background: '#007AFF', color: '#fff', fontWeight: 600 } : undefined}>
-              <Icon name={t.icon} size={18} />
-              <span className="leading-tight text-center"><span className="sm:hidden">{t.short || t.label}</span><span className="hidden sm:inline">{t.label}</span></span>
+              {t.id === 'more' ? <Icon name="more" size={24} strokeWidth={2.4} /> : <>
+                <Icon name={t.icon} size={18} />
+                <span className="leading-tight text-center"><span className="sm:hidden">{t.short || t.label}</span><span className="hidden sm:inline">{t.label}</span></span></>}
               {count[t.id] > 0 && <span className="absolute top-1 right-1 sm:static min-w-[1.2rem] h-[1.2rem] px-1 rounded-full text-[10px] font-bold inline-flex items-center justify-center"
                 style={{ background: active ? '#fff' : '#FF3B30', color: active ? '#007AFF' : '#fff' }}>{count[t.id]}</span>}
             </button>
           );
         })}
       </div>
-      {sub && <button type="button" onClick={() => go('more')} className="text-sm font-semibold inline-flex items-center gap-1" style={{ color: 'var(--accent)' }}><Icon name="chevronLeft" size={16} />More</button>}
+      {sub && <button type="button" onClick={() => go('more')} className="md:hidden text-sm font-semibold inline-flex items-center gap-1" style={{ color: 'var(--accent)' }}><Icon name="chevronLeft" size={16} />Back</button>}
       {sub && <h3 className="text-lg font-bold text-glass-primary -mt-2">{sub.label}</h3>}
       {view === 'more' && (
         <div className="grid sm:grid-cols-2 gap-2">

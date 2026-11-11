@@ -18,10 +18,17 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 const consoleErrors = [];
 page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) consoleErrors.push(m.text()); });
 page.on('pageerror', (e) => consoleErrors.push(String(e)));
-const nav = async (label) => { await page.getByRole('tab', { name: new RegExp('^' + label.replace(/[.*+?^${}()|[\]\\&]/g, '\\$&') + '( \\d+)?$') }).first().click(); await page.waitForTimeout(500); };
+const esc = (t) => t.replace(/[.*+?^${}()|[\]\\&]/g, '\\$&');
+const nav = async (label) => { await page.getByRole('tab', { name: new RegExp('^' + esc(label) + '( \\d+)?$') }).filter({ visible: true }).first().click(); await page.waitForTimeout(500); };
 const toast = async () => { await page.waitForTimeout(700); return (await page.locator('body').innerText()); };
 
-const more = async (label) => { await nav('More'); await page.getByRole('button', { name: new RegExp('^' + label) }).first().click(); await page.waitForTimeout(500); };
+// A page is either shown as a tab (when it fits) or sits behind the ⋯ button.
+const more = async (label) => {
+  const tab = page.getByRole('tab', { name: new RegExp('^' + esc(label)) }).filter({ visible: true });
+  if (await tab.count()) await tab.first().click();
+  else { await page.getByRole('button', { name: 'More', exact: true }).filter({ visible: true }).first().click(); await page.getByRole('menuitem', { name: new RegExp('^' + esc(label)) }).first().click(); }
+  await page.waitForTimeout(500);
+};
 const dlg = () => page.getByRole('alertdialog');
 
 await as(ADMIN);
@@ -32,7 +39,7 @@ const overview = await page.locator('body').innerText();
 ok(/Good (morning|afternoon|evening)/.test(overview) && /Decisions waiting/.test(overview) && /Orders to ship/.test(overview), 'UI01 Home opens with a short morning summary');
 ok(/Amazon is not connected yet/.test(overview), 'UI02 Home says Amazon is not connected yet');
 ok(/Fast delivery is not on for \d+ product/.test(overview), 'UI02b Home suggests turning on fast delivery');
-ok((await page.getByRole('tab').count()) === 5, 'UI02c only 5 tabs: Home, My Products, Decisions, Sales, More');
+ok((await page.getByRole('tab', { name: /^Home$/ }).filter({ visible: true }).count()) === 1 && (await page.getByRole('tab', { name: /^Decisions/ }).filter({ visible: true }).count()) === 1, 'UI02c main Amazon pages are tabs (Home, My Products, Decisions, Sales)');
 await page.screenshot({ path: `${SHOTS}/amz_overview.png`, fullPage: true });
 
 await nav('My Products');
@@ -104,7 +111,7 @@ await page.getByText('Same-day dispatch').first().waitFor({ timeout: 5000 }).cat
 let pend = (await rpcAs('api_amz_queue', { p_status: 'pending' })).filter((c) => c.kind === 'dispatch');
 const kids = (await rpcAs('api_amz_listings')).filter((l) => !l.is_parent).length;
 ok(pend.length === kids && pend.every((c) => c.after.handling_days === 0), `UI18 "Apply to all products" drafts same-day dispatch for every product (${pend.length}/${kids})`);
-ok(/Decisions/.test(await page.locator('[role=tab][aria-selected=true]').innerText()), 'UI19 it opens Decisions');
+ok(/Decisions/.test(await page.locator('[role=tab][aria-selected=true]').filter({ visible: true }).first().innerText()), 'UI19 it opens Decisions');
 await page.locator('[data-change]').first().waitFor();
 await page.screenshot({ path: `${SHOTS}/amz_dispatch.png`, fullPage: false });
 // Change one suggestion before approving
@@ -227,8 +234,13 @@ await page.getByText(/Connected: All good/).first().waitFor({ timeout: 5000 }).t
   .catch(() => ok(false, 'UI13 Test Connection result shown'));
 await page.screenshot({ path: `${SHOTS}/amz_settings.png`, fullPage: true });
 
-await nav('More');
-ok((await page.getByRole('button', { name: /^Phone app/ }).count()) === 0, 'UI53 Amazon no longer has its own phone-app page');
+await nav('Home');
+ok((await page.getByRole('tab', { name: /^Phone app/ }).count()) + (await page.getByRole('menuitem', { name: /^Phone app/ }).count()) === 0, 'UI53 Amazon no longer has its own phone-app page');
+{ const vis = await page.getByRole('tab').filter({ visible: true }).count();
+  ok(vis >= 6, `UI54 on a computer Amazon pages show directly when they fit (${vis} tabs visible)`);
+  const dots = page.getByRole('button', { name: 'More', exact: true }).filter({ visible: true });
+  if (await dots.count()) { await dots.first().click(); ok((await page.getByRole('menuitem').count()) >= 1 && (await dots.first().innerText()).trim() === '', 'UI55 only what does not fit sits behind ⋯ (no "More" word)'); await page.keyboard.press('Escape'); await page.mouse.click(5, 5); }
+  else ok(true, 'UI55 everything fits, so no ⋯ button'); }
 { const fs = await import('fs'); const FE = new URL('../../../../frontend/', import.meta.url);
   const html = fs.readFileSync(new URL('index.html', FE), 'utf8'); const man = JSON.parse(fs.readFileSync(new URL('public/manifest.webmanifest', FE), 'utf8'));
   ok(html.includes('rel="manifest"') && man.display === 'standalone' && man.icons.some((i) => i.sizes === '512x512') && fs.existsSync(new URL('public/sw.js', FE)),
@@ -259,7 +271,7 @@ if (pendingNow) {
 for (const label of ['Search words', 'Competitors', 'Account health', 'To-do list', 'History']) {
   await more(label);
 }
-await nav('More');
+await nav('Home');
 await page.screenshot({ path: `${SHOTS}/amz_more.png`, fullPage: false });
 ok(consoleErrors.length === 0, `UI14 no console errors across all screens${consoleErrors.length ? ': ' + consoleErrors.slice(0, 3).join(' | ') : ''}`);
 
@@ -270,6 +282,7 @@ await phone.getByText('What to do today').waitFor();
 const overflow = await phone.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 ok(overflow <= 1, `UI15 no sideways scroll on a phone (overflow ${overflow}px)`);
 await phone.screenshot({ path: `${SHOTS}/amz_phone.png`, fullPage: false });
+ok(!(await phone.getByRole('tab', { name: 'More' }).innerText()).includes('More'), 'UI56 phone shows ⋯ (three dots) instead of the word More');
 
 // non-admin
 await as(SALES);

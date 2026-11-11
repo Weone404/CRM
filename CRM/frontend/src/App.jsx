@@ -15,6 +15,7 @@ import { modalProps } from './components/ui/overlay';
 import { showToast } from './utils/toast';
 import { useRoute, navigate } from './utils/route';
 import LinkTile from './components/ui/LinkTile';
+import OverflowNav from './components/ui/OverflowNav';
 
 // Code-split everything that isn't needed for the first paint. Each of these
 // tabs/modals now ships as its own chunk fetched on demand, so a Sales user
@@ -69,7 +70,8 @@ export default function App() {
   const setSegment = (value) => { setSegmentState(value); try { localStorage.setItem('lead_segment', value); } catch { /* ignore */ } };
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showMore, setShowMore] = useState(false);
-  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [vw, setVw] = useState(() => (typeof window === 'undefined' ? 390 : window.innerWidth));
+  useEffect(() => { const f = () => setVw(window.innerWidth); window.addEventListener('resize', f); return () => window.removeEventListener('resize', f); }, []);
   const [passwordForm, setPasswordForm] = useState({ old_password: '', new_password: '', confirm_password: '' });
   const [passwordError, setPasswordError] = useState('');
   const [birthdays, setBirthdays] = useState([]);
@@ -252,12 +254,17 @@ export default function App() {
   const activeTab = tabs.some((t) => t.id === wanted) ? wanted : (primary[0]?.id === 'academy' ? academyKids[0]?.id : primary[0]?.id) || tabs[0]?.id || 'tasks';
   const section = ACADEMY.includes(activeTab) ? 'academy' : activeTab;
   const go = (id) => {
-    setShowMore(false); setShowMoreMenu(false);
+    setShowMore(false);
     if (id === 'academy') { navigate(lastAcademy() || academyKids[0]?.id); return; }
     if (ACADEMY.includes(id)) { try { localStorage.setItem('academy_tab', id); } catch { /* ignore */ } }
     navigate(id);
   };
-  const moreActive = moreTabs.some((t) => t.id === activeTab);
+  // Phones: as many sections as the width allows (about 72px each); the last slot is ⋯ (rest + password + logout).
+  const allNav = [...primary, ...moreTabs];
+  const slots = Math.max(3, Math.floor(vw / 72));
+  const barItems = allNav.length <= slots - 1 ? allNav : allNav.slice(0, slots - 1);
+  const sheetItems = allNav.slice(barItems.length);
+  const sheetActive = sheetItems.some((t) => t.id === section);
   const tabIcon = (t, size, active) => (t.logo
     ? <img src="/icons/academy-mark.png" alt="" width={size + 4} height={size} style={{ width: size + 4, height: size }} className={`nav-logo ${active ? 'is-active' : ''}`} />
     : <Icon name={t.icon} size={size} strokeWidth={active ? 2.3 : 1.8} />);
@@ -283,51 +290,25 @@ export default function App() {
         </div>
       </nav>
 
-      {/* Tabs: tablet and desktop */}
-      <div className="hidden md:flex items-center whitespace-nowrap relative px-2 sm:px-4 pb-1" role="tablist" aria-label="Sections">
-        {primary.map((t) => (
-          <button key={t.id} role="tab" aria-selected={section === t.id} onClick={() => go(t.id)}
-            className={`glass-tab-btn inline-flex items-center gap-2 ${section === t.id ? 'active' : ''}`}>
-            {tabIcon(t, 16, section === t.id)}{t.label}
-          </button>
-        ))}
-        {moreTabs.length > 0 && (
-          <div className="relative">
-            <button type="button" aria-haspopup="menu" aria-expanded={showMoreMenu} onClick={() => setShowMoreMenu((v) => !v)}
-              className={`glass-tab-btn inline-flex items-center gap-2 ${moreActive ? 'active' : ''}`}>
-              <Icon name="more" size={16} />{moreActive ? tabs.find((t) => t.id === activeTab)?.label : 'More'}<Icon name="chevronDown" size={14} />
-            </button>
-            {showMoreMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} aria-hidden="true" />
-                <div role="menu" aria-label="More" className="absolute left-0 top-full mt-1 z-50 min-w-[220px] more-menu p-1.5 animate-glass-in"
-                  onKeyDown={(e) => { if (e.key === 'Escape') setShowMoreMenu(false); }}>
-                  {moreTabs.map((t) => (
-                    <button key={t.id} role="menuitem" onClick={() => go(t.id)}
-                      className={`menu-item w-full flex items-center gap-3 px-3 min-h-[42px] rounded-xl text-sm text-left ${activeTab === t.id ? 'is-active' : ''}`}>
-                      <Icon name={t.icon} size={17} />{t.label}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        )}
-      </div>
+      {/* Tabs: tablet and desktop. Every section shows when it fits; only what does not fit goes behind ⋯ */}
+      <OverflowNav className="hidden md:block px-2 sm:px-4 pb-1" ariaLabel="Sections" items={allNav} activeId={section} onSelect={go}
+        itemClass={(a) => `glass-tab-btn inline-flex items-center gap-2 ${a ? 'active' : ''}`}
+        dotsClass={(a) => `nav-dots ${a ? 'is-active' : ''}`}
+        renderItem={(t, a) => <>{tabIcon(t, 16, a)}{t.label}</>} />
       </header>
 
       {/* Tabs: phones (bottom bar) */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 glass-nav tab-bar" aria-label="Sections">
-        <div className="grid" style={{ gridTemplateColumns: `repeat(${primary.length + 1}, minmax(0, 1fr))` }}>
-          {primary.map((t) => (
+        <div className="grid" style={{ gridTemplateColumns: `repeat(${barItems.length + 1}, minmax(0, 1fr))` }}>
+          {barItems.map((t) => (
             <button key={t.id} onClick={() => go(t.id)} aria-current={section === t.id ? 'page' : undefined} aria-label={t.label}
               className={`tab-bar-btn ${section === t.id ? 'is-active' : ''}`}>
               {tabIcon(t, 22, section === t.id)}<span className="truncate max-w-full px-1">{t.label}</span>
             </button>
           ))}
-          <button onClick={() => setShowMore(true)} aria-haspopup="dialog" aria-label="More"
-            className={`tab-bar-btn ${moreActive ? 'is-active' : ''}`}>
-            <Icon name="more" size={22} strokeWidth={moreActive ? 2.3 : 1.8} /><span>More</span>
+          <button onClick={() => setShowMore(true)} aria-haspopup="dialog" aria-label="More" title="More"
+            className={`tab-bar-btn ${sheetActive ? 'is-active' : ''}`}>
+            <span className="nav-dots-mobile"><Icon name="more" size={24} strokeWidth={2.4} /></span>
           </button>
         </div>
       </nav>
@@ -340,12 +321,12 @@ export default function App() {
               <button onClick={() => setShowMore(false)} className="p-2 rounded-full text-glass-muted min-h-[44px] min-w-[44px] inline-flex items-center justify-center" aria-label="Close"><Icon name="close" size={20} /></button>
             </div>
             <div className="grid grid-cols-1 gap-1">
-              {moreTabs.length > 0 && moreTabs.map((t) => (
-                <button key={t.id} onClick={() => go(t.id)} className={`flex items-center gap-3 px-3 min-h-[48px] rounded-xl text-base ${activeTab === t.id ? 'bg-[var(--accent-light)] text-[var(--accent)] font-semibold' : 'text-glass-primary'}`}>
-                  <Icon name={t.icon} size={20} />{t.label}
+              {sheetItems.map((t) => (
+                <button key={t.id} onClick={() => go(t.id)} className={`flex items-center gap-3 px-3 min-h-[48px] rounded-xl text-base ${section === t.id ? 'bg-[var(--accent-light)] text-[var(--accent)] font-semibold' : 'text-glass-primary'}`}>
+                  {tabIcon(t, 20, section === t.id)}{t.label}
                 </button>
               ))}
-              {moreTabs.length > 0 && <div className="h-px my-1" style={{ background: 'var(--border-subtle)' }} />}
+              {sheetItems.length > 0 && <div className="h-px my-1" style={{ background: 'var(--border-subtle)' }} />}
               <button onClick={() => { setShowMore(false); setShowChangePassword(true); }} className="flex items-center gap-3 px-3 min-h-[48px] rounded-xl text-base text-glass-primary"><Icon name="lock" size={20} />Change password</button>
               <button onClick={handleLogout} className="flex items-center gap-3 px-3 min-h-[48px] rounded-xl text-base text-red-600"><Icon name="logout" size={20} />Logout</button>
             </div>
