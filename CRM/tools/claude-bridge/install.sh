@@ -1,9 +1,12 @@
 #!/bin/bash
 # Installs the Nitaniya Live Claude helper on this Mac (run on the Mac Mini, in Terminal):
-#   bash ~/Desktop/CRM/CRM/tools/claude-bridge/install.sh
+#   bash <(curl -fsSL https://raw.githubusercontent.com/Weone404/CRM/main/CRM/tools/claude-bridge/install.sh)
+# (or, from a clone of the repo:  bash CRM/tools/claude-bridge/install.sh)
 # Needs: Node.js 18+ and Claude Code logged in with your Max account. Starts at login and keeps the Mac awake while running.
 set -euo pipefail
-DIR="$(cd "$(dirname "$0")" && pwd)"
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo /nonexistent)"
+REF="${NITANIYA_REF:-main}"
+RAW="https://raw.githubusercontent.com/Weone404/CRM/$REF/CRM/tools/claude-bridge"
 CONF="$HOME/.nitaniya-bridge"
 LABEL="in.nitaniya.claude-bridge"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -29,11 +32,14 @@ fi
 
 mkdir -p "$CONF"; chmod 700 "$CONF"
 printf "Paste the Mac connection code from CRM > Amazon > More > Settings: "
-read -r -s TOKEN; echo
+read -r -s TOKEN < /dev/tty; echo
 if [[ "$TOKEN" != nitb_* ]] || [ ${#TOKEN} -lt 60 ]; then echo "That is not a connection code. Copy it again from Settings."; exit 1; fi
 ( umask 077; printf '%s' "$TOKEN" > "$CONF/token" )
 printf '%s' "$CLAUDE" > "$CONF/claude-path"
-cp "$DIR/bridge.mjs" "$CONF/bridge.mjs"
+if [ -f "$DIR/bridge.mjs" ]; then cp "$DIR/bridge.mjs" "$CONF/bridge.mjs"
+else curl -fsSL "$RAW/bridge.mjs" -o "$CONF/bridge.mjs"; curl -fsSL "$RAW/uninstall.sh" -o "$CONF/uninstall.sh"; fi
+[ -f "$DIR/uninstall.sh" ] && cp "$DIR/uninstall.sh" "$CONF/uninstall.sh"
+"$NODE" --check "$CONF/bridge.mjs" || { echo "The helper file did not download correctly. Try again."; exit 1; }
 
 mkdir -p "$HOME/Library/LaunchAgents"
 cat > "$PLIST" <<EOF
@@ -60,4 +66,4 @@ launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 sleep 3
 echo "Done. Live Claude is running on this Mac. In the CRM, the Claude chat should now say: Online."
-echo "Log: $CONF/bridge.log   Stop it:  bash \"$DIR/uninstall.sh\""
+echo "Log: $CONF/bridge.log   Remove it any time:  bash ~/.nitaniya-bridge/uninstall.sh"

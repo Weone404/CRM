@@ -437,7 +437,7 @@ export function MacConnect() {
     if (!(await confirmDialog('Disconnect the Mac?', { message: 'Live Claude stops at once. Messages are then answered by the hourly task.', confirmText: 'Disconnect', danger: true }))) return;
     try { await rpc('api_amz_bridge_token_revoke'); setCode(''); load(); showToast('Mac disconnected.', 'success'); } catch (e) { showToast(e.message, 'error'); }
   };
-  const cmd = 'bash ~/Desktop/CRM/CRM/tools/claude-bridge/install.sh';
+  const cmd = 'bash <(curl -fsSL https://raw.githubusercontent.com/Weone404/CRM/main/CRM/tools/claude-bridge/install.sh)';
   const copy = (t) => navigator.clipboard?.writeText(t).then(() => showToast('Copied', 'success')).catch(() => {});
   return (
     <div className="glass-card p-4 space-y-3">
