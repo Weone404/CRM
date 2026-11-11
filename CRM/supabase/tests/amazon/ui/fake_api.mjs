@@ -29,12 +29,28 @@ http.createServer(async (req, res) => {
     if (fn === 'amazon-sync') return send(res, 200, { status: 'ok', results: [{ job: 'listings', status: 'ok' }] });
     return send(res, 404, { detail: 'no such function' });
   }
+  // Test-only: run a service function as service_role (stands in for the Mac helper / Edge Functions).
+  const sv = /^\/__svc\/(svc_[a-z_0-9]+)$/.exec(url.pathname);
+  if (sv) {
+    const ks = Object.keys(args);
+    const vs = ks.map((k) => (args[k] !== null && typeof args[k] === 'object' ? JSON.stringify(args[k]) : args[k]));
+    const db = await pool.connect();
+    try {
+      await db.query('BEGIN'); await db.query('SET LOCAL ROLE service_role');
+      const r = await db.query(`SELECT to_jsonb(public.${sv[1]}(${ks.map((k, i) => `${k} => $${i + 1}`).join(', ')})) AS r`, vs);
+      await db.query('COMMIT'); return send(res, 200, r.rows[0].r);
+    } catch (e) { await db.query('ROLLBACK'); return send(res, 400, { message: e.message }); } finally { db.release(); }
+  }
   const m = /^\/rest\/v1\/rpc\/([a-z_0-9]+)$/.exec(url.pathname);
   if (!m) return send(res, 404, { message: 'not found' });
   const fn = m[1]; calls.push({ fn, args });
   const keys = Object.keys(args);
+  // arrays: a Postgres array for text[] parameters, JSON for jsonb parameters (like PostgREST)
+  const types = (await pool.query(`SELECT unnest(proargnames) n, unnest(proargtypes::regtype[]::text[]) t FROM pg_proc
+                                     WHERE proname = $1 AND pronamespace = 'public'::regnamespace LIMIT 50`, [fn])).rows;
+  const tOf = (k) => (types.find((r) => r.n === k) || {}).t;
   const vals = keys.map((k) => (args[k] !== null && typeof args[k] === 'object' && !Array.isArray(args[k]) ? JSON.stringify(args[k])
-    : Array.isArray(args[k]) ? `{${args[k].map((x) => JSON.stringify(String(x))).join(',')}}` : args[k]));
+    : Array.isArray(args[k]) ? (tOf(k) === 'jsonb' ? JSON.stringify(args[k]) : `{${args[k].map((x) => JSON.stringify(String(x))).join(',')}}`) : args[k]));
   const sql = `SELECT to_jsonb(public.${fn}(${keys.map((k, i) => `${k} => $${i + 1}`).join(', ')})) AS r`;
   const db = await pool.connect();   // one connection per request: role and user are per transaction
   try {

@@ -482,4 +482,75 @@ BEGIN
 END $$;
 RESET ROLE;
 
+-- K: Fix All, ranked alternatives, problem pop-up, alerts, feedback (080)
+DO $$
+DECLARE r jsonb; j jsonb; fid bigint; fsku text; a uuid; b uuid; n int; sa CONSTANT text := 'SET ROLE authenticated';
+BEGIN
+  SELECT id, sku INTO fid, fsku FROM public.amazon_audit_findings WHERE status = 'open' AND sku IS NOT NULL
+    AND sku IN (SELECT sku FROM public.amazon_listings WHERE NOT coalesce(is_parent, false)) ORDER BY id LIMIT 1;
+  UPDATE public.amazon_claude_requests SET status = 'cancelled' WHERE status IN ('waiting', 'working');
+  EXECUTE sa; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  r := public.api_amz_fix(NULL);
+  PERFORM pg_temp.ok((r->>'queued')::int > 0, 'K01 Fix All queues one Claude fix per product with problems');
+  r := public.api_amz_fix(NULL);
+  PERFORM pg_temp.ok((r->>'queued')::int = 0 AND (r->>'already_waiting')::int > 0, 'K02 pressing Fix All twice does not duplicate work');
+  PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000c', false);
+  BEGIN PERFORM public.api_amz_fix(NULL); PERFORM pg_temp.ok(false, 'K03 viewer cannot run Fix All');
+  EXCEPTION WHEN OTHERS THEN PERFORM pg_temp.ok(true, 'K03 viewer cannot run Fix All'); END;
+  RESET ROLE;
+  -- Claude answers the fix for fsku with 2 ranked alternatives for the same problem + a swatch removal
+  UPDATE public.amazon_claude_requests SET status = 'cancelled' WHERE kind = 'fix' AND sku <> fsku AND status = 'waiting';
+  SET ROLE service_role;
+  j := public.svc_amz_bridge_claim('mac');
+  PERFORM pg_temp.ok(j->'job'->>'kind' = 'fix' AND j->'job'->>'sku' = fsku AND (j->'context'->'problems'->0) ? 'id', 'K04 fix job carries the problems with their ids');
+  r := public.svc_amz_bridge_answer((j->'job'->>'id')::bigint, 'Two ways to fix it.', NULL, jsonb_build_array(
+    jsonb_build_object('kind', 'listing', 'sku', fsku, 'after', '{"description": "Option A text."}'::jsonb, 'summary', 'Option A', 'reason', 'Fix',
+      'group', 'p1', 'rank', 1, 'rank_reason', 'Keeps the main keyword first.', 'finding_id', fid),
+    jsonb_build_object('kind', 'listing', 'sku', fsku, 'after', '{"description": "Option B text."}'::jsonb, 'summary', 'Option B', 'reason', 'Fix',
+      'group', 'p1', 'rank', 2, 'rank_reason', 'Shorter but drops a keyword.', 'finding_id', fid),
+    jsonb_build_object('kind', 'listing', 'sku', fsku, 'after', '{"remove_swatch": true}'::jsonb, 'summary', 'Remove swatch', 'group', 'p2', 'rank', 1)), 'mac');
+  PERFORM pg_temp.ok((r->>'drafts')::int = 3, 'K05 ranked alternatives and swatch removal become Decisions');
+  RESET ROLE;
+  SELECT id INTO a FROM public.amazon_change_queue WHERE summary = 'Option A' AND status = 'pending';
+  SELECT id INTO b FROM public.amazon_change_queue WHERE summary = 'Option B' AND status = 'pending';
+  PERFORM pg_temp.ok((SELECT alt_group IS NOT NULL AND alt_rank = 1 AND rank_reason LIKE 'Keeps%' AND finding_id = fid FROM public.amazon_change_queue WHERE id = a),
+    'K06 rank, reason and problem link are stored');
+  EXECUTE sa; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  r := public.api_amz_problem(fid);
+  PERFORM pg_temp.ok(jsonb_array_length(r->'solutions') >= 2 AND r->'solutions'->0->>'summary' = 'Option A' AND r ? 'product',
+    'K07 problem pop-up lists the solutions best-first');
+  PERFORM public.api_amz_approve(a);
+  RESET ROLE;
+  PERFORM pg_temp.ok((SELECT status = 'cancelled' AND reject_reason = 'Another choice was approved' FROM public.amazon_change_queue WHERE id = b),
+    'K08 approving one choice closes the other choices');
+  PERFORM pg_temp.ok((SELECT count(*) FROM public.amazon_change_queue WHERE after = '{"remove_swatch": true}'::jsonb AND status = 'pending') = 1,
+    'K09 other problems of the product keep their fix');
+  SET ROLE service_role;
+  r := public.svc_amz_bridge_answer(0, 'x', NULL, NULL, 'mac');
+  PERFORM public.svc_amz_upsert_orders(jsonb_build_array(jsonb_build_object('order_id', '408-9', 'purchase_date', now(), 'status', 'Unshipped',
+        'latest_ship_date', now() + interval '1 day', 'units', 1, 'items', jsonb_build_array(jsonb_build_object('sku', fsku, 'qty', 1, 'title', 'Diary')))));
+  PERFORM public.svc_amz_upsert_feedback('[{"order_id": "408-7", "rating": "1", "comment": "Late"}, {"order_id": "408-8", "rating": "3"}]');
+  j := public.svc_amz_alerts_for_email();
+  PERFORM pg_temp.ok(j @> '[{"kind": "new_order"}]' AND j @> '[{"kind": "feedback"}]' AND NOT (j::text LIKE '%408-8%'),
+    'K10 new orders and 1-2 star feedback raise alerts (3 stars does not)');
+  PERFORM pg_temp.ok(jsonb_array_length(public.svc_amz_alerts_for_email()) = 0, 'K11 each alert is emailed only once');
+  PERFORM public.svc_amz_alerts_scan();
+  RESET ROLE;
+  PERFORM pg_temp.ok((SELECT count(*) FROM public.amazon_alerts WHERE kind = 'new_order' AND ref = '408-9') = 1, 'K12 scanning again does not repeat alerts');
+  EXECUTE sa; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  PERFORM pg_temp.ok(jsonb_array_length(public.api_amz_alerts(true)) >= 2, 'K13 alerts show in the CRM');
+  r := public.api_amz_alert_emails('["Owner@Example.com", "team@example.in", "owner@example.com"]');
+  PERFORM pg_temp.ok(r = '["owner@example.com", "team@example.in"]'::jsonb, 'K15 Admin sets alert emails (cleaned, no duplicates)');
+  BEGIN PERFORM public.api_amz_alert_emails('["not-an-email"]'); PERFORM pg_temp.ok(false, 'K16 invalid email refused');
+  EXCEPTION WHEN OTHERS THEN PERFORM pg_temp.ok(SQLERRM LIKE '%not valid%', 'K16 invalid email refused'); END;
+  PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000c', false);
+  BEGIN PERFORM public.api_amz_alert_emails('[]'); PERFORM pg_temp.ok(false, 'K17 only Admin changes alert emails');
+  EXCEPTION WHEN OTHERS THEN PERFORM pg_temp.ok(true, 'K17 only Admin changes alert emails'); END;
+  PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  RESET ROLE;
+  PERFORM pg_temp.ok(NOT has_function_privilege('authenticated', 'public.svc_amz_alerts_for_email()', 'execute')
+    AND NOT has_table_privilege('authenticated', 'public.amazon_feedback', 'select'), 'K14 alert/feedback internals are not exposed');
+END $$;
+RESET ROLE;
+
 \echo ALL SQL TESTS PASSED

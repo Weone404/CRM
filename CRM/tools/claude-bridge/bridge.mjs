@@ -51,10 +51,23 @@ Reply with ONE JSON object and nothing else:
               "summary": "<5-8 words>", "reason": "<one short sentence why>"} ],
  "options": [ ... ]}
 Fields allowed in "after": listing -> title, bullets (array of strings), description, backend_terms;
-price -> price, mrp, quantity; dispatch -> handling_days (0 = same day, 1 = next day).
+price -> price, mrp, quantity; dispatch -> handling_days (0 = same day, 1 = next day); listing may also use
+{"remove_swatch": true} to delete a flagged colour-swatch photo.
+Drafts may also carry "group", "rank", "rank_reason", "finding_id" (see fix requests).
 "drafts" only when the owner asks for a change or clearly needs one. "options" only for suggestion requests (see below).`;
 
 function prompt(job, context) {
+  if (job.kind === "fix") {
+    return `${SYSTEM}\n\nSTORE DATA:\n${JSON.stringify(context)}\n\nFIX REQUEST for product ${job.sku}:\n${job.question}\n\n` +
+      `For EACH problem in "problems" for this product, propose 1 to 3 alternative fixes as drafts. Every draft must include:\n` +
+      `"group": the problem id as text (alternatives for the same problem share it), "finding_id": the problem id,\n` +
+      `"rank": 1 = best, "rank_reason": 1-3 plain sentences on WHY it got this rank (search visibility, Amazon rules, ` +
+      `buyer clarity, risk to sales, price margin) so the owner can judge.\n` +
+      `Fix types: long or repetitive names -> new "title"; no or lost Add to Cart -> "price" (never below 299; consider the Add to Cart price) and/or ` +
+      `"handling_days"; colour swatch photo with text/logo -> {"remove_swatch": true} (rank 1) because a clean photo must be uploaded by hand; ` +
+      `old year -> title with 2027; title changed outside the CRM -> keep the current title or restore the old one.\n` +
+      `If a problem cannot be fixed with the allowed fields, say so in "answer" and draft nothing for it. "answer": one short summary line.`;
+  }
   if (job.kind === "suggest") {
     return `${SYSTEM}\n\nSTORE DATA:\n${JSON.stringify(context)}\n\nSUGGESTION REQUEST for product ${job.sku}, field "${job.field}":\n${job.question}\n\n` +
       `Return "options": exactly 5 alternatives for that field (for bullets each option is an array of 4-5 strings), "answer": "Suggestions ready", no drafts.`;
@@ -98,17 +111,42 @@ function parseReply(text) {
   return { answer: text.trim().slice(0, 8000), drafts: [], options: null };
 }
 
+// Self-update: every 6 hours fetch the latest helper from the repo; if it changed and is valid JavaScript,
+// replace this file and exit (launchd starts the new version within 30 seconds).
+const SELF = new URL(import.meta.url).pathname;
+const RAW = process.env.BRIDGE_RAW || "https://raw.githubusercontent.com/Weone404/CRM/main/CRM/tools/claude-bridge/bridge.mjs";
+let nextUpdate = Date.now() + 60e3;
+async function selfUpdate() {
+  nextUpdate = Date.now() + 6 * 3600e3;
+  try {
+    const res = await fetch(RAW, { signal: AbortSignal.timeout(20000) });
+    if (!res.ok) return;
+    const code = await res.text();
+    const { readFileSync: rf, writeFileSync: wf } = await import("node:fs");
+    if (code.length < 2000 || code === rf(SELF, "utf8") || !code.includes("Nitaniya Live Claude helper")) return;
+    const tmp = `${SELF}.new`;
+    wf(tmp, code);
+    const ok = await new Promise((r) => spawn(process.execPath, ["--check", tmp]).on("close", (c) => r(c === 0)));
+    if (!ok) return;
+    const { renameSync } = await import("node:fs");
+    renameSync(tmp, SELF);
+    log("Updated the helper; restarting.");
+    process.exit(0);
+  } catch { /* try again later */ }
+}
+
 let pausedUntil = 0;
 log("Nitaniya Live Claude helper started. Claude:", CLAUDE);
 for (;;) {
   try {
     if (Date.now() < pausedUntil) { await call({ action: "ping" }).catch(() => {}); await sleep(IDLE_MS * 10); continue; }
+    if (Date.now() > nextUpdate) await selfUpdate();
     const r = await call({ action: "claim" });
     if (!r?.job) { await sleep(IDLE_MS); continue; }
     const job = r.job;
     log(`message ${job.id} (${job.kind})`);
     const hb = setInterval(() => { call({ action: "ping" }).catch(() => {}); }, 30000);   // stay "online" while thinking
-    const res = await runClaude(prompt(job, r.context)).finally(() => clearInterval(hb));
+    const res = await runClaude(r.prompt || prompt(job, r.context)).finally(() => clearInterval(hb));
     if (!res.ok) {
       log(`message ${job.id}: ${res.note}`);
       await call({ action: "release", id: job.id, note: res.note }).catch(() => {});

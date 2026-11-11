@@ -5,7 +5,7 @@ import { confirmDialog } from './ui/dialogs';
 import Icon from './icons';
 import { useRoute, navigate } from '../utils/route';
 import { ProductGallery, ProductEditor } from './AmazonEditor';
-import { Decisions, ClaudeChat, MorningSummary, MacConnect } from './AmazonDecisions';
+import { Decisions, ClaudeChat, MorningSummary, MacConnect, AlertEmails } from './AmazonDecisions';
 import { inr, pct, ageText, dispatchText } from '../utils/amazon';
 
 // CRM > Amazon (Nitaniya on Amazon.in). Admin, plus people Admin grants in Settings.
@@ -408,6 +408,7 @@ function Settings() {
   return (
     <div className="space-y-4">
       <MacConnect />
+      <AlertEmails />
       <div className="glass-card p-4 space-y-3">
         <div className="flex flex-wrap justify-between items-center gap-2">
           <div><h3 className="font-bold">Environment variables</h3><p className="text-xs text-glass-muted">Stored in Supabase Vault. Never shown again in full; only the last 4 characters.</p></div>
@@ -487,7 +488,6 @@ export default function Amazon({ access }) {
   const myAsins = [...new Set(skus.map((s) => s.asin).filter(Boolean))];
   const go = (v) => navigate('amazon', v);
   const openProduct = (sku) => { setOpenSku(sku); go('products'); };
-  const askClaude = (text, sku) => setChat({ text, sku });
   useEffect(() => { if (raw === 'ask' && access.can_approve) setChat({ text: '' }); }, [raw, access.can_approve]);
   const more = MORE.filter((m) => !m.admin || access.is_admin);
   const sub = more.find((m) => m.id === view);
@@ -529,7 +529,7 @@ export default function Amazon({ access }) {
       )}
       {tab === 'home' && <Home access={access} go={go} listings={listings} reloadAll={reloadAll} openProduct={openProduct} />}
       {tab === 'products' && <Products access={access} listings={listings} findings={findings} go={go} reload={reloadAll} openSku={openSku} setOpenSku={setOpenSku} />}
-      {tab === 'decisions' && <Decisions access={access} onChange={reloadAll} openProduct={openProduct} askClaude={access.can_approve ? askClaude : null} />}
+      {tab === 'decisions' && <Decisions access={access} onChange={reloadAll} openProduct={openProduct} />}
       {tab === 'sales' && <Sales listings={listings} />}
       {view === 'keywords' && <Keywords />}
       {view === 'competitors' && <Competitors myAsins={myAsins} />}

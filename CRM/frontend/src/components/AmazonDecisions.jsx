@@ -170,19 +170,151 @@ function DecisionCard({ c, access, busy, onApprove, onChanged, openProduct }) {
   );
 }
 
-export function Decisions({ access, onChange, openProduct, askClaude }) {
+// ---------------------------------------------------------------- pop-ups
+function Modal({ title, onClose, children, wide, z = 50 }) {
+  useEffect(() => {
+    const k = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 flex items-end sm:items-center justify-center p-0 sm:p-6" style={{ zIndex: z }} role="dialog" aria-modal="true" aria-label={title}>
+      <button type="button" className="absolute inset-0 bg-black/30" aria-label="Close" onClick={onClose} />
+      <div className={`relative w-full ${wide ? 'sm:max-w-4xl' : 'sm:max-w-lg'} max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl p-5`}
+        style={{ background: 'var(--surface-elevated, #fff)', boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}>
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <h3 className="text-lg font-bold text-glass-primary">{title}</h3>
+          <button type="button" className="glass-btn-ghost p-2 shrink-0" aria-label="Close pop-up" onClick={onClose}><Icon name="close" size={16} /></button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+const RANK = ['', 'Best choice', '2nd choice', '3rd choice'];
+function WhyModal({ c, onClose }) {
+  const g = c.guard_result || {};
+  return (
+    <Modal title={`Why ${RANK[c.alt_rank] ? `"${RANK[c.alt_rank]}"` : 'this choice'}?`} onClose={onClose} z={60}>
+      <div className="space-y-3 text-sm">
+        {c.rank_reason && <div className="rounded-2xl p-3" style={{ background: 'rgba(175,82,222,0.08)' }}><div className="text-xs font-semibold mb-1">How Claude ranked it</div>{c.rank_reason}</div>}
+        {c.reason && <div><div className="text-xs font-semibold text-glass-muted">What it fixes</div>{c.reason}</div>}
+        <div>
+          <div className="text-xs font-semibold text-glass-muted mb-1">Amazon rule checks</div>
+          {(g.blockers || []).length + (g.warnings || []).length + (g.confirms || []).length === 0
+            ? <div style={{ color: '#1E7B34' }}>All rules pass: price floor, name length, repeated words, sales words, required details.</div>
+            : <ul className="space-y-1">{[...(g.blockers || []).map((x) => ['Must fix', RED, x]), ...(g.confirms || []).map((x) => ['Double-check', AMBER, x]), ...(g.warnings || []).map((x) => ['Heads up', AMBER, x])]
+                .map(([w, st, x], i) => <li key={i} className="flex gap-2"><Chip style={st}>{w}</Chip><span>{x.message}</span></li>)}</ul>}
+        </div>
+        <div className="text-xs text-glass-muted">{WHO[c.created_by_type] || ''} · {ageText(c.created_at)}. Ranking weighs: Amazon rules, search visibility, buyer clarity, risk to sales and your margin.</div>
+      </div>
+    </Modal>
+  );
+}
+
+function currentFor(p, f) {
+  const code = f.rule_code;
+  if (['title_max_chars', 'title_word_repeat', 'title_promo_words', 'title_special_chars', 'stale_year', 'title_drift'].includes(code))
+    return [['Product name now', `${p?.title || '—'}${p?.title ? `  (${[...p.title].length} letters)` : ''}`]];
+  if (['buybox_lost', 'buybox_none'].includes(code))
+    return [['Your price', inr(p?.price)], ['Add to Cart winner asks', p?.buybox_price ? inr(p.buybox_price) : 'Nobody has it'], ['Stock', p?.stock ?? '—']];
+  if (code === 'amazon_issue') return [['Amazon says', f.message]];
+  return [['Details', f.message]];
+}
+
+export function ProblemModal({ findingId, access, onClose, onChanged, openProduct }) {
+  const [d, setD] = useState(null);
+  const [why, setWhy] = useState(null);
+  const [busy, setBusy] = useState('');
+  const load = useCallback(() => rpc('api_amz_problem', { p_id: findingId }).then(setD).catch((e) => setD({ error: e.message })), [findingId]);
+  useEffect(() => { load(); }, [load]);
+  if (!d) return <Modal title="Loading…" onClose={onClose}><Empty>Loading…</Empty></Modal>;
+  if (d.error) return <Modal title="Problem" onClose={onClose}><div style={{ color: '#C4261D' }}>{d.error}</div></Modal>;
+  const f = d.problem; const p = d.product;
+  const [what, how] = plain(f.rule_code, f.message);
+  const approve = async (c) => {
+    let second = false;
+    if (c.needs_second_confirm) {
+      if (!(await confirmDialog((c.guard_result.confirms || []).map((x) => x.message).join('\n'), { title: 'Please check', confirmText: 'Yes, approve', danger: true }))) return;
+      second = true;
+    }
+    setBusy(c.id);
+    try {
+      const a = await rpc('api_amz_approve', { p_id: c.id, p_second_confirm: second });
+      if (a?.status === 'stale') showToast('This product changed on Amazon meanwhile. Nothing sent.', 'error');
+      else { const s = await send(c.id); showToast(s.m, s.t); }
+    } catch (e) { showToast(e.message, 'error'); }
+    setBusy(''); onChanged(); onClose();
+  };
+  const askFix = async () => {
+    try { const r = await rpc('api_amz_fix', { p_sku: f.sku }); showToast(r.queued ? 'Claude is working on it. Solutions appear here and in Decisions.' : 'Claude is already working on this product.', 'success'); load(); }
+    catch (e) { showToast(e.message, 'error'); }
+  };
+  return (
+    <Modal title={what} onClose={onClose} wide>
+      <div className="grid md:grid-cols-2 gap-4">
+        <div className="rounded-2xl p-4 space-y-3" style={{ background: 'rgba(255,59,48,0.06)', boxShadow: 'inset 0 0 0 0.5px rgba(255,59,48,0.3)' }}>
+          <div className="text-xs font-bold uppercase tracking-wide" style={{ color: '#C4261D' }}>What's wrong now</div>
+          {p && (
+            <div className="flex gap-3 items-center">
+              <div className="w-14 h-14 rounded-xl bg-white grid place-items-center overflow-hidden shrink-0">{p.photo ? <img src={p.photo} alt="" className="w-full h-full object-contain" /> : <Icon name="image" size={18} />}</div>
+              <div className="text-sm min-w-0"><div className="font-semibold line-clamp-2">{p.title}</div><div className="text-[11px] text-glass-muted">{p.asin} · {p.sku}</div></div>
+            </div>
+          )}
+          {currentFor(p, f).map(([k, v]) => <div key={k} className="text-sm"><div className="text-xs text-glass-muted">{k}</div><div className="whitespace-pre-wrap">{v}</div></div>)}
+          {how && <div className="text-sm"><b>What Amazon wants: </b>{how}</div>}
+        </div>
+        <div className="rounded-2xl p-4 space-y-3" style={{ background: 'rgba(52,199,89,0.06)', boxShadow: 'inset 0 0 0 0.5px rgba(52,199,89,0.35)' }}>
+          <div className="text-xs font-bold uppercase tracking-wide" style={{ color: '#1E7B34' }}>Solutions {d.solutions.length > 1 ? '(ranked)' : ''}</div>
+          {d.solutions.length === 0 && (
+            <div className="text-sm space-y-3">
+              <div className="text-glass-secondary">{d.fix_waiting ? 'Claude is preparing solutions for this product…' : 'No solution yet.'}</div>
+              <div className="flex flex-wrap gap-2">
+                {!d.fix_waiting && access.can_approve && <button type="button" className="glass-btn px-4 py-2 text-sm inline-flex items-center gap-1.5" onClick={askFix}><Icon name="sparkles" size={14} />Ask Claude to fix this</button>}
+                {f.sku && <button type="button" className="glass-btn-ghost px-4 py-2 text-sm" onClick={() => { onClose(); openProduct(f.sku); }}>Fix myself</button>}
+              </div>
+            </div>
+          )}
+          {d.solutions.map((c, i) => (
+            <div key={c.id} className="rounded-2xl p-3 bg-white/70 space-y-2" style={{ boxShadow: i === 0 ? '0 0 0 2px #34C759' : 'inset 0 0 0 0.5px rgba(0,0,0,0.12)' }}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-7 h-7 rounded-full grid place-items-center text-xs font-bold text-white shrink-0" style={{ background: i === 0 ? '#34C759' : '#8E8E93' }}>#{c.alt_rank || i + 1}</span>
+                  <span className="font-semibold text-sm truncate">{c.summary}</span>
+                </div>
+                <button type="button" className="text-xs font-semibold shrink-0" style={{ color: 'var(--accent)' }} onClick={() => setWhy(c)}>Why this rank?</button>
+              </div>
+              {diffRows(c.before, c.after).map((r) => <div key={r.key} className="text-xs"><span className="text-glass-muted">{r.label}: </span><span className="font-medium whitespace-pre-wrap">{r.after}</span></div>)}
+              {access.can_approve && (
+                <button type="button" disabled={!!busy || !c.guard_result?.ok} onClick={() => approve(c)} className="px-4 py-1.5 rounded-xl text-sm font-semibold text-white" style={{ background: c.guard_result?.ok ? '#34C759' : '#A1A1A6' }}>
+                  {busy === c.id ? 'Sending…' : 'Use this'}</button>)}
+            </div>
+          ))}
+          {d.solutions.length > 1 && <div className="text-[11px] text-glass-muted">Using one choice closes the others.</div>}
+        </div>
+      </div>
+      {why && <WhyModal c={why} onClose={() => setWhy(null)} />}
+    </Modal>
+  );
+}
+
+export function Decisions({ access, onChange, openProduct }) {
   const [status, setStatus] = useState('open');
   const [rows, setRows] = useState(null);
   const [findings, setFindings] = useState([]);
+  const [fix, setFix] = useState(null);
   const [busy, setBusy] = useState('');
-  const [showFix, setShowFix] = useState(false);
+  const [problem, setProblem] = useState(null);
   const load = useCallback(async () => {
     try {
-      const [d, f] = await Promise.all([rpc('api_amz_decisions', { p_status: status }), rpc('api_amz_findings', { p_status: 'open' })]);
-      setRows(d); setFindings(f || []);
+      const [d, f, s] = await Promise.all([rpc('api_amz_decisions', { p_status: status }), rpc('api_amz_findings', { p_status: 'open' }), rpc('api_amz_fix_status')]);
+      setRows(d); setFindings(f || []); setFix(s);
     } catch (e) { showToast(e.message, 'error'); }
   }, [status]);
   useEffect(() => { load(); }, [load]);
+  const running = (fix?.waiting || 0) + (fix?.working || 0);
+  useEffect(() => { if (!running) return undefined; const t = setInterval(load, 10000); return () => clearInterval(t); }, [running, load]);
   const refresh = () => { load(); onChange?.(); };
   const approve = async (c) => {
     let second = false;
@@ -199,11 +331,16 @@ export function Decisions({ access, onChange, openProduct, askClaude }) {
     } catch (e) { showToast(e.message, 'error'); }
     setBusy(''); refresh();
   };
-  const pend = (rows || []).filter((c) => c.status === 'pending');
-  const safe = pend.filter((c) => c.guard_result?.ok && !c.needs_second_confirm);
+  const all = rows || [];
+  // Show only the best choice of each problem; the others open in the pop-up.
+  const bestOnly = all.filter((c) => !(c.status === 'pending' && c.alt_group && (c.alt_rank || 1) > 1
+    && all.some((x) => x.alt_group === c.alt_group && x.status === 'pending' && (x.alt_rank || 1) < (c.alt_rank || 1))));
+  const others = (c) => all.filter((x) => x.alt_group && x.alt_group === c.alt_group && x.id !== c.id && x.status === 'pending').length;
+  const pend = all.filter((c) => c.status === 'pending');
+  const safe = bestOnly.filter((c) => c.status === 'pending' && c.guard_result?.ok && !c.needs_second_confirm);
   const warned = safe.filter((c) => (c.guard_result?.warnings || []).length).length;
   const approveAll = async () => {
-    if (!(await confirmDialog(`Approve ${safe.length} safe changes?`, { message: `Only changes that pass every check. Each one goes live on Amazon.${warned ? ` ${warned} of them have a heads-up (shown on the card) — please read before approving.` : ''}`, confirmText: 'Approve all' }))) return;
+    if (!(await confirmDialog(`Approve ${safe.length} safe changes?`, { message: `Only the best choice of each problem, and only changes that pass every check.${warned ? ` ${warned} have a heads-up shown on the card.` : ''} Each one goes live on Amazon.`, confirmText: 'Approve all' }))) return;
     setBusy('all');
     let ok = 0, bad = 0;
     for (let i = 0; i < safe.length; i++) {
@@ -216,40 +353,59 @@ export function Decisions({ access, onChange, openProduct, askClaude }) {
     }
     setBusy(''); showToast(`${ok} sent${bad ? `, ${bad} need a look` : ''}.`, bad ? 'error' : 'success'); refresh();
   };
-  const withDraft = new Set(pend.map((c) => c.sku));
-  const fixes = findings.filter((f) => !f.sku || !withDraft.has(f.sku));
+  const fixAll = async () => {
+    if (!(await confirmDialog('Let Claude fix every problem?', { message: `Claude prepares 1-3 ranked choices for each of the ${findings.length} problems. Nothing goes live until you approve.${fix?.mac_online ? '' : ' Your Mac is offline, so the hourly backup will do it (slower).'}`, confirmText: 'Fix all with Claude' }))) return;
+    try { const r = await rpc('api_amz_fix', { p_sku: null }); showToast(r.queued ? `Claude is fixing ${r.queued} product${r.queued > 1 ? 's' : ''}. Solutions appear here as they are ready.` : 'Claude is already working on these.', 'success'); load(); }
+    catch (e) { showToast(e.message, 'error'); }
+  };
+  const solved = new Set(pend.map((c) => c.finding_id).filter(Boolean));
+  const open = findings.filter((f) => !solved.has(f.id));
   return (
     <div className="space-y-3">
       <div className="glass-card p-3 text-xs text-glass-secondary">Nothing changes on Amazon until you approve it. Every live change can be undone.</div>
+      {access.can_approve && findings.length > 0 && (
+        <div className="glass-card p-4 flex flex-wrap items-center gap-3" style={{ background: 'linear-gradient(135deg, rgba(217,119,87,0.12), rgba(175,82,222,0.10))' }}>
+          <span className="w-10 h-10 rounded-full grid place-items-center text-white shrink-0" style={{ background: 'linear-gradient(160deg,#D97757,#C15F3C)' }}><Icon name="sparkles" size={18} /></span>
+          <div className="flex-1 min-w-[200px]">
+            <div className="font-bold">{running ? `Claude is fixing ${running} product${running > 1 ? 's' : ''}…` : `${findings.length} problem${findings.length > 1 ? 's' : ''} found`}</div>
+            <div className="text-xs text-glass-secondary">{running ? (fix?.mac_online ? 'About a minute per product on your Mac. You can leave this page.' : 'Your Mac is offline: the hourly backup will finish it.') : 'Claude prepares ranked choices for each one. You decide.'}</div>
+          </div>
+          {!running && <button type="button" className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white" style={{ background: 'linear-gradient(160deg,#D97757,#C15F3C)' }} onClick={fixAll}>Fix All with Claude</button>}
+        </div>
+      )}
       <div className="flex flex-wrap justify-between gap-2 items-center">
         <div className="flex gap-1 p-1 rounded-xl" role="group" aria-label="Show" style={{ background: 'rgba(118,118,128,0.12)' }}>
-          {[['open', `Waiting${pend.length ? ` (${pend.length})` : ''}`], ['done', 'Done'], ['rejected', 'Rejected']].map(([v, l]) => (
+          {[['open', `Waiting${bestOnly.filter((c) => c.status === 'pending').length ? ` (${bestOnly.filter((c) => c.status === 'pending').length})` : ''}`], ['done', 'Done'], ['rejected', 'Rejected']].map(([v, l]) => (
             <button key={v} type="button" aria-pressed={status === v} onClick={() => setStatus(v)} className={`px-3 py-1.5 rounded-lg text-sm ${status === v ? 'bg-white font-semibold shadow-sm' : ''}`}>{l}</button>))}
         </div>
         {access.can_approve && status === 'open' && safe.length > 1 && (
           <button type="button" className="px-4 py-2 rounded-xl text-sm font-semibold text-white" style={{ background: '#34C759' }} disabled={!!busy} onClick={approveAll}>{busy === 'all' ? 'Sending…' : `Approve all safe (${safe.length})`}</button>)}
       </div>
-      {!rows ? <Empty>Loading…</Empty> : rows.length === 0 ? <Empty>{status === 'open' ? 'No decisions waiting. All done.' : 'Nothing here yet.'}</Empty>
-        : rows.map((c) => <DecisionCard key={c.id} c={c} access={access} busy={busy} onApprove={approve} onChanged={refresh} openProduct={openProduct} />)}
-      {status === 'open' && fixes.length > 0 && (
-        <div className="glass-card p-4 space-y-3">
-          <div className="flex justify-between items-center">
-            <h3 className="font-bold">Problems with no suggestion yet ({fixes.length})</h3>
-            {fixes.length > 5 && <button type="button" className="text-sm font-semibold" style={{ color: 'var(--accent)' }} onClick={() => setShowFix((s) => !s)}>{showFix ? 'Show less' : 'Show all'}</button>}
+      {!rows ? <Empty>Loading…</Empty> : bestOnly.length === 0 ? <Empty>{status === 'open' ? 'No decisions waiting.' : 'Nothing here yet.'}</Empty>
+        : bestOnly.map((c) => (
+          <div key={c.id}>
+            <DecisionCard c={c} access={access} busy={busy} onApprove={approve} onChanged={refresh} openProduct={openProduct} />
+            {others(c) > 0 && c.finding_id && <button type="button" className="ml-4 mt-1 text-xs font-semibold" style={{ color: 'var(--accent)' }} onClick={() => setProblem(c.finding_id)}>See {others(c)} other choice{others(c) > 1 ? 's' : ''} ranked →</button>}
+          </div>))}
+      {status === 'open' && open.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="font-bold px-1 pt-2">Problems ({open.length}) · tap one to see the fix</h3>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {open.map((f) => {
+              const [what, how] = plain(f.rule_code, f.message);
+              return (
+                <button key={f.id} type="button" data-problem={f.id} onClick={() => setProblem(f.id)} className="glass-card p-4 text-left hover:shadow-lg transition-shadow space-y-1.5">
+                  <div className="flex items-center gap-2"><Chip style={f.severity === 'blocker' ? RED : AMBER}>{f.severity === 'blocker' ? 'Fix first' : 'Should fix'}</Chip><span className="text-[11px] text-glass-muted">{f.asin || 'Whole account'}</span></div>
+                  <div className="font-semibold text-sm text-glass-primary">{what}</div>
+                  {how && <div className="text-xs text-glass-secondary line-clamp-2">{how}</div>}
+                  <div className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>See the fix →</div>
+                </button>
+              );
+            })}
           </div>
-          {(showFix ? fixes : fixes.slice(0, 5)).map((f) => {
-            const [what, how] = plain(f.rule_code, f.message);
-            return (
-              <div key={f.id} className="flex flex-wrap items-center gap-2 text-sm">
-                <div className="flex-1 min-w-[200px]"><div className="font-semibold text-glass-primary">{what}</div>
-                  <div className="text-xs text-glass-secondary">{f.asin || 'Whole account'}{how ? ` · ${how}` : ''}</div></div>
-                {f.sku && askClaude && <button type="button" className="glass-btn-ghost px-3 py-1.5 text-xs" onClick={() => askClaude(`Please suggest a fix for product ${f.sku} (${f.asin}): ${what}. ${f.message}`, f.sku)}>Ask Claude to fix</button>}
-                {f.sku && <button type="button" className="glass-btn-ghost px-3 py-1.5 text-xs" onClick={() => openProduct(f.sku)}>Fix myself</button>}
-              </div>
-            );
-          })}
         </div>
       )}
+      {problem && <ProblemModal findingId={problem} access={access} onClose={() => setProblem(null)} onChanged={refresh} openProduct={openProduct} />}
     </div>
   );
 }
@@ -362,7 +518,9 @@ export function ClaudeChat({ open, onClose, preset, goDecisions }) {
 export function MorningSummary({ go, openProduct }) {
   const [h, setH] = useState(null);
   const [showReport, setShowReport] = useState(false);
-  useEffect(() => { rpc('api_amz_home').then(setH).catch(() => setH({ error: true })); }, []);
+  const [alerts, setAlerts] = useState([]);
+  useEffect(() => { rpc('api_amz_home').then(setH).catch(() => setH({ error: true })); rpc('api_amz_alerts', { p_mark_seen: false }).then(setAlerts).catch(() => {}); }, []);
+  const ALERT_ICON = { new_order: 'cart', pickup: 'clock', feedback: 'heart', out_of_stock: 'alert', suppressed: 'alert' };
   if (!h || h.error) return null;
   const hr = istHour();
   const hello = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
@@ -379,6 +537,18 @@ export function MorningSummary({ go, openProduct }) {
           <button type="button" onClick={() => go('decisions')} className="text-left"><div className="text-xs text-glass-muted">Decisions waiting</div><div className="text-xl font-bold" style={h.decisions ? { color: '#007AFF' } : undefined}>{h.decisions}</div><div className="text-[11px] text-glass-muted">tap to review</div></button>
         </div>
       </div>
+      {alerts.filter((a) => !a.seen_at).length > 0 && (
+        <div className="glass-card p-4 space-y-2">
+          <div className="flex justify-between items-center"><h3 className="font-bold">Alerts</h3>
+            <button type="button" className="text-xs font-semibold" style={{ color: 'var(--accent)' }} onClick={() => rpc('api_amz_alerts', { p_mark_seen: true }).then(() => setAlerts((x) => x.map((a) => ({ ...a, seen_at: new Date().toISOString() })))).catch(() => {})}>Mark all as read</button></div>
+          {alerts.filter((a) => !a.seen_at).slice(0, 6).map((a) => (
+            <a key={a.id} href={a.link || undefined} target="_blank" rel="noreferrer" className="flex items-start gap-3 rounded-xl p-2 hover:bg-black/5">
+              <span className="w-8 h-8 rounded-full grid place-items-center text-white shrink-0" style={{ background: a.kind === 'new_order' ? '#34C759' : a.kind === 'pickup' ? '#FF9500' : '#FF3B30' }}><Icon name={ALERT_ICON[a.kind] || 'alert'} size={14} /></span>
+              <span className="text-sm min-w-0"><span className="block font-semibold">{a.title}</span>{a.body && <span className="block text-xs text-glass-secondary">{a.body}</span>}<span className="block text-[11px] text-glass-muted">{ageText(a.created_at)}</span></span>
+            </a>
+          ))}
+        </div>
+      )}
       {due.length > 0 && (
         <div className="glass-card p-4 space-y-2">
           <div className="flex flex-wrap justify-between items-center gap-2">
@@ -466,3 +636,35 @@ export function MacConnect() {
   );
 }
 
+
+// ---------------------------------------------------------------- Settings: who gets alert emails
+export function AlertEmails() {
+  const [list, setList] = useState(null);
+  const [add, setAdd] = useState('');
+  useEffect(() => { rpc('api_amz_alert_emails', { p_emails: null }).then(setList).catch(() => setList([])); }, []);
+  const save = async (next) => {
+    try { setList(await rpc('api_amz_alert_emails', { p_emails: next })); showToast('Saved', 'success'); return true; }
+    catch (e) { showToast(e.message, 'error'); return false; }
+  };
+  const valid = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(add.trim());
+  return (
+    <div className="glass-card p-4 space-y-3">
+      <h3 className="font-bold">Alert emails</h3>
+      <div className="text-xs text-glass-secondary">New orders, the 11 AM pickup reminder, 1–2 star feedback and out-of-stock alerts are emailed every hour from 9 AM to 8 PM (only when something happened), sent from your connected Gmail.</div>
+      {!list ? <Empty>Loading…</Empty> : (
+        <div className="flex flex-wrap gap-2">
+          {list.length === 0 && <span className="text-sm text-glass-muted">No emails yet. Alerts still show on Home.</span>}
+          {list.map((e) => (
+            <span key={e} className="inline-flex items-center gap-1.5 pl-3 pr-1 py-1 rounded-full text-sm" style={{ background: 'rgba(0,122,255,0.10)' }}>
+              {e}<button type="button" aria-label={`Remove ${e}`} className="w-6 h-6 rounded-full grid place-items-center hover:bg-black/10" onClick={() => save(list.filter((x) => x !== e))}><Icon name="close" size={12} /></button>
+            </span>))}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <input aria-label="Add alert email" type="email" className="glass-input flex-1 px-3 py-2 text-sm" placeholder="name@example.com" value={add}
+          onChange={(e) => setAdd(e.target.value)} onKeyDown={async (e) => { if (e.key === 'Enter' && valid && await save([...(list || []), add.trim()])) setAdd(''); }} />
+        <button type="button" className="glass-btn px-4 text-sm" disabled={!valid || (list || []).length >= 10} onClick={async () => { if (await save([...(list || []), add.trim()])) setAdd(''); }}>Add</button>
+      </div>
+    </div>
+  );
+}

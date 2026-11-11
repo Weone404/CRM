@@ -12,7 +12,7 @@ export const FIELD_LABELS = {
   title: 'Product name', item_highlights: 'Short highlight', bullets: 'Key points', description: 'Description',
   backend_terms: 'Hidden search words', price: 'Price', mrp: 'MRP', country_of_origin: 'Made in (country)',
   manufacturer: 'Maker name & address', net_quantity: 'Quantity in the box', main_image: 'Main photo', claims: 'Claims',
-  daily_budget_total: 'Daily ad budget (all ads)', handling_days: 'Dispatch time',
+  daily_budget_total: 'Daily ad budget (all ads)', handling_days: 'Dispatch time', remove_swatch: 'Colour swatch photo',
 };
 
 // Dispatch (handling) time in plain words. 0 = same day, 1 = next day.
@@ -34,14 +34,20 @@ export const PLAIN = {
   backend_terms_bytes: ['Hidden search words are too long', 'Remove some words.'],
   backend_no_emoji: ['Hidden search words have emoji', 'Remove the emoji.'],
   main_image: ['Main photo breaks Amazon rules', 'White background, no text, at least 1000 px.'],
+  amazon_issue: ['Amazon reported a problem', 'See the details and the suggested fix.'],
   suppressed_after_change: ['Product is hidden on Amazon after a change', 'Approve the undo in Approve Changes.'],
   price_floor: ['Price is below ₹299', 'Raise the price.'],
   mrp_gte_price: ['MRP is lower than the price', 'MRP must be equal or higher.'],
 };
-export const plain = (code, fallback) => PLAIN[code] || [fallback || 'Needs a look', ''];
+export const plain = (code, fallback) => {
+  if (code === 'amazon_issue' && /SWCH|swatch/i.test(fallback || '')) return ['Colour swatch photo has text or a logo', 'Amazon hides it. Remove it or upload a clean photo.'];
+  if (code === 'amazon_issue' && /MAIN/i.test(fallback || '')) return ['Main photo breaks an Amazon rule', 'Upload a cover with a pure white background and no text.'];
+  return PLAIN[code] || [fallback || 'Needs a look', ''];
+};
 
 const show = (k, v) => {
   if (k === 'handling_days') return dispatchText(v);
+  if (k === 'remove_swatch') return v === true ? 'Removed (Amazon uses your cover photo)' : 'Flagged photo with text/logo';
   if (v == null || v === '') return '—';
   if (k === 'price' || k === 'mrp' || k === 'daily_budget_total') return inr(v);
   if (Array.isArray(v)) return v.join('\n');

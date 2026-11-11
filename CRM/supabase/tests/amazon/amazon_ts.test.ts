@@ -2,7 +2,7 @@
 // Amazon is replaced by a scripted fake; nothing here calls the real API.
 import { describe, expect, test } from "bun:test";
 import { SpApi, LwaError, testConnection, buildPatches, parseListing, parseCompetitiveSummary, parseSalesTraffic,
-  parseOrdersReport, parseOrder, parseOrderItems, parsePerformance, istDayRange, istDay } from "../../functions/_shared/amazon.ts";
+  parseOrdersReport, parseOrder, parseOrderItems, parseFeedbackReport, parsePerformance, istDayRange, istDay } from "../../functions/_shared/amazon.ts";
 import { execute, reconcile, staleFields } from "../../functions/_shared/amazon_exec.ts";
 
 type Step = { status: number; body?: unknown; headers?: Record<string, string> } | Error;
@@ -329,5 +329,19 @@ describe("orders", () => {
     expect(JSON.stringify(o)).not.toMatch(/Delhi|x@y/);
     expect(parseOrderItems({ payload: { OrderItems: [{ SellerSKU: "S", ASIN: "B", Title: "Diary", QuantityOrdered: 2 }] } }))
       .toEqual([{ sku: "S", asin: "B", title: "Diary", qty: 2 }]);
+  });
+});
+
+describe("fixes and feedback", () => {
+  test("remove_swatch deletes only the flagged swatch photo", () => {
+    expect(buildPatches({ remove_swatch: true }, "M", "en_IN").patches)
+      .toEqual([{ op: "delete", path: "/attributes/swatch_product_image_locator", value: [{ marketplace_id: "M" }] }]);
+    expect(buildPatches({ remove_swatch: false }, "M", "en_IN").patches).toEqual([]);
+  });
+  test("feedback report: rating, comment, order; bad rows skipped", () => {
+    const tsv = ["Date\tRating\tComments\tYour Response\tOrder ID\tRater Email", "11/10/26\t1\tLate\t\t408-7\tno-reply@amazon.com",
+      "11/10/26\tx\tbad\t\t408-0\t", "11/09/26\t3\tOk\tThanks\t408-8\tno-reply@amazon.com"].join("\n");
+    expect(parseFeedbackReport(tsv)).toEqual([{ order_id: "408-7", rating: 1, comment: "Late", responded: false },
+      { order_id: "408-8", rating: 3, comment: "Ok", responded: true }]);
   });
 });

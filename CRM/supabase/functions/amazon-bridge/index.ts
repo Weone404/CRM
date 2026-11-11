@@ -8,6 +8,7 @@
 // The helper never sees Amazon keys, never approves, and can only draft listing/price/dispatch changes.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { cors, json, HttpError, rpc } from "../_shared/amazon_deno.ts";
+import { buildPrompt } from "../_shared/claude_prompt.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors(req) });
@@ -20,8 +21,11 @@ Deno.serve(async (req) => {
     switch (body.action) {
       case "ping":                                     // heartbeat while Claude is thinking
         return json(req, 200, { ok: true });
-      case "claim":
-        return json(req, 200, (await rpc("svc_amz_bridge_claim", { p_by: "mac" })) ?? { job: null });
+      case "claim": {
+        const r = await rpc("svc_amz_bridge_claim", { p_by: "mac" });
+        if (!r) return json(req, 200, { job: null });
+        return json(req, 200, { ...r, prompt: buildPrompt(r.job, r.context) });
+      }
       case "answer": {
         if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, "Missing message id");
         const drafts = Array.isArray(body.drafts) ? body.drafts.slice(0, 30) : null;

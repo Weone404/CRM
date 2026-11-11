@@ -128,6 +128,40 @@ q = (await rpcAs('api_amz_queue', { p_status: 'approved' })).filter((c) => c.kin
 ok(q.length === kids - 1 && q.filter((c) => c.after.handling_days === 1).length === 1, `UI20 "Approve all safe" sends the rest (${q.length}/${kids - 1})`);
 await page.screenshot({ path: `${SHOTS}/amz_queue.png`, fullPage: false });
 
+// Fix All + ranked choices in a pop-up
+const svc = async (fn, args) => (await fetch(`${API}/__svc/${fn}`, { method: 'POST', body: JSON.stringify(args) })).json();
+await nav('Home'); await nav('Decisions');
+await page.getByRole('button', { name: 'Fix All with Claude' }).click();
+await dlg().getByRole('button', { name: 'Fix all with Claude' }).click();
+await page.getByText(/Claude is fixing \d+ product/).first().waitFor({ timeout: 5000 }).then(() => ok(true, 'UI33 Fix All hands every problem to Claude and shows progress'))
+  .catch(() => ok(false, 'UI33 Fix All hands every problem to Claude and shows progress'));
+const job = await svc('svc_amz_bridge_claim', { p_by: 'mac' });
+const prob = job.context.problems.find((p) => p.sku === job.job.sku);
+await svc('svc_amz_bridge_answer', { p_id: job.job.id, p_answer: 'Fixed.', p_options: null, p_by: 'mac', p_drafts: [
+  { kind: 'listing', sku: job.job.sku, after: { description: 'Choice one text.' }, summary: 'Clearer description', reason: 'Fixes the problem', group: String(prob.id), rank: 1, rank_reason: 'Keeps your main search words and reads naturally.', finding_id: prob.id },
+  { kind: 'listing', sku: job.job.sku, after: { description: 'Choice two text.' }, summary: 'Shorter description', reason: 'Fixes the problem', group: String(prob.id), rank: 2, rank_reason: 'Shorter, but drops one search word.', finding_id: prob.id }] });
+await nav('Home'); await nav('Decisions');
+await page.getByRole('button', { name: /See 1 other choice ranked/ }).waitFor({ timeout: 5000 });
+ok((await page.getByText('Shorter description').count()) === 0, 'UI34 only the best choice shows as a card; others are one tap away');
+await page.getByRole('button', { name: /See 1 other choice ranked/ }).click();
+const pop = page.getByRole('dialog').last();
+await pop.getByText("What's wrong now").waitFor();
+ok((await pop.getByText('#1').count()) === 1 && (await pop.getByText('#2').count()) === 1, 'UI35 pop-up shows what is wrong next to ranked solutions');
+await page.screenshot({ path: `${SHOTS}/amz_problem.png`, fullPage: false });
+await pop.getByRole('button', { name: 'Why this rank?' }).first().click();
+await page.getByText('Keeps your main search words and reads naturally.').waitFor({ timeout: 3000 }).then(() => ok(true, 'UI36 Why this rank? explains the ranking'))
+  .catch(() => ok(false, 'UI36 Why this rank? explains the ranking'));
+await page.screenshot({ path: `${SHOTS}/amz_why.png`, fullPage: false });
+await page.getByRole('button', { name: 'Close pop-up' }).last().click();
+await pop.getByRole('button', { name: 'Use this' }).first().click();
+await page.waitForTimeout(1500);
+const alts = (await rpcAs('api_amz_decisions', { p_status: 'all' })).filter((c) => c.finding_id === prob.id);
+ok(alts.find((c) => c.alt_rank === 1)?.status === 'approved' && alts.find((c) => c.alt_rank === 2)?.status === 'cancelled', 'UI37 using one choice approves it and closes the other');
+await page.locator('[data-problem]').first().click();
+await page.getByRole('dialog').last().getByText("What's wrong now").waitFor({ timeout: 4000 }).then(() => ok(true, 'UI38 each problem card opens its own pop-up'))
+  .catch(() => ok(false, 'UI38 each problem card opens its own pop-up'));
+await page.keyboard.press('Escape');
+
 await nav('Home');
 await page.waitForTimeout(800);
 await page.getByRole('button', { name: 'Review', exact: true }).count().then((n) => ok(n === 0, 'UI21 Home no longer asks to review once all are decided'));
@@ -158,6 +192,10 @@ ok(!(await page.content()).includes('UITESTVALUE'), 'UI12 full key never appears
 await page.getByRole('button', { name: 'Connect my Mac' }).click();
 await page.getByText(/^nitb_[0-9a-f]{60,}$/).waitFor({ timeout: 5000 }).then(() => ok(true, 'UI32 Settings makes a one-time Mac connection code'))
   .catch(() => ok(false, 'UI32 Settings makes a one-time Mac connection code'));
+await page.getByLabel('Add alert email').fill('owner@example.com');
+await page.getByRole('button', { name: 'Add', exact: true }).click();
+await page.getByRole('button', { name: 'Remove owner@example.com' }).waitFor({ timeout: 4000 }).then(() => ok(true, 'UI39 alert emails can be added (and removed) in Settings'))
+  .catch(async () => ok(false, 'UI39 alert emails can be added (and removed) in Settings ' + await toast()));
 await page.getByRole('button', { name: 'Test Connection' }).click();
 await page.getByText(/Connected: All good/).first().waitFor({ timeout: 5000 }).then(() => ok(true, 'UI13 Test Connection result shown'))
   .catch(() => ok(false, 'UI13 Test Connection result shown'));

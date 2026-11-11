@@ -313,6 +313,10 @@ export function buildPatches(after: Record<string, any>, mk: string, lang: strin
       case "country_of_origin":
         patches.push({ op: "replace", path: "/attributes/country_of_origin", value: [{ value: String(v), marketplace_id: mk }] });
         break;
+      case "remove_swatch":
+        // Flagged colour-swatch photo: remove it; Amazon then uses the cover photo for the colour swatch.
+        if (v === true) patches.push({ op: "delete", path: "/attributes/swatch_product_image_locator", value: [{ marketplace_id: mk }] });
+        break;
       case "handling_days": case "quantity": break;   // sent above as one fulfillment_availability merge
       case "images": {
         // Ordered photos; the first is the cover. Slots that had a photo before and are now empty are deleted.
@@ -441,6 +445,17 @@ export function parseOrder(o: any) {
 export function parseOrderItems(r: any) {
   return (r?.payload?.OrderItems || []).map((i: any) => ({ sku: i.SellerSKU, asin: i.ASIN, title: String(i.Title || "").slice(0, 200),
     qty: Number(i.QuantityOrdered || 0) }));
+}
+
+// GET_SELLER_FEEDBACK_DATA (tab-separated, 1-3 star feedback only). Columns: Date, Rating, Comments, Your Response, Order ID.
+export function parseFeedbackReport(tsv: string) {
+  const lines = String(tsv || "").replace(/\r/g, "").split("\n").filter((l) => l.trim());
+  if (lines.length < 2) return [];
+  const head = lines[0].split("\t").map((h) => h.trim().toLowerCase());
+  const at = (n: string) => head.indexOf(n);
+  const [iR, iC, iY, iO] = ["rating", "comments", "your response", "order id"].map(at);
+  return lines.slice(1).map((l) => l.split("\t")).filter((c) => c[iO] && /^[1-5]$/.test(String(c[iR]).trim()))
+    .map((c) => ({ order_id: c[iO].trim(), rating: Number(c[iR]), comment: (c[iC] || "").slice(0, 1000), responded: !!(c[iY] || "").trim() }));
 }
 
 // GET_V2_SELLER_PERFORMANCE_REPORT -> percentages (seller-fulfilled figures; this account is FBM only).

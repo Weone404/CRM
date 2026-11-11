@@ -4,7 +4,7 @@
 // Every job takes its own lock (svc_amz_run_begin), so overlapping runs skip instead of doubling up,
 // and every run is recorded in amazon_sync_runs (the CRM shows data age from it).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { SpApi, SpApiError, LwaError, parseListing, parseCompetitiveSummary, parseCatalog, parseOrdersReport, parseOrder, parseOrderItems,
+import { SpApi, SpApiError, LwaError, parseListing, parseCompetitiveSummary, parseCatalog, parseOrdersReport, parseOrder, parseOrderItems, parseFeedbackReport,
   parsePerformance, istDay, istDayRange } from "../_shared/amazon.ts";
 import { execute, reconcile } from "../_shared/amazon_exec.ts";
 import { asUser, cors, cronOk, json, HttpError, loadApi, rpc, scrub } from "../_shared/amazon_deno.ts";
@@ -129,6 +129,29 @@ async function reports(api: SpApi, _s: Record<string, string>, t0: number) {
       p_vtr: h.valid_tracking_rate, p_policy: h.policy_issues, p_raw: doc?.performanceMetrics?.[0] ?? null });
     await rpc("svc_amz_config_set", { p_key: key, p_value: "done" });
     n++;
+  });
+  // 3. Seller feedback (1-3 stars, last 30 days), once per IST day; 1-2 stars raise an alert.
+  await step("feedback", async () => {
+    const key = `report_feedback_${today}`;
+    const state = await rpc("svc_amz_config_get", { p_key: key });
+    if (state === "done" || state === "fatal") return;
+    if (!state) {
+      const r = await api.createReport("GET_SELLER_FEEDBACK_DATA", new Date(Date.now() - 30 * 86400000).toISOString(), new Date(Date.now() - 120000).toISOString());
+      await rpc("svc_amz_config_set", { p_key: key, p_value: r.reportId });
+      notes.push("feedback requested");
+      return;
+    }
+    const rep = await api.getReport(state);
+    if (rep.processingStatus === "CANCELLED" || rep.processingStatus === "FATAL") {
+      await rpc("svc_amz_config_set", { p_key: key, p_value: rep.processingStatus === "FATAL" ? "fatal" : "done" });
+      notes.push(`feedback ${rep.processingStatus}`);
+      return;
+    }
+    if (rep.processingStatus !== "DONE") { notes.push(`feedback ${rep.processingStatus}`); return; }
+    const rows = parseFeedbackReport(await download(await api.getReportDocument(rep.reportDocumentId), true));
+    if (rows.length) await rpc("svc_amz_upsert_feedback", { p_items: rows });
+    await rpc("svc_amz_config_set", { p_key: key, p_value: "done" });
+    notes.push(`feedback ${rows.length}`);
   });
   if (errors.length) throw new Error([...errors, ...notes].join("; "));   // work already saved stays saved
   return { items: n, detail: [...notes, ...errors].join("; ") };
