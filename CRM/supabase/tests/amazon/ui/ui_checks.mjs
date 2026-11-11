@@ -29,10 +29,10 @@ await page.goto(APP);
 await page.getByText('What to do today').waitFor({ timeout: 15000 });
 await page.getByText(/Fast delivery is not on/).waitFor({ timeout: 5000 }).catch(() => {});
 const overview = await page.locator('body').innerText();
-ok(/Another seller is winning the "Add to Cart" button/.test(overview), 'UI01 Home explains Buy Box losses in plain words under Fix these first');
+ok(/Good (morning|afternoon|evening)/.test(overview) && /Decisions waiting/.test(overview) && /Orders to ship/.test(overview), 'UI01 Home opens with a short morning summary');
 ok(/Amazon is not connected yet/.test(overview), 'UI02 Home says Amazon is not connected yet');
 ok(/Fast delivery is not on for \d+ product/.test(overview), 'UI02b Home suggests turning on fast delivery');
-ok((await page.getByRole('tab').count()) === 5, 'UI02c only 5 tabs: Home, My Products, Approve Changes, Sales, More');
+ok((await page.getByRole('tab').count()) === 5, 'UI02c only 5 tabs: Home, My Products, Decisions, Sales, More');
 await page.screenshot({ path: `${SHOTS}/amz_overview.png`, fullPage: true });
 
 await nav('My Products');
@@ -104,18 +104,46 @@ await page.getByText('Same-day dispatch').first().waitFor({ timeout: 5000 }).cat
 let pend = (await rpcAs('api_amz_queue', { p_status: 'pending' })).filter((c) => c.kind === 'dispatch');
 const kids = (await rpcAs('api_amz_listings')).filter((l) => !l.is_parent).length;
 ok(pend.length === kids && pend.every((c) => c.after.handling_days === 0), `UI18 "Apply to all products" drafts same-day dispatch for every product (${pend.length}/${kids})`);
-ok(/Approve Changes/.test(await page.locator('[role=tab][aria-selected=true]').innerText()), 'UI19 it opens Approve Changes');
+ok(/Decisions/.test(await page.locator('[role=tab][aria-selected=true]').innerText()), 'UI19 it opens Decisions');
+await page.locator('[data-change]').first().waitFor();
 await page.screenshot({ path: `${SHOTS}/amz_dispatch.png`, fullPage: false });
-await page.getByRole('button', { name: /^Approve all \(\d+\)$/ }).click();
+// Change one suggestion before approving
+const card1 = page.locator('[data-change]').filter({ hasText: 'Same-day dispatch' }).nth(0);
+await card1.getByRole('button', { name: 'Change', exact: true }).click();
+await card1.getByLabel('Dispatch time').selectOption('1');
+await card1.getByRole('button', { name: 'Approve my version' }).click();
+await page.waitForTimeout(1500);
+calls = await (await fetch(`${API}/__calls`)).json();
+ok(calls.some((c) => c.fn === 'api_amz_revise'), 'UI27 Change lets you edit a suggestion and approve your version');
+// Reject one with a quick reason
+const card2 = page.locator('[data-change]').filter({ hasText: 'Same-day dispatch' }).filter({ has: page.getByRole('button', { name: 'Reject' }) }).nth(0);
+await card2.getByRole('button', { name: 'Reject', exact: true }).click();
+await card2.getByRole('button', { name: 'Not now' }).click();
+await page.waitForTimeout(1000);
+ok((await rpcAs('api_amz_queue', { p_status: 'rejected' })).some((c) => c.kind === 'dispatch' && c.reject_reason === 'Not now'), 'UI28 Reject with one tap and a quick reason');
+await page.getByRole('button', { name: /^Approve all safe \(\d+\)$/ }).click();
 await dlg().getByRole('button', { name: 'Approve all' }).click();
 await page.waitForTimeout(1500 + kids * 250);
 q = (await rpcAs('api_amz_queue', { p_status: 'approved' })).filter((c) => c.kind === 'dispatch');
-calls = await (await fetch(`${API}/__calls`)).json();
-ok(q.length === kids && calls.filter((c) => c.fn === 'amazon-execute').length >= kids + 2, 'UI20 "Approve all" approves and sends every dispatch change');
+ok(q.length === kids - 1 && q.filter((c) => c.after.handling_days === 1).length === 1, `UI20 "Approve all safe" sends the rest (${q.length}/${kids - 1})`);
+await page.screenshot({ path: `${SHOTS}/amz_queue.png`, fullPage: false });
 
-await nav('Sales');
 await nav('Home');
-await page.getByRole('button', { name: 'Review' }).count().then((n) => ok(n === 0, 'UI21 Home no longer asks to review once all are approved'));
+await page.waitForTimeout(800);
+await page.getByRole('button', { name: 'Review', exact: true }).count().then((n) => ok(n === 0, 'UI21 Home no longer asks to review once all are decided'));
+
+// Live Claude chat
+await page.getByRole('button', { name: 'Ask Claude' }).click();
+const chatBox = page.getByRole('dialog', { name: 'Claude chat' });
+await chatBox.getByText(/Not connected|offline/).waitFor({ timeout: 5000 }).then(() => ok(true, 'UI29 chat shows honestly that the Mac is not connected'))
+  .catch(() => ok(false, 'UI29 chat shows honestly that the Mac is not connected'));
+await chatBox.getByLabel('Message to Claude').fill('Which diary sells most?');
+await chatBox.getByRole('button', { name: 'Send' }).click();
+await chatBox.getByText(/Waiting\. Claude answers when your Mac is online/).waitFor({ timeout: 5000 }).then(() => ok(true, 'UI30 a message waits with a clear note when the Mac is offline'))
+  .catch(() => ok(false, 'UI30 a message waits with a clear note when the Mac is offline'));
+ok((await chatBox.getByRole('button', { name: 'Speak' }).count()) === 1, 'UI31 a mic button is there for voice');
+await page.screenshot({ path: `${SHOTS}/amz_chat.png`, fullPage: false });
+await chatBox.getByRole('button', { name: 'Close', exact: true }).click();
 
 await more('Settings');
 const rt = page.locator('input[placeholder^="Atzr|"]');
@@ -127,12 +155,15 @@ await rt.locator('xpath=../button').click();
 await page.waitForTimeout(800);
 ok((await page.locator('input[placeholder*="••••9876"]').count()) === 1, 'UI11 saved key shows only the last 4 characters');
 ok(!(await page.content()).includes('UITESTVALUE'), 'UI12 full key never appears in the page');
+await page.getByRole('button', { name: 'Connect my Mac' }).click();
+await page.getByText(/^nitb_[0-9a-f]{60,}$/).waitFor({ timeout: 5000 }).then(() => ok(true, 'UI32 Settings makes a one-time Mac connection code'))
+  .catch(() => ok(false, 'UI32 Settings makes a one-time Mac connection code'));
 await page.getByRole('button', { name: 'Test Connection' }).click();
 await page.getByText(/Connected: All good/).first().waitFor({ timeout: 5000 }).then(() => ok(true, 'UI13 Test Connection result shown'))
   .catch(() => ok(false, 'UI13 Test Connection result shown'));
 await page.screenshot({ path: `${SHOTS}/amz_settings.png`, fullPage: true });
 
-for (const label of ['Things to fix', 'Search words', 'Competitors', 'Account health', 'To-do list', 'Ask Claude', 'History']) {
+for (const label of ['Search words', 'Competitors', 'Account health', 'To-do list', 'History']) {
   await more(label);
 }
 await nav('More');

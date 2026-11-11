@@ -186,6 +186,12 @@ export class SpApi {
   }
   getReport(id: string) { return this.request("GET", `/reports/2021-06-30/reports/${enc(id)}`); }
   getReportDocument(id: string) { return this.request("GET", `/reports/2021-06-30/documents/${enc(id)}`); }
+  // Orders (v0). Only non-personal fields are read; buyer name/address need a Restricted Data Token and are never requested.
+  getOrders(lastUpdatedAfter: string, nextToken?: string) {
+    return this.request("GET", "/orders/v0/orders", { query: nextToken ? { MarketplaceIds: this.marketplaceId, NextToken: nextToken }
+      : { MarketplaceIds: this.marketplaceId, LastUpdatedAfter: lastUpdatedAfter, MaxResultsPerPage: "100" } });
+  }
+  getOrderItems(orderId: string) { return this.request("GET", `/orders/v0/orders/${enc(orderId)}/orderItems`); }
   financialEvents(postedAfter: string, nextToken?: string) {
     return this.request("GET", "/finances/v0/financialEvents", { query: { PostedAfter: postedAfter, NextToken: nextToken, MaxResultsPerPage: "100" } });
   }
@@ -421,6 +427,20 @@ export function parseOrdersReport(tsv: string) {
     agg.set(k, r);
   }
   return [...agg.values()].map((r) => ({ ...r, revenue: Math.round(r.revenue * 100) / 100 }));
+}
+
+export function parseOrder(o: any) {
+  return {
+    order_id: o?.AmazonOrderId, purchase_date: o?.PurchaseDate ?? null, status: o?.OrderStatus ?? null,
+    latest_ship_date: o?.LatestShipDate ?? null, ship_service: o?.ShipmentServiceLevelCategory ?? null,
+    easy_ship_status: o?.EasyShipShipmentStatus ?? null,
+    units: Number(o?.NumberOfItemsShipped || 0) + Number(o?.NumberOfItemsUnshipped || 0),
+    total: o?.OrderTotal?.Amount != null ? Number(o.OrderTotal.Amount) : null,
+  };
+}
+export function parseOrderItems(r: any) {
+  return (r?.payload?.OrderItems || []).map((i: any) => ({ sku: i.SellerSKU, asin: i.ASIN, title: String(i.Title || "").slice(0, 200),
+    qty: Number(i.QuantityOrdered || 0) }));
 }
 
 // GET_V2_SELLER_PERFORMANCE_REPORT -> percentages (seller-fulfilled figures; this account is FBM only).

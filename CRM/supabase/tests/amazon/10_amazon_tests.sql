@@ -399,4 +399,87 @@ BEGIN
 END $$;
 RESET ROLE;
 
+-- C: decisions, chat bridge, orders, home (078)
+DO $$
+DECLARE r jsonb; tok text; j jsonb; cid uuid; s1 text; sa CONSTANT text := 'SET ROLE authenticated'; n int;
+BEGIN
+  SELECT sku INTO s1 FROM public.amazon_listings WHERE NOT coalesce(is_parent, false) ORDER BY sku OFFSET 5 LIMIT 1;
+  EXECUTE sa; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  r := public.api_amz_chat_send('Which product sells most?');
+  PERFORM pg_temp.ok(r->>'status' = 'waiting' AND r->>'kind' = 'chat', 'C01 chat message is queued');
+  r := public.api_amz_chat();
+  PERFORM pg_temp.ok(NOT (r->>'online')::boolean AND NOT (r->>'connected')::boolean, 'C02 Claude shows offline until the Mac is connected');
+  tok := public.api_amz_bridge_token_new();
+  PERFORM pg_temp.ok(tok LIKE 'nitb_%' AND length(tok) > 60, 'C03 Admin gets a bridge token once');
+  PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000c', false);
+  BEGIN PERFORM public.api_amz_chat_send('hi there'); PERFORM pg_temp.ok(false, 'C04 viewer cannot chat');
+  EXCEPTION WHEN OTHERS THEN PERFORM pg_temp.ok(SQLERRM LIKE '%allowed to approve%', 'C04 viewer cannot chat'); END;
+  BEGIN PERFORM public.api_amz_bridge_token_new(); PERFORM pg_temp.ok(false, 'C05 only Admin makes bridge tokens');
+  EXCEPTION WHEN OTHERS THEN PERFORM pg_temp.ok(true, 'C05 only Admin makes bridge tokens'); END;
+  RESET ROLE; SET ROLE service_role;
+  PERFORM pg_temp.ok(NOT public.svc_amz_bridge_ok('nitb_wrong_token_0000000000000000000000000000000000'), 'C06 wrong bridge token refused');
+  PERFORM pg_temp.ok(public.svc_amz_bridge_ok(tok), 'C07 right bridge token accepted (and marks the Mac online)');
+  j := public.svc_amz_bridge_claim('mac');
+  PERFORM pg_temp.ok(j->'job'->>'kind' = 'chat' AND jsonb_array_length(j->'context'->'products') > 0
+    AND NOT (j::text ~* 'refresh|secret|atzr'), 'C08 claim returns the message with store context and no keys');
+  PERFORM pg_temp.ok(public.svc_amz_bridge_claim('mac') IS NULL OR (public.svc_amz_bridge_claim('mac')->'job'->>'id') <> (j->'job'->>'id'),
+    'C09 a message is handed out only once');
+  r := public.svc_amz_bridge_answer((j->'job'->>'id')::bigint, 'Your B5 diary sells most.',
+        NULL, jsonb_build_array(jsonb_build_object('kind', 'price', 'sku', s1, 'after', '{"price": 299}'::jsonb, 'summary', 'Lower price', 'reason', 'Win Add to Cart'),
+                                jsonb_build_object('kind', 'price', 'sku', s1, 'after', '{"approved": true}'::jsonb, 'summary', 'sneaky'),
+                                jsonb_build_object('kind', 'ads_budget', 'sku', NULL, 'after', '{"daily_budget_total": 999}'::jsonb)), 'mac');
+  PERFORM pg_temp.ok((r->>'drafts')::int = 1, 'C10 Claude drafts become Decisions; unknown fields/kinds are dropped');
+  RESET ROLE;
+  SELECT id INTO cid FROM public.amazon_change_queue WHERE reason = 'Win Add to Cart';
+  SELECT jsonb_build_object('price', price + 5) INTO j FROM public.amazon_listings WHERE sku = s1;
+  PERFORM pg_temp.ok((SELECT status = 'pending' AND created_by_type = 'claude' FROM public.amazon_change_queue WHERE id = cid), 'C11 Claude can never approve: its draft waits');
+  EXECUTE sa; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  r := public.api_amz_decisions('open');
+  PERFORM pg_temp.ok(EXISTS (SELECT 1 FROM jsonb_array_elements(r) x WHERE x->>'id' = cid::text AND x->>'reason' = 'Win Add to Cart' AND x ? 'product'),
+    'C12 Decisions list shows the reason and product');
+  r := public.api_amz_revise(cid, '{"price": 298}');
+  PERFORM pg_temp.ok(r->>'status' = 'blocked', 'C13 an edited decision still obeys the ₹299 floor');
+  r := public.api_amz_revise(cid, j);
+  PERFORM pg_temp.ok(r->>'status' = 'approved', 'C14 Change + approve publishes the edited version');
+  RESET ROLE;
+  PERFORM pg_temp.ok((SELECT status = 'rejected' AND reject_reason = 'Edited before approval' FROM public.amazon_change_queue WHERE id = cid)
+    AND (SELECT reason = 'Win Add to Cart' FROM public.amazon_change_queue WHERE id = (r->>'id')::uuid), 'C15 original closed as edited, reason kept');
+  EXECUTE sa; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  r := public.api_amz_chat_send('Second question');
+  RESET ROLE; SET ROLE service_role;
+  j := public.svc_amz_bridge_claim('mac');
+  PERFORM public.svc_amz_bridge_release((j->'job'->>'id')::bigint, 'Claude limit reached');
+  PERFORM pg_temp.ok(public.svc_amz_bridge_claim('mac') IS NULL, 'C16 after a Claude limit the message waits (no busy loop)');
+  RESET ROLE;
+  UPDATE public.amazon_claude_requests SET claimed_at = now() - interval '11 minutes' WHERE id = (j->'job'->>'id')::bigint;
+  SET ROLE service_role;
+  PERFORM public.svc_amz_bridge_release((public.svc_amz_bridge_claim('mac')->'job'->>'id')::bigint, 'err');
+  RESET ROLE;
+  UPDATE public.amazon_claude_requests SET claimed_at = now() - interval '11 minutes' WHERE id = (j->'job'->>'id')::bigint;
+  SET ROLE service_role;
+  PERFORM public.svc_amz_bridge_release((public.svc_amz_bridge_claim('mac')->'job'->>'id')::bigint, 'err');
+  RESET ROLE;
+  PERFORM pg_temp.ok((SELECT status = 'answered' AND answer LIKE 'Sorry%' FROM public.amazon_claude_requests WHERE id = (j->'job'->>'id')::bigint),
+    'C17 after 3 failed tries the user gets a clear answer, not an endless wait');
+  SET ROLE service_role;
+  n := public.svc_amz_upsert_orders(jsonb_build_array(jsonb_build_object('order_id', '408-1', 'purchase_date', now(), 'status', 'Unshipped',
+        'latest_ship_date', now() + interval '1 day', 'units', 1, 'items', jsonb_build_array(jsonb_build_object('sku', s1, 'qty', 1)))));
+  PERFORM public.svc_amz_upsert_orders(jsonb_build_array(jsonb_build_object('order_id', '408-1', 'status', 'Unshipped', 'items', '[]'::jsonb)));
+  PERFORM public.svc_amz_report_save('Week: 4 sold.');
+  RESET ROLE;
+  PERFORM pg_temp.ok((SELECT jsonb_array_length(items) = 1 FROM public.amazon_orders WHERE order_id = '408-1'), 'C18 order items are kept when a later sync has none');
+  UPDATE public.amazon_listings SET quantity = 3 WHERE sku = s1;
+  EXECUTE sa; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  r := public.api_amz_home();
+  PERFORM pg_temp.ok(jsonb_array_length(r->'to_ship') = 1 AND r->'low_stock' @> jsonb_build_array(jsonb_build_object('sku', s1))
+    AND r->'report'->>'text' = 'Week: 4 sold.', 'C19 Home shows orders to ship, low stock and the weekly report');
+  PERFORM public.api_amz_bridge_token_revoke();
+  RESET ROLE; SET ROLE service_role;
+  PERFORM pg_temp.ok(NOT public.svc_amz_bridge_ok(tok), 'C20 revoking the token disconnects the Mac at once');
+  RESET ROLE;
+  PERFORM pg_temp.ok(NOT has_function_privilege('authenticated', 'public.svc_amz_bridge_claim(text)', 'execute')
+    AND NOT has_function_privilege('anon', 'public.api_amz_chat_send(text, text)', 'execute'), 'C21 bridge functions are service-only');
+END $$;
+RESET ROLE;
+
 \echo ALL SQL TESTS PASSED

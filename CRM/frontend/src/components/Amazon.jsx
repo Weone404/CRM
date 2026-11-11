@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from '../backend/supabaseClient';
 import { showToast } from '../utils/toast';
-import { confirmDialog, promptDialog } from './ui/dialogs';
+import { confirmDialog } from './ui/dialogs';
 import Icon from './icons';
 import { useRoute, navigate } from '../utils/route';
 import { ProductGallery, ProductEditor } from './AmazonEditor';
-import { inr, pct, diffRows, STATUS_STYLE, ageText, dispatchText, plain } from '../utils/amazon';
+import { Decisions, ClaudeChat, MorningSummary, MacConnect } from './AmazonDecisions';
+import { inr, pct, ageText, dispatchText } from '../utils/amazon';
 
 // CRM > Amazon (Nitaniya on Amazon.in). Admin, plus people Admin grants in Settings.
 // Built for a non-technical seller: 4 tabs (Home, My Products, Approve Changes, Sales) and everything else under More.
@@ -62,7 +63,6 @@ const Empty = ({ children }) => <div className="text-center text-glass-muted py-
 const Err = ({ msg }) => (msg ? <div className="glass-card p-3 text-sm" style={{ color: '#C4261D' }}>{msg}</div> : null);
 const SEV = { blocker: { bg: 'rgba(255,59,48,0.12)', fg: '#C4261D' }, warning: { bg: 'rgba(255,149,0,0.14)', fg: '#B25E00' },
               confirm: { bg: 'rgba(0,122,255,0.12)', fg: '#0062CC' }, info: {} };
-const SEV_WORD = { blocker: 'Must fix', warning: 'Heads up', confirm: 'Double-check' };
 const NEEDS_BR = <Chip bg="rgba(118,118,128,0.12)" fg="#6E6E73">Needs Brand Registry</Chip>;
 const Seg = ({ value, options, onChange, label }) => (
   <div className="flex gap-1 p-1 rounded-xl w-max max-w-full overflow-x-auto" role="group" aria-label={label} style={{ background: 'rgba(118,118,128,0.12)' }}>
@@ -71,21 +71,6 @@ const Seg = ({ value, options, onChange, label }) => (
         className={`px-3 py-1.5 rounded-lg text-sm whitespace-nowrap ${value === v ? 'bg-white font-semibold shadow-sm' : ''}`}>{l}</button>))}
   </div>
 );
-
-function GuardList({ g }) {
-  if (!g) return null;
-  const items = [...(g.blockers || []), ...(g.confirms || []), ...(g.warnings || [])];
-  if (!items.length) return <div className="text-xs mt-2" style={{ color: '#1E7B34' }}>All checks pass.</div>;
-  return (
-    <ul className="mt-2 space-y-1">
-      {items.map((i, n) => (
-        <li key={n} className="text-xs flex gap-2 items-start">
-          <Chip {...SEV[i.severity]}>{SEV_WORD[i.severity] || i.severity}</Chip><span className="text-glass-secondary">{i.message}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
 
 // Plain-words health verdict from Amazon's limits.
 function healthVerdict(h) {
@@ -99,10 +84,9 @@ function healthVerdict(h) {
 }
 
 // ---------------------------------------------------------------- Home: what to do today
-function Home({ access, go, listings, reloadAll }) {
+function Home({ access, go, listings, reloadAll, openProduct }) {
   const [o, load, err] = useLoad(() => rpc('api_amz_overview'));
   const [syncing, setSyncing] = useState(false);
-  const names = useMemo(() => Object.fromEntries((listings || []).map((l) => [l.sku, l.title])), [listings]);
   const sync = async () => {
     setSyncing(true);
     const r = await run(edge('amazon-sync', { jobs: ['listings', 'pricing'] }));
@@ -118,9 +102,9 @@ function Home({ access, go, listings, reloadAll }) {
   const todo = [];
   if (!o.connected) todo.push({ tone: '#FF9500', icon: 'lock', text: 'Amazon is not connected yet.', sub: access.is_admin ? 'Add the Amazon keys in Settings, then press Test Connection.' : 'Ask Admin to finish Settings.', btn: access.is_admin && 'Open Settings', to: 'settings' });
   else if (o.last_test && o.last_test !== 'Connected') todo.push({ tone: '#FF3B30', icon: 'alert', text: 'The link to Amazon is not working.', sub: `Last check said: ${o.last_test}.`, btn: access.is_admin && 'Open Settings', to: 'settings' });
-  if (o.pending) todo.push({ tone: '#FF9500', icon: 'check', text: `${o.pending} change${o.pending > 1 ? 's are' : ' is'} waiting for your OK.`, sub: 'Nothing goes to Amazon until you approve it.', btn: 'Review', to: 'approve' });
+  if (o.pending) todo.push({ tone: '#FF9500', icon: 'check', text: `${o.pending} decision${o.pending > 1 ? 's are' : ' is'} waiting for you.`, sub: 'Nothing goes to Amazon until you approve it.', btn: 'Review', to: 'decisions' });
   const probs = (o.open_findings?.blocker || 0) + (o.open_findings?.warning || 0);
-  if (probs) todo.push({ tone: o.open_findings.blocker ? '#FF3B30' : '#FF9500', icon: 'shield', text: `${probs} thing${probs > 1 ? 's' : ''} to fix on your products.`, sub: 'Fixing them helps you show up in search and sell more.', btn: 'See them', to: 'audit' });
+  if (probs) todo.push({ tone: o.open_findings.blocker ? '#FF3B30' : '#FF9500', icon: 'shield', text: `${probs} thing${probs > 1 ? 's' : ''} to fix on your products.`, sub: 'Fixing them helps you show up in search and sell more.', btn: 'See them', to: 'decisions' });
   if (slow) todo.push({ tone: '#007AFF', icon: 'zap', text: `Fast delivery is not on for ${slow} product${slow > 1 ? 's' : ''}.`, sub: 'Same-day dispatch gives customers an earlier delivery date.', btn: 'Turn on', to: 'products' });
   if (healthBad?.length) todo.push({ tone: '#FF3B30', icon: 'heart', text: 'Your account health needs attention.', sub: `Problem: ${healthBad.join(', ')}.`, btn: 'See health', to: 'health' });
   if (o.rotation_alert) todo.push({ tone: o.rotation_alert <= 7 ? '#FF3B30' : '#FF9500', icon: 'lock', text: `Amazon password (client secret) expires in ${o.rotation_days_left} days.`, sub: 'Make a new one in Seller Central and paste it in Settings.', btn: access.is_admin && 'Open Settings', to: 'settings' });
@@ -128,10 +112,7 @@ function Home({ access, go, listings, reloadAll }) {
   const lastAt = Object.values(o.last_sync || {}).map((r) => r.at).filter(Boolean).sort().pop();
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3">
-        <Stat label="Sold today" value={inr(o.sales_today.revenue)} sub={`${o.sales_today.units} item${o.sales_today.units === 1 ? '' : 's'}`} onClick={() => go('sales')} />
-        <Stat label="Sold in last 7 days" value={inr(o.sales_7d.revenue)} sub={`${o.sales_7d.units} item${o.sales_7d.units === 1 ? '' : 's'}`} onClick={() => go('sales')} />
-      </div>
+      <MorningSummary go={go} openProduct={openProduct} />
       <div className="glass-card p-4">
         <h3 className="font-bold mb-3">What to do today</h3>
         {todo.length === 0 ? <div className="text-sm" style={{ color: '#1E7B34' }}>All good. Nothing needs you right now.</div> : (
@@ -147,24 +128,6 @@ function Home({ access, go, listings, reloadAll }) {
           </ul>
         )}
       </div>
-      {o.top_findings.length > 0 && (
-        <div className="glass-card p-4">
-          <div className="flex justify-between items-center mb-2">
-            <h3 className="font-bold">Fix these first</h3>
-            <button className="text-sm font-semibold" style={{ color: 'var(--accent)' }} onClick={() => go('audit')}>See all</button>
-          </div>
-          <ul className="space-y-3">{o.top_findings.map((f) => {
-            const [what, how] = plain(f.rule_code, f.message);
-            return (
-              <li key={f.id} className="text-sm">
-                <div className="font-semibold text-glass-primary">{what}</div>
-                <div className="text-xs text-glass-secondary truncate">{f.sku ? (names[f.sku] || f.asin) : 'Whole account'}</div>
-                {how && <div className="text-xs text-glass-muted">{how}</div>}
-              </li>
-            );
-          })}</ul>
-        </div>
-      )}
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-glass-muted px-1">
         <span>Data from Amazon updated {lastAt ? ageText(lastAt) : 'never'}{o.waiting_requests > 0 ? ` · ${o.waiting_requests} question(s) waiting for Claude` : ''}</span>
         {access.is_admin && <button disabled={syncing} onClick={sync} className="glass-btn-ghost px-3 py-1.5 text-xs inline-flex items-center gap-1.5"><Icon name="refresh" size={13} />{syncing ? 'Updating…' : 'Update now'}</button>}
@@ -235,100 +198,6 @@ function Products({ access, listings, findings, go, reload, openSku, setOpenSku 
   );
 }
 
-// ---------------------------------------------------------------- Approve Changes
-const DONE_MSG = { live: 'Live on Amazon.', executing: 'Sent. Amazon is still applying it.', skipped: 'Already running.',
-  failed: 'Amazon said no. See the reason on the card.', stale: 'Amazon changed this product meanwhile. Nothing sent.',
-  needs_manual: 'Done in part. One step is left for you (see the card).' };
-
-function Approve({ access, onChange }) {
-  const [status, setStatus] = useState('open');
-  const [rows, load, err] = useLoad(() => rpc('api_amz_queue', { p_status: status === 'all' ? null : status }), [status]);
-  const [busy, setBusy] = useState('');
-  const refresh = () => { load(); onChange?.(); };
-  const send = async (c) => {
-    const a = await run(rpc('api_amz_approve', { p_id: c.id, p_second_confirm: !!c._second }));
-    if (a?.status === 'stale') { showToast('This product changed on Amazon after the change was made. Marked "Out of date".', 'error'); return 'stale'; }
-    if (!a) return 'error';
-    const r = await run(edge('amazon-execute', { id: c.id }));
-    return r?.status || 'approved';
-  };
-  const approve = async (c) => {
-    const d = diffRows(c.before, c.after);
-    if (c.needs_second_confirm) {
-      const msg = `${(c.guard_result.confirms || []).map((x) => x.message).join(' ')}\n\n${d.map((r) => `${r.label}: ${r.before} → ${r.after}`).join('\n')}`;
-      if (!(await confirmDialog(msg, { title: 'Please check again', confirmText: 'Yes, approve', danger: true }))) return;
-      c._second = true;
-    } else if (!(await confirmDialog(`Approve "${c.summary || c.kind}"?`, { message: 'It goes live on Amazon right away.', confirmText: 'Approve' }))) return;
-    setBusy(c.id);
-    const st = await send(c);
-    if (DONE_MSG[st]) showToast(DONE_MSG[st], st === 'failed' ? 'error' : 'success');
-    setBusy(''); refresh();
-  };
-  const ready = (rows || []).filter((c) => c.status === 'pending' && c.guard_result?.ok && !c.needs_second_confirm);
-  const approveAll = async () => {
-    if (!(await confirmDialog(`Approve all ${ready.length} changes?`, { message: 'Each one goes live on Amazon. Changes that need a second look are skipped.', confirmText: 'Approve all' }))) return;
-    setBusy('all');
-    const res = {};
-    for (let i = 0; i < ready.length; i++) {
-      showToast(`Sending ${i + 1} of ${ready.length}…`, 'info');
-      const st = await send(ready[i]); res[st] = (res[st] || 0) + 1;
-    }
-    setBusy('');
-    showToast(Object.entries(res).map(([k, n]) => `${n} ${(STATUS_STYLE[k]?.label || k).toLowerCase()}`).join(', '), res.failed ? 'error' : 'success');
-    refresh();
-  };
-  const reject = async (c) => {
-    const reason = await promptDialog('Why say no?', { message: 'Claude reads this before suggesting again.', required: true });
-    if (reason) { await run(rpc('api_amz_reject', { p_id: c.id, p_reason: reason }), 'Rejected'); refresh(); }
-  };
-  const act = async (fn, c, msg) => { await run(rpc(fn, { p_id: c.id }), msg); refresh(); };
-  return (
-    <div className="space-y-3">
-      <div className="glass-card p-3 text-xs text-glass-secondary">Nothing changes on Amazon until you approve it here. You can undo a live change any time.</div>
-      <div className="flex flex-wrap justify-between gap-2 items-center">
-        <Seg label="Show" value={status} onChange={setStatus} options={[['open', 'To do'], ['live', 'Done'], ['rejected', 'Said no'], ['all', 'All']]} />
-        {access.can_approve && ready.length > 1 && status !== 'live' && status !== 'rejected' && (
-          <button className="glass-btn px-4 py-2 text-sm" disabled={!!busy} onClick={approveAll}>{busy === 'all' ? 'Sending…' : `Approve all (${ready.length})`}</button>)}
-      </div>
-      <Err msg={err} />
-      {!rows ? <Empty>Loading…</Empty> : rows.length === 0 ? <Empty>{status === 'open' ? 'Nothing waiting. All done.' : 'Nothing here.'}</Empty> : rows.map((c) => {
-        const st = STATUS_STYLE[c.status] || {};
-        return (
-          <div key={c.id} className="glass-card p-4 text-sm">
-            <div className="flex flex-wrap justify-between gap-2">
-              <div className="min-w-0"><div className="font-semibold text-glass-primary">{c.summary || c.kind}</div>
-                <div className="text-xs text-glass-muted truncate">{c.before?.title || c.asin || '—'} · suggested by {c.created_by_type === 'claude' ? 'Claude' : c.created_by_type === 'system' ? 'the CRM' : 'you'} · {ageText(c.created_at)}</div></div>
-              <Chip bg={st.bg} fg={st.fg}>{st.label || c.status}</Chip>
-            </div>
-            <div className="mt-3 grid gap-2">
-              {diffRows(c.before, c.after).map((r) => (
-                <div key={r.key} className="grid sm:grid-cols-[130px_1fr_1fr] gap-1 sm:gap-3 text-xs">
-                  <div className="text-glass-muted">{r.label}</div>
-                  <div className="whitespace-pre-wrap line-through decoration-1 opacity-60"><span className="sr-only">Now: </span>{r.before}</div>
-                  <div className="whitespace-pre-wrap font-medium"><span className="sr-only">New: </span>{r.after}</div>
-                </div>
-              ))}
-            </div>
-            <GuardList g={c.guard_result} />
-            {c.preview_result?.preview?.issues?.length > 0 && <div className="text-xs mt-2 text-glass-secondary">Amazon says: {c.preview_result.preview.issues.map((i) => i.message).join(' | ')}</div>}
-            {c.error && <div className="text-xs mt-2" style={{ color: c.status === 'needs_manual' ? '#7A2EA8' : '#C4261D' }}>{c.error}</div>}
-            {c.reject_reason && <div className="text-xs mt-2 text-glass-muted">Said no: {c.reject_reason}</div>}
-            <div className="flex flex-wrap gap-2 mt-3">
-              {c.status === 'pending' && access.can_approve && <button disabled={!!busy || !c.guard_result?.ok} className="glass-btn px-4 py-1.5 text-sm" onClick={() => approve(c)}>{busy === c.id ? 'Sending…' : 'Approve'}</button>}
-              {['pending', 'stale'].includes(c.status) && access.can_approve && <button className="glass-btn-ghost px-3 py-1.5 text-sm" onClick={() => reject(c)}>Say no</button>}
-              {['failed', 'stale'].includes(c.status) && <button className="glass-btn-ghost px-3 py-1.5 text-sm" onClick={() => act('api_amz_resubmit', c, 'Checked again and put back in the list')}>Check again</button>}
-              {c.status === 'needs_manual' && access.can_approve && <button className="glass-btn-ghost px-3 py-1.5 text-sm" onClick={() => act('api_amz_manual_done', c, 'Marked done')}>I did it in Seller Central</button>}
-              {['live', 'needs_manual'].includes(c.status) && c.kind !== 'ads_budget' && <button className="glass-btn-ghost px-3 py-1.5 text-sm" onClick={() => act('api_amz_rollback', c, 'Undo prepared: approve it to undo')}>Undo</button>}
-              {c.batch_id && ['pending', 'approved'].includes(c.status) && access.can_approve && <button className="glass-btn-ghost px-3 py-1.5 text-sm" style={{ color: '#C4261D' }}
-                onClick={async () => { if (await confirmDialog('Cancel every waiting change in this group?', { danger: true, confirmText: 'Cancel group' })) { const n = await run(rpc('api_amz_cancel_batch', { p_batch: c.batch_id })); if (n !== undefined) showToast(`${n} cancelled`, 'success'); refresh(); } }}>Cancel group</button>}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------- Sales
 function Sales({ listings }) {
   const [days, setDays] = useState(30);
@@ -362,46 +231,6 @@ function Sales({ listings }) {
           </div>
         </>
       )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------- Audit
-function Audit({ access }) {
-  const [status, setStatus] = useState('open');
-  const [rows, load, err] = useLoad(() => rpc('api_amz_findings', { p_status: status }), [status]);
-  const dismiss = async (f) => {
-    const reason = await promptDialog('Ignore this?', { message: f.message, placeholder: 'Why (kept in the log)', required: true });
-    if (reason) { await run(rpc('api_amz_finding_dismiss', { p_id: f.id, p_reason: reason }), 'Ignored'); load(); }
-  };
-  const askFix = async (f) => {
-    await run(rpc('api_amz_request_create', { p_question: `Draft a fix for finding #${f.id} on ${f.asin || 'the account'} (${f.sku || ''}): ${f.message}` }),
-      'Sent to Claude. The fix will show up in Approve Changes after Claude\'s next run.');
-  };
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap gap-2 justify-between">
-        <div className="flex gap-1 p-1 rounded-xl" style={{ background: 'rgba(118,118,128,0.12)' }}>
-          {[['open', 'To fix'], ['fixed', 'Fixed'], ['dismissed', 'Ignored']].map(([s, l]) => <button key={s} onClick={() => setStatus(s)} className={`px-3 py-1.5 rounded-lg text-sm ${status === s ? 'bg-white font-semibold shadow-sm' : ''}`}>{l}</button>)}
-        </div>
-        <button className="glass-btn px-3 py-1.5 text-sm" onClick={async () => { const n = await run(rpc('api_amz_audit_run')); if (n !== undefined) showToast(`Checked: ${n} thing(s) to fix`, 'success'); load(); }}>Check again now</button>
-      </div>
-      <Err msg={err} />
-      {!rows ? <Empty>Loading…</Empty> : rows.length === 0 ? <Empty>{status === 'open' ? 'Nothing to fix. Well done.' : 'Nothing here.'}</Empty> : rows.map((f) => (
-        <div key={f.id} className="glass-card p-3 text-sm">
-          <div className="flex flex-wrap gap-2 items-center"><Chip {...SEV[f.severity]}>{SEV_WORD[f.severity] || f.severity}</Chip><b>{plain(f.rule_code, f.message)[0]}</b></div>
-          {plain(f.rule_code)[1] && <div className="mt-1 text-glass-primary">{plain(f.rule_code)[1]}</div>}
-          <div className="mt-1 text-xs text-glass-secondary">{f.message}</div>
-          <div className="text-[11px] text-glass-muted mt-0.5">{f.asin || 'Whole account'} · {f.sku} · {ageText(f.created_at)}</div>
-          {f.dismiss_reason && <div className="text-xs text-glass-muted mt-1">Dismissed: {f.dismiss_reason}</div>}
-          {status === 'open' && access.can_view && (
-            <div className="flex gap-2 mt-2">
-              <button className="glass-btn px-3 py-1 text-xs" onClick={() => askFix(f)}>Ask Claude to fix it</button>
-              <button className="glass-btn-ghost px-3 py-1 text-xs" onClick={() => dismiss(f)}>Ignore</button>
-            </div>
-          )}
-        </div>
-      ))}
     </div>
   );
 }
@@ -520,29 +349,6 @@ function Strategy() {
   );
 }
 
-// ---------------------------------------------------------------- Ask Claude
-function AskClaude() {
-  const [rows, load, err] = useLoad(() => rpc('api_amz_requests'));
-  const [q, setQ] = useState('');
-  return (
-    <div className="space-y-3">
-      <div className="glass-card p-3 text-xs text-glass-secondary">Claude answers on its next scheduled run (not instantly). Answers and any drafts appear here and in the Change Queue.</div>
-      <form className="space-y-2" onSubmit={async (e) => { e.preventDefault(); if (q.trim().length >= 3) { await run(rpc('api_amz_request_create', { p_question: q }), 'Queued for Claude'); setQ(''); load(); } }}>
-        <textarea rows={3} className="glass-input w-full px-3 py-2 text-sm" placeholder="e.g. Why did B0GGHDXNY1 lose the Buy Box, and what should we do without going below ₹299?" value={q} onChange={(e) => setQ(e.target.value)} />
-        <button className="glass-btn px-4 py-2 text-sm">Ask</button>
-      </form>
-      <Err msg={err} />
-      {(rows || []).map((r) => (
-        <div key={r.id} className="glass-card p-3 text-sm">
-          <div className="flex justify-between gap-2"><div className="font-medium">{r.question}</div><Chip {...(r.status === 'answered' ? { bg: 'rgba(52,199,89,0.14)', fg: '#1E7B34' } : r.status === 'waiting' ? SEV.warning : {})}>{r.status}</Chip></div>
-          {r.answer && <div className="mt-2 whitespace-pre-wrap text-glass-secondary">{r.answer}</div>}
-          <div className="text-[11px] text-glass-muted mt-1">{ageText(r.created_at)}{r.status === 'waiting' && <button className="ml-2" onClick={async () => { await run(rpc('api_amz_request_cancel', { p_id: r.id })); load(); }}>Cancel</button>}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------- Activity Log
 function Activity() {
   const [rows, , err] = useLoad(() => rpc('api_amz_activity', { p_limit: 300 }));
@@ -601,6 +407,7 @@ function Settings() {
   const r = Object.fromEntries((rules || []).map((x) => [x.code, x]));
   return (
     <div className="space-y-4">
+      <MacConnect />
       <div className="glass-card p-4 space-y-3">
         <div className="flex flex-wrap justify-between items-center gap-2">
           <div><h3 className="font-bold">Environment variables</h3><p className="text-xs text-glass-muted">Stored in Supabase Vault. Never shown again in full; only the last 4 characters.</p></div>
@@ -650,28 +457,27 @@ function Settings() {
 const TABS = [
   { id: 'home', label: 'Home', icon: 'chart' },
   { id: 'products', label: 'My Products', icon: 'list' },
-  { id: 'approve', label: 'Approve Changes', short: 'Approve', icon: 'check' },
+  { id: 'decisions', label: 'Decisions', icon: 'check' },
   { id: 'sales', label: 'Sales', icon: 'tag' },
   { id: 'more', label: 'More', icon: 'more' },
 ];
 const MORE = [
-  { id: 'audit', label: 'Things to fix', hint: 'Every problem on your products', icon: 'shield' },
   { id: 'keywords', label: 'Search words', hint: 'Words buyers type on Amazon', icon: 'search' },
   { id: 'competitors', label: 'Competitors', hint: 'Watch other sellers\' prices', icon: 'globe' },
   { id: 'health', label: 'Account health', hint: 'Late dispatch, cancels, complaints', icon: 'heart' },
   { id: 'strategy', label: 'To-do list', hint: 'Plans and reminders', icon: 'calendar' },
-  { id: 'ask', label: 'Ask Claude', hint: 'Ask a question, get an answer later', icon: 'sparkles' },
   { id: 'activity', label: 'History', hint: 'Who changed what, and when', icon: 'clock' },
   { id: 'settings', label: 'Settings', hint: 'Amazon keys, limits, who can use this', icon: 'settings', admin: true },
 ];
 // Old links keep working.
-const ALIAS = { overview: 'home', listings: 'products', inventory: 'products', queue: 'approve', content: 'products', images: 'products' };
+const ALIAS = { overview: 'home', listings: 'products', inventory: 'products', queue: 'decisions', approve: 'decisions', audit: 'decisions', ask: 'home', content: 'products', images: 'products' };
 
 export default function Amazon({ access }) {
   const route = useRoute();
   const raw = (route.tab === 'amazon' && route.section) || 'home';
   const view = ALIAS[raw] || raw;
   const [openSku, setOpenSku] = useState('');
+  const [chat, setChat] = useState(null);
   const [listings, reloadListings] = useLoad(() => rpc('api_amz_listings'));
   const [queue, reloadQueue] = useLoad(() => rpc('api_amz_queue', { p_status: 'pending' }), [view]);
   const [findings, reloadFindings] = useLoad(() => rpc('api_amz_findings', { p_status: 'open' }), [view]);
@@ -680,10 +486,13 @@ export default function Amazon({ access }) {
   const skus = (listings || []).map((l) => ({ sku: l.sku, asin: l.asin, title: l.title }));
   const myAsins = [...new Set(skus.map((s) => s.asin).filter(Boolean))];
   const go = (v) => navigate('amazon', v);
+  const openProduct = (sku) => { setOpenSku(sku); go('products'); };
+  const askClaude = (text, sku) => setChat({ text, sku });
+  useEffect(() => { if (raw === 'ask' && access.can_approve) setChat({ text: '' }); }, [raw, access.can_approve]);
   const more = MORE.filter((m) => !m.admin || access.is_admin);
   const sub = more.find((m) => m.id === view);
   const tab = sub ? 'more' : (TABS.find((t) => t.id === view) ? view : 'home');
-  const count = { approve: queue?.length || 0 };
+  const count = { decisions: queue?.length || 0 };
   return (
     <div className="space-y-4">
       <div>
@@ -713,24 +522,27 @@ export default function Amazon({ access }) {
             <button key={m.id} type="button" onClick={() => go(m.id)} className="glass-card p-3 flex items-center gap-3 text-left min-h-[64px]">
               <span className="h-10 w-10 rounded-[12px] inline-flex items-center justify-center shrink-0" style={{ background: 'rgba(0,122,255,0.12)', color: '#007AFF' }}><Icon name={m.icon} size={20} /></span>
               <span className="min-w-0 flex-1"><span className="block font-semibold text-glass-primary">{m.label}</span><span className="block text-xs text-glass-secondary">{m.hint}</span></span>
-              {m.id === 'audit' && (findings || []).length > 0 && <Chip {...SEV.warning}>{findings.length}</Chip>}
               <Icon name="chevronRight" size={16} />
             </button>
           ))}
         </div>
       )}
-      {tab === 'home' && <Home access={access} go={go} listings={listings} reloadAll={reloadAll} />}
+      {tab === 'home' && <Home access={access} go={go} listings={listings} reloadAll={reloadAll} openProduct={openProduct} />}
       {tab === 'products' && <Products access={access} listings={listings} findings={findings} go={go} reload={reloadAll} openSku={openSku} setOpenSku={setOpenSku} />}
-      {tab === 'approve' && <Approve access={access} onChange={reloadAll} />}
+      {tab === 'decisions' && <Decisions access={access} onChange={reloadAll} openProduct={openProduct} askClaude={access.can_approve ? askClaude : null} />}
       {tab === 'sales' && <Sales listings={listings} />}
-      {view === 'audit' && <Audit access={access} />}
       {view === 'keywords' && <Keywords />}
       {view === 'competitors' && <Competitors myAsins={myAsins} />}
       {view === 'health' && <Health />}
       {view === 'strategy' && <Strategy />}
-      {view === 'ask' && <AskClaude />}
       {view === 'activity' && <Activity />}
       {view === 'settings' && access.is_admin && <Settings />}
+      {access.can_approve && !chat && (
+        <button type="button" onClick={() => setChat({ text: '' })} aria-label="Ask Claude"
+          className="fixed bottom-5 right-5 z-40 rounded-full pl-4 pr-5 py-3 text-white font-semibold shadow-lg inline-flex items-center gap-2"
+          style={{ background: 'linear-gradient(160deg,#D97757,#C15F3C)' }}><Icon name="sparkles" size={18} />Ask Claude</button>
+      )}
+      <ClaudeChat open={!!chat} preset={chat} onClose={() => setChat(null)} goDecisions={() => go('decisions')} />
     </div>
   );
 }

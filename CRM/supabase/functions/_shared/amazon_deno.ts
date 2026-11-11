@@ -14,7 +14,7 @@ export const cors = (req: Request) => {
   const o = req.headers.get("Origin") ?? "";
   return {
     "Access-Control-Allow-Origin": ALLOWED.has(o) || PREVIEW.test(o) ? o : "https://crm.weoneaviation.in",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-token",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-token, x-bridge-token",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Vary": "Origin",
   };

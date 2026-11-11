@@ -4,7 +4,7 @@
 // Every job takes its own lock (svc_amz_run_begin), so overlapping runs skip instead of doubling up,
 // and every run is recorded in amazon_sync_runs (the CRM shows data age from it).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { SpApi, SpApiError, LwaError, parseListing, parseCompetitiveSummary, parseCatalog, parseOrdersReport,
+import { SpApi, SpApiError, LwaError, parseListing, parseCompetitiveSummary, parseCatalog, parseOrdersReport, parseOrder, parseOrderItems,
   parsePerformance, istDay, istDayRange } from "../_shared/amazon.ts";
 import { execute, reconcile } from "../_shared/amazon_exec.ts";
 import { asUser, cors, cronOk, json, HttpError, loadApi, rpc, scrub } from "../_shared/amazon_deno.ts";
@@ -167,8 +167,32 @@ async function finances(api: SpApi, _s: Record<string, string>, t0: number) {
   return { items: await rpc("svc_amz_upsert_sales", { p_items: rows }) };
 }
 
+// Orders updated in the last 3 days (status, ship-by time, Easy Ship status), then items for open orders.
+// getOrders allows ~1 request/minute after a burst of 20; getOrderItems ~0.5/s: SpApi waits on 429 by itself.
+async function orders(api: SpApi, _s: Record<string, string>, t0: number) {
+  const since = new Date(Date.now() - 3 * 86400000).toISOString();
+  const rows: any[] = [];
+  let token: string | undefined;
+  for (let page = 0; page < 5 && Date.now() - t0 < DEADLINE_MS; page++) {
+    const r = await api.getOrders(since, token);
+    for (const o of r?.payload?.Orders || []) rows.push(parseOrder(o));
+    token = r?.payload?.NextToken;
+    if (!token) break;
+  }
+  const n = rows.length ? await rpc("svc_amz_upsert_orders", { p_items: rows }) : 0;
+  const need: string[] = await rpc("svc_amz_orders_without_items");
+  const withItems: any[] = [];
+  for (const id of need) {
+    if (Date.now() - t0 > DEADLINE_MS) break;
+    const base = rows.find((x) => x.order_id === id) || { order_id: id };
+    withItems.push({ ...base, items: parseOrderItems(await api.getOrderItems(id)) });
+  }
+  if (withItems.length) await rpc("svc_amz_upsert_orders", { p_items: withItems.filter((x) => x.status) });
+  return { items: n, detail: `${rows.length} orders, items for ${withItems.length}` };
+}
+
 const JOBS: Record<string, (api: SpApi, s: Record<string, string>, t0: number) => Promise<{ items: number; detail?: string }>> =
-  { listings, pricing, execute: executeJob, reports, finances };
+  { listings, pricing, execute: executeJob, reports, finances, orders };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors(req) });

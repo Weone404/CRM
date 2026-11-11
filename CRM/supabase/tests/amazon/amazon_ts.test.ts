@@ -2,7 +2,7 @@
 // Amazon is replaced by a scripted fake; nothing here calls the real API.
 import { describe, expect, test } from "bun:test";
 import { SpApi, LwaError, testConnection, buildPatches, parseListing, parseCompetitiveSummary, parseSalesTraffic,
-  parseOrdersReport, parsePerformance, istDayRange, istDay } from "../../functions/_shared/amazon.ts";
+  parseOrdersReport, parseOrder, parseOrderItems, parsePerformance, istDayRange, istDay } from "../../functions/_shared/amazon.ts";
 import { execute, reconcile, staleFields } from "../../functions/_shared/amazon_exec.ts";
 
 type Step = { status: number; body?: unknown; headers?: Record<string, string> } | Error;
@@ -317,5 +317,17 @@ describe("India offer (price + MRP)", () => {
         { audience: "ALL", our_price: [{ schedule: [{ value_with_tax: 449 }] }], maximum_retail_price: [{ schedule: [{ value_with_tax: 799 }] }] }],
       unit_count: [{ type: { value: "count" }, value: 1 }] } });
     expect([l.price, l.mrp, l.net_quantity]).toEqual([449, 799, "1 count"]);
+  });
+});
+
+describe("orders", () => {
+  test("only non-personal order fields are kept", () => {
+    const o = parseOrder({ AmazonOrderId: "408-1", PurchaseDate: "2026-11-10T05:00:00Z", OrderStatus: "Unshipped", LatestShipDate: "2026-11-11T18:29:59Z",
+      EasyShipShipmentStatus: "PendingSchedule", NumberOfItemsUnshipped: 2, OrderTotal: { Amount: "698.00" }, BuyerInfo: { BuyerEmail: "x@y" }, ShippingAddress: { City: "Delhi" } });
+    expect(o).toEqual({ order_id: "408-1", purchase_date: "2026-11-10T05:00:00Z", status: "Unshipped", latest_ship_date: "2026-11-11T18:29:59Z",
+      ship_service: null, easy_ship_status: "PendingSchedule", units: 2, total: 698 });
+    expect(JSON.stringify(o)).not.toMatch(/Delhi|x@y/);
+    expect(parseOrderItems({ payload: { OrderItems: [{ SellerSKU: "S", ASIN: "B", Title: "Diary", QuantityOrdered: 2 }] } }))
+      .toEqual([{ sku: "S", asin: "B", title: "Diary", qty: 2 }]);
   });
 });
