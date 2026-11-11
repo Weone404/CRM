@@ -4,6 +4,7 @@ import { showToast } from '../utils/toast';
 import { confirmDialog } from './ui/dialogs';
 import Icon from './icons';
 import { inr, diffRows, STATUS_STYLE, ageText, plain, FIELD_LABELS } from '../utils/amazon';
+import { useRoute, setParams } from '../utils/route';
 
 // Decisions inbox, Live Claude chat, Morning summary and Mac connection for CRM > Amazon.
 // Built for the shop owner: one card per change with the product photo, old vs new, why, and three buttons.
@@ -300,6 +301,8 @@ export function ProblemModal({ findingId, access, onClose, onChanged, openProduc
 }
 
 export function Decisions({ access, onChange, openProduct }) {
+  const route = useRoute();
+  const openId = route.params?.open || '';
   const [status, setStatus] = useState('open');
   const [rows, setRows] = useState(null);
   const [findings, setFindings] = useState([]);
@@ -406,6 +409,15 @@ export function Decisions({ access, onChange, openProduct }) {
         </div>
       )}
       {problem && <ProblemModal findingId={problem} access={access} onClose={() => setProblem(null)} onChanged={refresh} openProduct={openProduct} />}
+      {openId && rows && (() => {
+        const c = all.find((x) => x.id === openId);
+        return (
+          <Modal title={c ? 'Decision from your email' : 'Decision'} onClose={() => setParams({ open: '' })}>
+            {c ? <DecisionCard c={c} access={access} busy={busy} onApprove={async (x) => { await approve(x); setParams({ open: '' }); }} onChanged={refresh} openProduct={openProduct} />
+              : <div className="text-sm text-glass-secondary">This decision was already handled. See the Done and Rejected tabs.</div>}
+          </Modal>
+        );
+      })()}
     </div>
   );
 }
@@ -500,13 +512,13 @@ export function ClaudeChat({ open, onClose, preset, goDecisions }) {
               onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } }} />
             <div className="flex flex-col gap-1">
               <button type="button" aria-label={speech.on ? 'Stop listening' : 'Speak'} className="w-10 h-10 rounded-full grid place-items-center text-white"
-                style={{ background: speech.on ? '#FF3B30' : '#8E8E93' }} onClick={() => (speech.on ? speech.stop() : speech.start(lang))}><Icon name="mic" size={18} /></button>
+                style={{ background: speech.on ? '#FF3B30' : '#8E8E93' }} onClick={() => (speech.on ? speech.stop() : speech.start(lang.split('|')[0]))}><Icon name="mic" size={18} /></button>
               <button type="button" aria-label="Send" disabled={sending || text.trim().length < 2} className="w-10 h-10 rounded-full grid place-items-center text-white" style={{ background: '#007AFF' }} onClick={submit}><Icon name="send" size={16} /></button>
             </div>
           </div>
-          <div className="flex items-center gap-2 text-[11px] text-glass-muted">
-            Voice:
-            {[['en-IN', 'English'], ['hi-IN', 'हिन्दी']].map(([v, l]) => <button key={v} type="button" aria-pressed={lang === v} onClick={() => setLang(v)} className={`px-2 py-0.5 rounded-full ${lang === v ? 'font-semibold' : ''}`} style={lang === v ? { background: 'rgba(0,122,255,0.12)', color: '#007AFF' } : undefined}>{l}</button>)}
+          <div className="flex items-center gap-2 text-[11px] text-glass-muted flex-wrap">
+            Voice (Claude replies in the language you use):
+            {[['en-IN', 'English'], ['hi-IN', 'हिन्दी'], ['en-IN|hinglish', 'Hinglish']].map(([v, l]) => <button key={v} type="button" aria-pressed={lang === v} onClick={() => setLang(v)} className={`px-2 py-0.5 rounded-full ${lang === v ? 'font-semibold' : ''}`} style={lang === v ? { background: 'rgba(0,122,255,0.12)', color: '#007AFF' } : undefined}>{l}</button>)}
           </div>
         </div>
       </div>
@@ -519,7 +531,16 @@ export function MorningSummary({ go, openProduct }) {
   const [h, setH] = useState(null);
   const [showReport, setShowReport] = useState(false);
   const [alerts, setAlerts] = useState([]);
-  useEffect(() => { rpc('api_amz_home').then(setH).catch(() => setH({ error: true })); rpc('api_amz_alerts', { p_mark_seen: false }).then(setAlerts).catch(() => {}); }, []);
+  const [fests, setFests] = useState([]);
+  useEffect(() => {
+    rpc('api_amz_home').then(setH).catch(() => setH({ error: true }));
+    rpc('api_amz_alerts', { p_mark_seen: false }).then(setAlerts).catch(() => {});
+    rpc('api_amz_festivals').then(setFests).catch(() => {});
+  }, []);
+  const prep = async (f) => {
+    try { await rpc('api_amz_festival_prep', { p_name: f.name }); showToast(`Claude is preparing ideas for ${f.name}. They will wait in Decisions.`, 'success'); setFests((x) => x.map((y) => (y.name === f.name ? { ...y, prepared: true } : y))); }
+    catch (e) { showToast(e.message, 'error'); }
+  };
   const ALERT_ICON = { new_order: 'cart', pickup: 'clock', feedback: 'heart', out_of_stock: 'alert', suppressed: 'alert' };
   if (!h || h.error) return null;
   const hr = istHour();
@@ -576,6 +597,22 @@ export function MorningSummary({ go, openProduct }) {
                 <div className="text-[11px] mt-1 line-clamp-2">{p.title}</div>
                 <Chip style={p.stock === 0 ? RED : AMBER}>{p.stock} left</Chip>
               </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {fests.length > 0 && (
+        <div className="glass-card p-4 space-y-2">
+          <h3 className="font-bold">Coming up</h3>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {fests.slice(0, 6).map((f) => (
+              <div key={`${f.name}${f.day}`} className="shrink-0 w-52 rounded-2xl p-3 space-y-1" style={{ background: f.days_left <= 21 ? 'rgba(255,149,0,0.10)' : 'rgba(118,118,128,0.08)' }}>
+                <div className="font-semibold text-sm">{f.name}</div>
+                <div className="text-[11px] text-glass-muted">{new Date(f.day).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} · {f.days_left === 0 ? 'today' : `in ${f.days_left} days`}</div>
+                {f.note && <div className="text-xs text-glass-secondary line-clamp-2">{f.note}</div>}
+                {f.prepared ? <Chip style={GREEN}>Claude is on it</Chip>
+                  : <button type="button" className="glass-btn-ghost px-3 py-1 text-xs" onClick={() => prep(f)}>Prepare with Claude</button>}
+              </div>
             ))}
           </div>
         </div>
@@ -663,7 +700,96 @@ export function AlertEmails() {
       <div className="flex gap-2">
         <input aria-label="Add alert email" type="email" className="glass-input flex-1 px-3 py-2 text-sm" placeholder="name@example.com" value={add}
           onChange={(e) => setAdd(e.target.value)} onKeyDown={async (e) => { if (e.key === 'Enter' && valid && await save([...(list || []), add.trim()])) setAdd(''); }} />
-        <button type="button" className="glass-btn px-4 text-sm" disabled={!valid || (list || []).length >= 10} onClick={async () => { if (await save([...(list || []), add.trim()])) setAdd(''); }}>Add</button>
+        <button type="button" aria-label="Add email" className="glass-btn px-4 text-sm" disabled={!valid || (list || []).length >= 10} onClick={async () => { if (await save([...(list || []), add.trim()])) setAdd(''); }}>Add</button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- Settings: my style
+const TONES = ['Friendly', 'Professional', 'Premium', 'Simple'];
+function Words({ label, list, onChange, placeholder }) {
+  const [w, setW] = useState('');
+  const add = () => { const t = w.trim(); if (t && !list.includes(t) && list.length < 30) onChange([...list, t]); setW(''); };
+  return (
+    <div className="space-y-1.5">
+      <div className="text-sm font-semibold">{label}</div>
+      <div className="flex flex-wrap gap-1.5">{list.map((x) => (
+        <span key={x} className="inline-flex items-center gap-1 pl-2.5 pr-1 py-0.5 rounded-full text-xs" style={{ background: 'rgba(118,118,128,0.12)' }}>{x}
+          <button type="button" aria-label={`Remove ${x}`} className="w-5 h-5 rounded-full grid place-items-center hover:bg-black/10" onClick={() => onChange(list.filter((y) => y !== x))}><Icon name="close" size={10} /></button></span>))}</div>
+      <div className="flex gap-2"><input aria-label={label} className="glass-input flex-1 px-3 py-1.5 text-sm" placeholder={placeholder} value={w} onChange={(e) => setW(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} />
+        <button type="button" aria-label={`Add to ${label}`} className="glass-btn-ghost px-3 text-sm" onClick={add}>Add</button></div>
+    </div>
+  );
+}
+export function MyStyle() {
+  const [st, setSt] = useState(null);
+  useEffect(() => { rpc('api_amz_style', { p_style: null }).then((r) => setSt({ tone: '', language: 'auto', use_words: [], avoid_words: [], notes: '', ...r })).catch(() => setSt(null)); }, []);
+  if (!st) return null;
+  const save = async () => { try { await rpc('api_amz_style', { p_style: st }); showToast('Style saved. Claude uses it from the next suggestion.', 'success'); } catch (e) { showToast(e.message, 'error'); } };
+  return (
+    <div className="glass-card p-4 space-y-3">
+      <h3 className="font-bold">My style</h3>
+      <div className="text-xs text-glass-secondary">Claude follows this in every name, key point and description it suggests, and in its replies.</div>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <label className="text-sm"><span className="font-semibold">Tone</span>
+          <select aria-label="Tone" className="glass-input w-full px-3 py-2 mt-1" value={st.tone || ''} onChange={(e) => setSt({ ...st, tone: e.target.value })}>
+            <option value="">No preference</option>{TONES.map((t) => <option key={t}>{t}</option>)}</select></label>
+        <label className="text-sm"><span className="font-semibold">Claude's reply language</span>
+          <select aria-label="Reply language" className="glass-input w-full px-3 py-2 mt-1" value={st.language || 'auto'} onChange={(e) => setSt({ ...st, language: e.target.value })}>
+            <option value="auto">Same as my message</option><option value="english">English</option><option value="hindi">हिन्दी (Hindi)</option><option value="hinglish">Hinglish</option></select></label>
+      </div>
+      <Words label="Words I like" list={st.use_words || []} onChange={(v) => setSt({ ...st, use_words: v })} placeholder="e.g. personalised" />
+      <Words label="Words never to use" list={st.avoid_words || []} onChange={(v) => setSt({ ...st, avoid_words: v })} placeholder="e.g. cheap" />
+      <label className="block text-sm"><span className="font-semibold">Anything else Claude should know</span>
+        <textarea aria-label="Style notes" rows={2} className="glass-input w-full px-3 py-2 mt-1 text-sm" maxLength={600} value={st.notes || ''} onChange={(e) => setSt({ ...st, notes: e.target.value })} placeholder="e.g. Mention free name printing on the cover." /></label>
+      <div className="text-[11px] text-glass-muted">Product listings stay in English for Amazon.in; only Claude's replies follow the language setting.</div>
+      <button type="button" className="glass-btn px-4 py-2 text-sm" onClick={save}>Save my style</button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- Sales: profit per product
+export function Profit() {
+  const [rows, setRows] = useState(null);
+  const [edit, setEdit] = useState({});
+  const load = () => rpc('api_amz_margins').then(setRows).catch(() => setRows([]));
+  useEffect(() => { load(); }, []);
+  const save = async (r) => {
+    const e = edit[r.sku] || {};
+    const cost = e.cost === '' || e.cost === undefined ? null : Number(e.cost);
+    try { await rpc('api_amz_cost_set', { p_sku: r.sku, p_cost: cost, p_extra: Number(e.extra || 0) }); showToast('Saved', 'success'); setEdit((x) => ({ ...x, [r.sku]: undefined })); load(); }
+    catch (err) { showToast(err.message, 'error'); }
+  };
+  if (!rows) return null;
+  const missing = rows.filter((r) => r.cost == null).length;
+  return (
+    <div className="glass-card p-4 space-y-3">
+      <h3 className="font-bold">Profit per product</h3>
+      <div className="text-xs text-glass-secondary">Enter what one diary costs you (with name printing) and packing per order, once. Amazon fees per unit come from your last 60 days of orders. Claude then protects your margin in price suggestions.{missing ? ` ${missing} product${missing > 1 ? 's' : ''} still need a cost.` : ''}</div>
+      <div className="divide-y" style={{ borderColor: 'var(--border-subtle)' }}>
+        {rows.map((r) => {
+          const e = edit[r.sku];
+          const tone = r.margin_pct == null ? {} : r.margin_pct < 0 ? RED : r.margin_pct < 10 ? AMBER : GREEN;
+          return (
+            <div key={r.sku} className="py-2 flex flex-wrap items-center gap-3 text-sm">
+              <div className="w-10 h-10 rounded-lg bg-white grid place-items-center overflow-hidden shrink-0">{r.photo ? <img src={r.photo} alt="" className="w-full h-full object-contain" /> : null}</div>
+              <div className="flex-1 min-w-[160px]"><div className="truncate font-medium">{r.title}</div>
+                <div className="text-[11px] text-glass-muted">Price {inr(r.price)} · Amazon fee {r.fee_per_unit != null ? inr(r.fee_per_unit) : 'not known yet'}</div></div>
+              {e ? (
+                <div className="flex items-center gap-1.5">
+                  <input aria-label={`Cost of ${r.sku}`} type="number" min="0" className="glass-input w-20 px-2 py-1 text-sm" placeholder="Cost" value={e.cost ?? ''} onChange={(ev) => setEdit((x) => ({ ...x, [r.sku]: { ...e, cost: ev.target.value } }))} />
+                  <input aria-label={`Packing of ${r.sku}`} type="number" min="0" className="glass-input w-20 px-2 py-1 text-sm" placeholder="Packing" value={e.extra ?? ''} onChange={(ev) => setEdit((x) => ({ ...x, [r.sku]: { ...e, extra: ev.target.value } }))} />
+                  <button type="button" className="glass-btn px-3 py-1 text-xs" onClick={() => save(r)}>Save</button>
+                </div>
+              ) : (
+                <button type="button" className="flex items-center gap-2" onClick={() => setEdit((x) => ({ ...x, [r.sku]: { cost: r.cost ?? '', extra: r.extra ?? '' } }))}>
+                  {r.cost == null ? <Chip>Add cost</Chip> : <><span className="font-semibold">{inr(r.profit)}</span><Chip style={tone}>{r.margin_pct}%</Chip></>}
+                </button>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

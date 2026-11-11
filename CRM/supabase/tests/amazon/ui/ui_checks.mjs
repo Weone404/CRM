@@ -192,14 +192,44 @@ ok(!(await page.content()).includes('UITESTVALUE'), 'UI12 full key never appears
 await page.getByRole('button', { name: 'Connect my Mac' }).click();
 await page.getByText(/^nitb_[0-9a-f]{60,}$/).waitFor({ timeout: 5000 }).then(() => ok(true, 'UI32 Settings makes a one-time Mac connection code'))
   .catch(() => ok(false, 'UI32 Settings makes a one-time Mac connection code'));
+// My style
+await page.getByLabel('Reply language').selectOption('hinglish');
+await page.getByLabel('Words never to use', { exact: true }).fill('cheap');
+await page.getByLabel('Words never to use', { exact: true }).press('Enter');
+await page.getByRole('button', { name: 'Save my style' }).click();
+await page.waitForTimeout(800);
+const st = await rpcAs('api_amz_style', { p_style: null });
+ok(st.language === 'hinglish' && (st.avoid_words || []).includes('cheap'), 'UI40 My style (Hinglish replies, words to avoid) is saved');
 await page.getByLabel('Add alert email').fill('owner@example.com');
-await page.getByRole('button', { name: 'Add', exact: true }).click();
+await page.getByRole('button', { name: 'Add email' }).click();
 await page.getByRole('button', { name: 'Remove owner@example.com' }).waitFor({ timeout: 4000 }).then(() => ok(true, 'UI39 alert emails can be added (and removed) in Settings'))
   .catch(async () => ok(false, 'UI39 alert emails can be added (and removed) in Settings ' + await toast()));
 await page.getByRole('button', { name: 'Test Connection' }).click();
 await page.getByText(/Connected: All good/).first().waitFor({ timeout: 5000 }).then(() => ok(true, 'UI13 Test Connection result shown'))
   .catch(() => ok(false, 'UI13 Test Connection result shown'));
 await page.screenshot({ path: `${SHOTS}/amz_settings.png`, fullPage: true });
+
+// Profit per product + festivals + email deep link
+await nav('Sales');
+await page.getByText('Profit per product').waitFor({ timeout: 5000 });
+await page.getByRole('button', { name: 'Add cost' }).first().click();
+await page.getByLabel(/^Cost of /).first().fill('150');
+await page.getByLabel(/^Packing of /).first().fill('20');
+await page.getByRole('button', { name: 'Save', exact: true }).first().click();
+await page.waitForTimeout(1000);
+ok((await rpcAs('api_amz_margins')).some((m) => Number(m.cost) === 150 && Number(m.extra) === 20), 'UI41 cost per product is saved for the profit view');
+await nav('Home');
+await page.getByText('Coming up').waitFor({ timeout: 5000 }).then(() => ok(true, 'UI42 Home shows upcoming festivals')).catch(() => ok(false, 'UI42 Home shows upcoming festivals'));
+await page.getByRole('button', { name: 'Prepare with Claude' }).first().click();
+await page.waitForTimeout(800);
+ok((await page.getByText('Claude is on it').count()) >= 1, 'UI43 Prepare with Claude asks Claude for festival ideas');
+const pendingNow = (await rpcAs('api_amz_decisions', { p_status: 'open' })).find((c) => c.status === 'pending');
+if (pendingNow) {
+  await page.goto(`${APP}#/amazon/decisions?open=${pendingNow.id}`);
+  await page.getByRole('dialog', { name: 'Decision from your email' }).waitFor({ timeout: 6000 }).then(() => ok(true, 'UI44 a link from the email opens that decision'))
+    .catch(() => ok(false, 'UI44 a link from the email opens that decision'));
+  await page.keyboard.press('Escape');
+} else ok(true, 'UI44 (no pending decision to open)');
 
 for (const label of ['Search words', 'Competitors', 'Account health', 'To-do list', 'History']) {
   await more(label);

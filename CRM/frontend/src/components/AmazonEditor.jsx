@@ -101,7 +101,10 @@ function Ideas({ field, listing, current, onUse, onClose }) {
   useEffect(() => { rpc('api_amz_keywords').then((r) => setKw((r || []).filter((k) => k.status !== 'rejected').map((k) => k.keyword))).catch(() => {}); }, []);
   const loadClaude = () => rpc('api_amz_suggestions', { p_sku: listing.sku }).then((r) => setClaude((r || []).filter((x) => x.field === field))).catch(() => {});
   useEffect(() => { loadClaude(); }, [field, listing.sku]); // eslint-disable-line react-hooks/exhaustive-deps
-  const instant = useMemo(() => ideasFor(field, { ...listing, ...current }, kw), [field, listing, current, kw]);
+  const [avoid, setAvoid] = useState([]);
+  useEffect(() => { rpc('api_amz_style', { p_style: null }).then((st) => setAvoid((st?.avoid_words || []).map((w) => String(w).toLowerCase()))).catch(() => {}); }, []);
+  const instant = useMemo(() => ideasFor(field, { ...listing, ...current }, kw)
+    .filter((t) => !avoid.some((w) => w && String(t).toLowerCase().includes(w))), [field, listing, current, kw, avoid]);
   const [edits, setEdits] = useState({});
   const waiting = claude.find((c) => c.status === 'waiting');
   const answered = claude.find((c) => c.status === 'answered');

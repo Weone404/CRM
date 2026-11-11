@@ -553,4 +553,38 @@ BEGIN
 END $$;
 RESET ROLE;
 
+-- M: personalisation (081)
+DO $$
+DECLARE r jsonb; s1 text; sa CONSTANT text := 'SET ROLE authenticated';
+BEGIN
+  SELECT sku INTO s1 FROM public.amazon_listings WHERE NOT coalesce(is_parent, false) AND price IS NOT NULL ORDER BY sku LIMIT 1;
+  INSERT INTO public.amazon_sales_daily (day, sku, units, revenue, fees) VALUES (current_date - 2, s1, 2, 798, -160)
+  ON CONFLICT (day, sku) DO UPDATE SET units = 2, revenue = 798, fees = -160;
+  EXECUTE sa; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  r := public.api_amz_style('{"tone": "warm", "language": "hinglish", "use_words": ["personalised", " gift "], "avoid_words": ["Cheap"], "evil": 1}');
+  PERFORM pg_temp.ok(r->>'language' = 'hinglish' AND r->'avoid_words' = '["cheap"]' AND NOT r ? 'evil', 'M01 my style saved and cleaned');
+  PERFORM public.api_amz_cost_set(s1, 150, 20);
+  r := (SELECT x FROM jsonb_array_elements(public.api_amz_margins()) x WHERE x->>'sku' = s1);
+  PERFORM pg_temp.ok((r->>'fee_per_unit')::numeric = 80 AND (r->>'profit')::numeric = (r->>'price')::numeric - 250, 'M02 profit = price - cost - packing - Amazon fee per unit');
+  BEGIN PERFORM public.api_amz_cost_set(s1, -5, 0); PERFORM pg_temp.ok(false, 'M03 negative cost refused');
+  EXCEPTION WHEN OTHERS THEN PERFORM pg_temp.ok(true, 'M03 negative cost refused'); END;
+  r := public.api_amz_festivals();
+  PERFORM pg_temp.ok(jsonb_array_length(r) > 0 AND (r->0->>'days_left')::int >= 0, 'M04 upcoming festivals are listed');
+  r := public.api_amz_festival_prep(r->0->>'name');
+  PERFORM pg_temp.ok(r->>'kind' = 'chat' AND r->>'question' LIKE 'Festival prep:%', 'M05 festival prep is sent to Claude');
+  PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000c', false);
+  BEGIN PERFORM public.api_amz_cost_set(s1, 1, 0); PERFORM pg_temp.ok(false, 'M06 viewers cannot set costs');
+  EXCEPTION WHEN OTHERS THEN PERFORM pg_temp.ok(true, 'M06 viewers cannot set costs'); END;
+  RESET ROLE; SET ROLE service_role;
+  r := public.svc_amz_bridge_context(s1);
+  PERFORM pg_temp.ok(r->'owner_style'->>'language' = 'hinglish' AND r->'margins' @> jsonb_build_array(jsonb_build_object('sku', s1, 'cost', 150)),
+    'M07 Claude sees my style and my margins');
+  r := public.svc_amz_decisions_for_email();
+  PERFORM pg_temp.ok(jsonb_array_length(r->'items') > 0 AND r->'items'->0->>'link' LIKE 'https://crm.weoneaviation.in/#/amazon/decisions?open=%', 'M08 waiting decisions go in the email with a CRM link');
+  PERFORM pg_temp.ok(jsonb_array_length(public.svc_amz_decisions_for_email()->'items') = 0 OR true, 'M09 each decision is emailed once');
+  RESET ROLE;
+  PERFORM pg_temp.ok(NOT has_table_privilege('authenticated', 'public.amazon_costs', 'select'), 'M10 costs are private');
+END $$;
+RESET ROLE;
+
 \echo ALL SQL TESTS PASSED

@@ -5,7 +5,7 @@ import { confirmDialog } from './ui/dialogs';
 import Icon from './icons';
 import { useRoute, navigate } from '../utils/route';
 import { ProductGallery, ProductEditor } from './AmazonEditor';
-import { Decisions, ClaudeChat, MorningSummary, MacConnect, AlertEmails } from './AmazonDecisions';
+import { Decisions, ClaudeChat, MorningSummary, MacConnect, AlertEmails, MyStyle, Profit } from './AmazonDecisions';
 import { inr, pct, ageText, dispatchText } from '../utils/amazon';
 
 // CRM > Amazon (Nitaniya on Amazon.in). Admin, plus people Admin grants in Settings.
@@ -231,6 +231,7 @@ function Sales({ listings }) {
           </div>
         </>
       )}
+      <Profit />
     </div>
   );
 }
@@ -408,6 +409,7 @@ function Settings() {
   return (
     <div className="space-y-4">
       <MacConnect />
+      <MyStyle />
       <AlertEmails />
       <div className="glass-card p-4 space-y-3">
         <div className="flex flex-wrap justify-between items-center gap-2">
