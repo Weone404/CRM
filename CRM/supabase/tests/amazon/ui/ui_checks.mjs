@@ -204,10 +204,35 @@ await page.getByLabel('Add alert email').fill('owner@example.com');
 await page.getByRole('button', { name: 'Add email' }).click();
 await page.getByRole('button', { name: 'Remove owner@example.com' }).waitFor({ timeout: 4000 }).then(() => ok(true, 'UI39 alert emails can be added (and removed) in Settings'))
   .catch(async () => ok(false, 'UI39 alert emails can be added (and removed) in Settings ' + await toast()));
+// Business email (HIOX SMTP) + phone app: in the main CRM Settings, not under Amazon
+await page.evaluate(() => { window.location.hash = '#/settings'; });
+await page.getByText('Install We One CRM on your phone').waitFor({ timeout: 5000 }).then(() => ok(true, 'UI50 main Settings explains how to install the whole CRM as an app'))
+  .catch(() => ok(false, 'UI50 main Settings explains how to install the whole CRM as an app'));
+await page.getByRole('button', { name: 'Turn on notifications' }).waitFor({ timeout: 5000 }).then(() => ok(true, 'UI51 notifications can be turned on for this device'))
+  .catch(() => ok(false, 'UI51 notifications can be turned on for this device'));
+await page.screenshot({ path: `${SHOTS}/amz_phoneapp.png`, fullPage: true });
+await page.getByLabel('Business email password').fill('UiSmtpSecret77');
+await page.getByRole('button', { name: 'Save email settings' }).click();
+await page.waitForTimeout(900);
+const sm = await rpcAs('api_amz_smtp', { p_cfg: null });
+ok(sm.password_set === true && sm.host === 'host2.dnsinweb.com' && sm.port === 465, 'UI47 business email settings save with the HIOX defaults');
+ok(!(await page.content()).includes('UiSmtpSecret77') && (await page.locator('input[placeholder^="•••••••• saved"]').count()) === 1, 'UI48 the email password is never shown again');
+await page.getByLabel('Business email on').check();
+await page.waitForTimeout(900);
+ok((await rpcAs('api_amz_smtp', { p_cfg: null })).enabled === true, 'UI49 business email can be switched on');
+await page.evaluate(() => { window.location.hash = '#/amazon/settings'; });
+await page.waitForTimeout(800);
 await page.getByRole('button', { name: 'Test Connection' }).click();
 await page.getByText(/Connected: All good/).first().waitFor({ timeout: 5000 }).then(() => ok(true, 'UI13 Test Connection result shown'))
   .catch(() => ok(false, 'UI13 Test Connection result shown'));
 await page.screenshot({ path: `${SHOTS}/amz_settings.png`, fullPage: true });
+
+await nav('More');
+ok((await page.getByRole('button', { name: /^Phone app/ }).count()) === 0, 'UI53 Amazon no longer has its own phone-app page');
+{ const fs = await import('fs'); const FE = new URL('../../../../frontend/', import.meta.url);
+  const html = fs.readFileSync(new URL('index.html', FE), 'utf8'); const man = JSON.parse(fs.readFileSync(new URL('public/manifest.webmanifest', FE), 'utf8'));
+  ok(html.includes('rel="manifest"') && man.display === 'standalone' && man.icons.some((i) => i.sizes === '512x512') && fs.existsSync(new URL('public/sw.js', FE)),
+    'UI52 the CRM is installable (manifest, icons, service worker)'); }
 
 // Profit per product + festivals + email deep link
 await nav('Sales');

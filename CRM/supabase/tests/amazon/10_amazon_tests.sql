@@ -587,4 +587,71 @@ BEGIN
 END $$;
 RESET ROLE;
 
+-- N: business email + phone notifications (082)
+DO $$
+DECLARE r jsonb; sa CONSTANT text := 'SET ROLE authenticated'; aid uuid := '00000000-0000-0000-0000-00000000000a';
+  sub CONSTANT jsonb := '{"endpoint": "https://fcm.googleapis.com/fcm/send/abc123", "keys": {"p256dh": "BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM", "auth": "tBHItJI5svbpez7KI4CCXg"}}';
+BEGIN
+  EXECUTE sa; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  r := public.api_amz_smtp(NULL);
+  PERFORM pg_temp.ok(r->>'host' = 'host2.dnsinweb.com' AND (r->>'port')::int = 465 AND NOT (r->>'password_set')::boolean, 'N01 email settings start with the HIOX defaults');
+  PERFORM pg_temp.fails($q$SELECT public.api_amz_smtp('{"host": "host2.dnsinweb.com", "port": 465, "username": "info@weoneaviation.in", "enabled": true}')$q$,
+    '%password first%', 'N02 cannot turn on without a password');
+  PERFORM pg_temp.fails($q$SELECT public.api_amz_smtp('{"host": "host2.dnsinweb.com", "port": 587, "username": "info@weoneaviation.in", "password": "x"}')$q$,
+    '%465%', 'N03 blocked ports are refused');
+  PERFORM pg_temp.fails($q$SELECT public.api_amz_smtp(jsonb_build_object('host', 'host2.dnsinweb.com', 'port', 465, 'username', 'info@weoneaviation.in', 'from_name', E'A\r\nBcc: x@y.z'))$q$,
+    '%Sender name%', 'N04 sender name cannot inject headers');
+  PERFORM public.api_amz_alert_emails('[]');
+  r := public.api_amz_smtp('{"host": "Host2.dnsinweb.com", "port": "465", "username": "Info@WeOneAviation.in", "from_name": "Nitaniya Alerts", "password": "s3cret pass", "enabled": true}');
+  PERFORM pg_temp.ok((r->>'password_set')::boolean AND r->>'host' = 'host2.dnsinweb.com' AND r->>'username' = 'info@weoneaviation.in'
+    AND NOT r ? 'password' AND r::text NOT LIKE '%s3cret%', 'N05 saved; the password is never returned');
+  PERFORM pg_temp.ok(NOT (r->>'ready')::boolean, 'N06 not ready until someone is on the alert email list');
+  PERFORM public.api_amz_alert_emails('["owner@example.com"]');
+  PERFORM pg_temp.ok((public.api_amz_smtp(NULL)->>'ready')::boolean, 'N07 ready once a recipient exists');
+  r := public.api_amz_smtp('{"host": "host2.dnsinweb.com", "port": 465, "username": "info@weoneaviation.in", "from_name": "Nitaniya Alerts", "enabled": true}');
+  PERFORM pg_temp.ok((r->>'password_set')::boolean, 'N08 saving again without a password keeps the old one');
+  PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000c', false);
+  PERFORM pg_temp.fails($q$SELECT public.api_amz_smtp('{"host": "a.b", "port": 465, "username": "a@b.cd"}')$q$, '%Only Admin%', 'N09 only Admin changes the email settings');
+  PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000b', false);
+  PERFORM pg_temp.fails($q$SELECT public.api_amz_push_subscribe('{}')$q$, '%access%', 'N10 people without Amazon access cannot turn on notifications');
+  PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  PERFORM pg_temp.fails($q$SELECT public.api_amz_push_subscribe('{"endpoint": "http://evil", "keys": {"p256dh": "x", "auth": "y"}}')$q$, '%invalid%', 'N11 bad subscriptions are refused');
+  PERFORM public.api_amz_push_subscribe(sub, 'iPhone');
+  PERFORM public.api_amz_push_subscribe(sub, NULL);
+  r := public.api_amz_push_status(sub->>'endpoint');
+  PERFORM pg_temp.ok((r->>'this_device')::boolean AND (r->>'my_devices')::int = 1 AND (r->>'email_ready')::boolean, 'N12 this phone is on (re-subscribing does not duplicate)');
+  RESET ROLE;
+  PERFORM pg_temp.ok(NOT has_table_privilege('authenticated', 'public.amazon_push_subs', 'select')
+    AND NOT has_function_privilege('authenticated', 'public.svc_amz_notify_config()', 'execute')
+    AND NOT has_function_privilege('authenticated', 'public.svc_amz_notify_claim()', 'execute'), 'N13 subscriptions and secrets are not exposed to browsers');
+  PERFORM pg_temp.ok(NOT EXISTS (SELECT 1 FROM public.amazon_activity_log WHERE details::text LIKE '%s3cret%'), 'N14 the password is not in the activity log');
+  UPDATE public.amazon_alerts SET pushed_at = now(), emailed_at = now();
+  UPDATE public.amazon_claude_requests SET pushed_at = now();
+  INSERT INTO public.amazon_alerts (kind, ref, title, body) VALUES ('new_order', 'N-ORDER-1', 'New order: 1 × Diary', 'Ship by Mon');
+  INSERT INTO public.amazon_claude_requests (question, kind, asked_by) VALUES ('How are sales?', 'chat', aid);
+  UPDATE public.amazon_claude_requests SET status = 'answered', answer = 'Good', answered_at = now() WHERE question = 'How are sales?';
+  SET ROLE service_role;
+  r := public.svc_amz_notify_claim();
+  PERFORM pg_temp.ok(jsonb_array_length(r->'push') = 1 AND jsonb_array_length(r->'email') = 1 AND jsonb_array_length(r->'subs') = 1
+    AND r->'replies'->0->>'asked_by' = aid::text, 'N15 a new alert goes to phone + email, the reply to the person who asked');
+  r := public.svc_amz_notify_claim();
+  PERFORM pg_temp.ok(jsonb_array_length(r->'push') = 0 AND jsonb_array_length(r->'email') = 0 AND jsonb_array_length(r->'replies') = 0, 'N16 nothing is sent twice');
+  PERFORM public.svc_amz_notify_unclaim_email(ARRAY(SELECT id FROM public.amazon_alerts WHERE ref = 'N-ORDER-1'));
+  r := public.svc_amz_alerts_for_email();
+  PERFORM pg_temp.ok(r @> '[{"title": "New order: 1 × Diary"}]', 'N17 if the business email fails, the Gmail task still sends the alert');
+  r := public.svc_amz_vapid_init('{"k": 1}', repeat('A', 87));
+  r := public.svc_amz_vapid_init('{"k": 2}', repeat('B', 87));
+  PERFORM pg_temp.ok(r->>'vapid_keys' = '{"k": 1}' AND r->>'vapid_public' = repeat('A', 87), 'N18 phone-notification keys are made once and kept');
+  PERFORM public.svc_amz_push_result(NULL, ARRAY(SELECT id FROM public.amazon_push_subs), NULL);
+  PERFORM pg_temp.ok(NOT EXISTS (SELECT 1 FROM public.amazon_push_subs), 'N19 phones that turned notifications off are removed');
+  RESET ROLE;
+  UPDATE public.amazon_config SET value = (value::jsonb || '{"enabled": false}')::text WHERE key = 'smtp';
+  INSERT INTO public.amazon_alerts (kind, ref, title) VALUES ('out_of_stock', 'N-SKU', 'Out of stock: X');
+  SET ROLE service_role;
+  PERFORM pg_temp.ok(jsonb_array_length(public.svc_amz_notify_claim()->'email') = 0
+    AND jsonb_array_length(public.svc_amz_notify_digest()->'items') = 0, 'N20 business email off: alerts and decisions are left for Gmail');
+  RESET ROLE;
+END $$;
+RESET ROLE;
+
 \echo ALL SQL TESTS PASSED

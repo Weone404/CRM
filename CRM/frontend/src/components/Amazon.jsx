@@ -6,6 +6,7 @@ import Icon from './icons';
 import { useRoute, navigate } from '../utils/route';
 import { ProductGallery, ProductEditor } from './AmazonEditor';
 import { Decisions, ClaudeChat, MorningSummary, MacConnect, AlertEmails, MyStyle, Profit } from './AmazonDecisions';
+import { syncPush } from './AppAlerts';
 import { inr, pct, ageText, dispatchText } from '../utils/amazon';
 
 // CRM > Amazon (Nitaniya on Amazon.in). Admin, plus people Admin grants in Settings.
@@ -491,6 +492,7 @@ export default function Amazon({ access }) {
   const go = (v) => navigate('amazon', v);
   const openProduct = (sku) => { setOpenSku(sku); go('products'); };
   useEffect(() => { if (raw === 'ask' && access.can_approve) setChat({ text: '' }); }, [raw, access.can_approve]);
+  useEffect(() => { syncPush(); }, []);
   const more = MORE.filter((m) => !m.admin || access.is_admin);
   const sub = more.find((m) => m.id === view);
   const tab = sub ? 'more' : (TABS.find((t) => t.id === view) ? view : 'home');

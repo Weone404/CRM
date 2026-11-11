@@ -87,6 +87,20 @@ if (!window.__crmFetchWrapped) {
 // GET /api/followups/pending, etc. seen in the backend logs). Rendering without
 // it so each page load issues each request exactly once.
 installModalKeys();
+
+// Installable app + phone notifications (public/sw.js). The worker caches nothing.
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => {}); });
+  // Tapping a notification while the app is open: go to the screen it points to.
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data?.type === 'open' && typeof e.data.url === 'string') {
+      const u = new URL(e.data.url, window.location.origin);
+      if (u.origin === window.location.origin) window.location.hash = u.hash || '#/amazon';
+    }
+  });
+}
+// Android "Install app" button: keep the browser's install prompt for the Settings card.
+window.addEventListener('beforeinstallprompt', (e) => { window.__installPrompt = e; });
 ReactDOM.createRoot(document.getElementById('root')).render(
   <App />
 );

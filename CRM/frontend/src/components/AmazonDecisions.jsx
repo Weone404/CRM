@@ -687,7 +687,7 @@ export function AlertEmails() {
   return (
     <div className="glass-card p-4 space-y-3">
       <h3 className="font-bold">Alert emails</h3>
-      <div className="text-xs text-glass-secondary">New orders, the 11 AM pickup reminder, 1–2 star feedback and out-of-stock alerts are emailed every hour from 9 AM to 8 PM (only when something happened), sent from your connected Gmail.</div>
+      <div className="text-xs text-glass-secondary">New orders, the 11 AM pickup reminder, 1–2 star feedback and out-of-stock alerts go to these people. With the business email on, they arrive within a minute; otherwise they come every hour from 9 AM to 8 PM from your connected Gmail.</div>
       {!list ? <Empty>Loading…</Empty> : (
         <div className="flex flex-wrap gap-2">
           {list.length === 0 && <span className="text-sm text-glass-muted">No emails yet. Alerts still show on Home.</span>}

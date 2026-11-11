@@ -32,6 +32,8 @@ const StudentDirectory = lazy(() => import('./components/StudentDirectory'));
 const Attendance = lazy(() => import('./components/Attendance'));
 const FlightBridge = lazy(() => import('./components/FlightBridge'));
 const AIIntegrations = lazy(() => import('./components/AIIntegrations'));
+const PhoneApp = lazy(() => import('./components/AppAlerts').then((m) => ({ default: m.PhoneApp })));
+const BusinessEmail = lazy(() => import('./components/AppAlerts').then((m) => ({ default: m.BusinessEmail })));
 const Connections = lazy(() => import('./components/Connections'));
 const Amazon = lazy(() => import('./components/Amazon'));
 const Ads = lazy(() => import('./components/Ads'));
@@ -94,6 +96,8 @@ export default function App() {
     return () => { live = false; };
   }, [employee]);
   const canAccessAmazon = USE_SUPABASE && !!amzAccess?.can_view;
+  // Keep this phone's notification subscription fresh whenever the CRM opens (not only on the Amazon tab).
+  useEffect(() => { if (canAccessAmazon) import('./components/AppAlerts').then((m) => m.syncPush()).catch(() => {}); }, [canAccessAmazon]);
   // ADS section (Supabase backend only): Admin, plus people Admin grants in ADS > Settings > Team access.
   const [adsAccess, setAdsAccess] = useState(null);
   useEffect(() => {
@@ -385,8 +389,8 @@ export default function App() {
           {activeTab === 'partnerships' && canAccessFlightBridge && <FlightBridge />}
           {activeTab === 'amazon' && canAccessAmazon && <Amazon access={amzAccess} />}
           {activeTab === 'ads' && canAccessAds && <Ads access={adsAccess} />}
-          {activeTab === 'settings' && USE_SUPABASE && department === 'Admin' && <><AIIntegrations /><Connections /></>}
-          {activeTab === 'profile' && isEmployeeSession && <MyProfile />}
+          {activeTab === 'settings' && USE_SUPABASE && department === 'Admin' && <div className="space-y-4"><PhoneApp notifications={canAccessAmazon} /><BusinessEmail /><AIIntegrations /><Connections /></div>}
+          {activeTab === 'profile' && isEmployeeSession && <div className="space-y-4"><MyProfile />{USE_SUPABASE && <PhoneApp notifications={canAccessAmazon} />}</div>}
           {activeTab === 'leave' && isEmployeeSession && <LeaveCalendar employeeId={employee.id} />}
         </Suspense>
       </div>

@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")"; ROOT=../../../..
 fuser -k 54399/tcp 5199/tcp >/dev/null 2>&1 || true
 psql -q -c "DROP DATABASE IF EXISTS amz_ui" -c "CREATE DATABASE amz_ui" >/dev/null 2>&1
-for f in ../00_supabase_stub.sql $ROOT/backend/migrations/072_amazon_module.sql $ROOT/backend/migrations/073_amazon_seed.sql $ROOT/backend/migrations/075_amazon_dispatch.sql $ROOT/backend/migrations/076_amazon_product_editor.sql $ROOT/backend/migrations/077_amazon_legal_soft.sql $ROOT/backend/migrations/078_amazon_decisions_chat.sql $ROOT/backend/migrations/080_amazon_fixall_alerts.sql $ROOT/backend/migrations/081_amazon_personal.sql; do
+for f in ../00_supabase_stub.sql $ROOT/backend/migrations/072_amazon_module.sql $ROOT/backend/migrations/073_amazon_seed.sql $ROOT/backend/migrations/075_amazon_dispatch.sql $ROOT/backend/migrations/076_amazon_product_editor.sql $ROOT/backend/migrations/077_amazon_legal_soft.sql $ROOT/backend/migrations/078_amazon_decisions_chat.sql $ROOT/backend/migrations/080_amazon_fixall_alerts.sql $ROOT/backend/migrations/081_amazon_personal.sql $ROOT/backend/migrations/082_amazon_notify.sql; do
   psql -q -X -v ON_ERROR_STOP=1 -d amz_ui -f "$f" >/dev/null 2>&1
 done
 psql -q -d amz_ui -c "INSERT INTO public.employee (id, name, department, auth_user_id) VALUES
