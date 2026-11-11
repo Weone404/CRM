@@ -604,14 +604,14 @@ export function MorningSummary({ go, openProduct }) {
       {fests.length > 0 && (
         <div className="glass-card p-4 space-y-2">
           <h3 className="font-bold">Coming up</h3>
-          <div className="flex gap-2 overflow-x-auto pb-1">
+          <div className="flex gap-2 overflow-x-auto pb-1 snap-x snap-mandatory -mx-1 px-1" style={{ scrollPaddingLeft: 4 }}>
             {fests.slice(0, 6).map((f) => (
-              <div key={`${f.name}${f.day}`} className="shrink-0 w-52 rounded-2xl p-3 space-y-1" style={{ background: f.days_left <= 21 ? 'rgba(255,149,0,0.10)' : 'rgba(118,118,128,0.08)' }}>
+              <div key={`${f.name}${f.day}`} className="shrink-0 snap-start w-[min(13rem,72%)] rounded-2xl p-3 space-y-1.5 flex flex-col" style={{ background: f.days_left <= 21 ? 'rgba(255,149,0,0.10)' : 'rgba(118,118,128,0.08)' }}>
                 <div className="font-semibold text-sm">{f.name}</div>
                 <div className="text-[11px] text-glass-muted">{new Date(f.day).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} · {f.days_left === 0 ? 'today' : `in ${f.days_left} days`}</div>
                 {f.note && <div className="text-xs text-glass-secondary line-clamp-2">{f.note}</div>}
-                {f.prepared ? <Chip style={GREEN}>Claude is on it</Chip>
-                  : <button type="button" className="glass-btn-ghost px-3 py-1 text-xs" onClick={() => prep(f)}>Prepare with Claude</button>}
+                <div className="mt-auto pt-1">{f.prepared ? <Chip style={GREEN}>Claude is on it</Chip>
+                  : <button type="button" className="glass-btn-ghost px-3 py-1 text-xs whitespace-nowrap" onClick={() => prep(f)}>Prepare with Claude</button>}</div>
               </div>
             ))}
           </div>

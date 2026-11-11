@@ -495,3 +495,64 @@ input[type="datetime-local"].glass-input { color-scheme: light; }
   .glass-overlay[data-modal]:not([data-nosheet]) > *::before { content: ''; display: block; width: 40px; height: 5px; border-radius: 9999px; background: rgba(60,60,67,.3); margin: -8px auto 12px; }
 }
 @media (prefers-reduced-motion: reduce) { .glass-overlay[data-modal], .glass-overlay[data-modal] > * { animation: none !important; } }
+
+/* ───────── App shell (installed phone app + browser) ───────── */
+/* Installed iPhone app draws under the status bar: keep the header below the clock and battery. */
+.safe-top { padding-top: env(safe-area-inset-top); }
+/* Room for the phone tab bar (and the home indicator) so the end of every page can be scrolled into view. */
+.app-shell { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+@media (min-width: 768px) { .app-shell { padding-bottom: 0; } }
+
+/* Phone tab bar: thicker glass so the coloured wallpaper does not glow through it. */
+.tab-bar { border-bottom: none; border-top: 1px solid var(--glass-edge); padding-bottom: env(safe-area-inset-bottom);
+  background: rgba(255, 255, 255, 0.82);
+  -webkit-backdrop-filter: blur(24px) saturate(140%); backdrop-filter: blur(24px) saturate(140%); }
+.tab-bar-btn { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  min-height: 58px; padding: 6px 0 5px; font-size: 11px; font-weight: 500; color: var(--label-2);
+  -webkit-tap-highlight-color: transparent; transition: color .2s var(--ease), transform .3s var(--spring); }
+.tab-bar-btn.is-active { color: var(--accent); font-weight: 600; }
+.tab-bar-btn.is-active::before { content: ""; position: absolute; top: 0; left: 50%; width: 22px; height: 3px; margin-left: -11px;
+  border-radius: 0 0 3px 3px; background: var(--accent); }
+.tab-bar-btn:active { transform: scale(0.92); }
+
+/* Academy uses the We One emblem: muted when not selected, full gold when selected. */
+.nav-logo { display: block; object-fit: contain; filter: grayscale(1) brightness(.5) opacity(.85); transition: filter .25s var(--ease), transform .3s var(--spring); }
+.nav-logo.is-active, .glass-tab-btn:hover .nav-logo { filter: none; }
+
+/* Segmented control (Academy: Students · Team · Attendance · Tasks) */
+.seg-control { display: grid; gap: 4px; padding: 4px; border-radius: 14px; background: rgba(118, 118, 128, 0.12); }
+.seg-control button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; min-height: 40px;
+  padding: 0 4px; border-radius: 10px; font-size: 12.5px; font-weight: 600; color: var(--label-2); letter-spacing: -0.01em;
+  transition: background-color .2s var(--ease), color .2s var(--ease), box-shadow .2s var(--ease), transform .3s var(--spring); }
+.seg-control button.is-active { background: #fff; color: var(--label); box-shadow: 0 3px 8px rgba(0,0,0,.12), 0 1px 1px rgba(0,0,0,.04); }
+.seg-control button:active { transform: scale(0.96); }
+.seg-control button svg { display: none; }
+@media (min-width: 640px) { .seg-control { display: inline-grid; min-width: 520px; } .seg-control button { font-size: 14px; padding: 0 12px; } .seg-control button svg { display: block; } }
+
+/* Desktop "More" menu: nearly solid so the page behind never shows through the words */
+.more-menu { background: rgba(255, 255, 255, 0.96); border: 1px solid rgba(0, 0, 0, 0.06); border-radius: 16px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.06); }
+.menu-item { color: var(--label); transition: background-color .15s var(--ease), color .15s var(--ease); }
+.menu-item.is-active { background: var(--accent-light); color: var(--accent); font-weight: 600; }
+
+/* Floating button (Ask Claude) sits above the phone tab bar, never on it. */
+.fab-above-bar { bottom: calc(76px + env(safe-area-inset-bottom) + 12px); }
+@media (min-width: 768px) { .fab-above-bar { bottom: 24px; } }
+
+/* ───────── Hover polish: mouse/trackpad only, never sticky on touch ───────── */
+@media (hover: hover) and (pointer: fine) {
+  .glass-tab-btn:hover:not(.active) { background: rgba(255, 255, 255, 0.6); box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+  .seg-control button:hover:not(.is-active) { background: rgba(255, 255, 255, 0.55); color: var(--label); }
+  .menu-item:hover:not(.is-active) { background: rgba(118, 118, 128, 0.12); }
+  .glass-btn:hover:not(:disabled) { transform: translateY(-1px); }
+  .glass-btn-ghost:hover:not(:disabled) { box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  .glass-table tbody tr { cursor: default; }
+  .fab-above-bar:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(193, 95, 60, .35); }
+}
+.fab-above-bar { transition: transform .3s var(--spring), box-shadow .25s var(--ease); }
+.fab-above-bar:active { transform: scale(0.95); }
+@media (prefers-reduced-motion: reduce) {
+  .tab-bar-btn, .seg-control button, .nav-logo, .fab-above-bar, .glass-btn { transition: none; }
+  .tab-bar-btn:active, .seg-control button:active, .fab-above-bar:active { transform: none; }
+  .glass-btn:hover:not(:disabled), .fab-above-bar:hover { transform: none; }
+}

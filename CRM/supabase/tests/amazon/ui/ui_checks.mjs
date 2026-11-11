@@ -206,7 +206,7 @@ await page.getByRole('button', { name: 'Remove owner@example.com' }).waitFor({ t
   .catch(async () => ok(false, 'UI39 alert emails can be added (and removed) in Settings ' + await toast()));
 // Business email (HIOX SMTP) + phone app: in the main CRM Settings, not under Amazon
 await page.evaluate(() => { window.location.hash = '#/settings'; });
-await page.getByText('Install We One CRM on your phone').waitFor({ timeout: 5000 }).then(() => ok(true, 'UI50 main Settings explains how to install the whole CRM as an app'))
+await page.getByText('Install CRM on your phone').waitFor({ timeout: 5000 }).then(() => ok(true, 'UI50 main Settings explains how to install the whole CRM as an app'))
   .catch(() => ok(false, 'UI50 main Settings explains how to install the whole CRM as an app'));
 await page.getByRole('button', { name: 'Turn on notifications' }).waitFor({ timeout: 5000 }).then(() => ok(true, 'UI51 notifications can be turned on for this device'))
   .catch(() => ok(false, 'UI51 notifications can be turned on for this device'));

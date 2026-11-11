@@ -1,7 +1,6 @@
 import { lazy, Suspense, useState } from 'react';
 import { login } from '../api';
 import { USE_SUPABASE } from '../backend/mode';
-import Icon from './icons';
 
 // Live globe behind the sign-in card (loads after the form, so signing in is never slowed down).
 const Globe3D = lazy(() => import('./Globe3D'));
@@ -39,9 +38,9 @@ export default function Login({ onLogin, onSwitchToEmployee, onSwitchToStudent }
           <p className="mt-3 text-lg" style={{ color: 'rgba(0,0,0,0.6)' }}>One place for the We One Aviation team.</p>
         </div>
         <div className="glass-strong p-6 sm:p-8 w-full max-w-md mx-auto lg:ml-auto animate-glass-in">
-          <div className="flex justify-center mb-3" style={{ color: '#007AFF' }}><Icon name="plane" size={40} strokeWidth={1.6} /></div>
-          <h1 className="text-2xl font-bold mb-1 text-center tracking-tight" style={{ color: 'rgba(0,0,0,0.92)' }}>We One Aviation</h1>
-          <p className="text-base mb-6 text-center" style={{ color: 'rgba(0,0,0,0.6)' }}>CRM · Sign in to continue</p>
+          <div className="flex justify-center mb-3"><img src="/icons/icon-192.png" alt="CRM" width={64} height={64} className="h-16 w-16 rounded-[16px]" style={{ boxShadow: '0 4px 14px rgba(0,0,0,0.12), 0 0 0 0.5px rgba(0,0,0,0.06)' }} /></div>
+          <h1 className="text-2xl font-bold mb-1 text-center tracking-tight" style={{ color: 'rgba(0,0,0,0.92)' }}>CRM</h1>
+          <p className="text-base mb-6 text-center" style={{ color: 'rgba(0,0,0,0.6)' }}>Sign in to continue</p>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label htmlFor="login-id" className="block text-sm font-medium mb-1.5" style={{ color: 'rgba(0,0,0,0.6)' }}>{USE_SUPABASE ? 'Login ID, phone or email' : 'Login ID'}</label>

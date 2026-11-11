@@ -1,11 +1,11 @@
-// We One CRM service worker: phone notifications only. It does not cache pages, so updates show at once.
+// CRM service worker: phone notifications only. It does not cache pages, so updates show at once.
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 
 self.addEventListener('push', (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data ? e.data.text() : '' }; }
-  e.waitUntil(self.registration.showNotification(d.title || 'We One CRM', {
+  e.waitUntil(self.registration.showNotification(d.title || 'CRM', {
     body: d.body || '',
     tag: d.tag || undefined,
     renotify: Boolean(d.tag),

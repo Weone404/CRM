@@ -124,8 +124,8 @@ Deno.serve(async (req) => {
         const to = cfg.recipients.length ? cfg.recipients : [cfg.smtp.username];
         try {
           await smtpSend(smtpOf(cfg), { to, subject: "✅ Test: CRM alerts from your business email",
-            text: "This is a test from We One CRM. Amazon alerts will now come from this address.",
-            html: "<p>This is a test from <b>We One CRM</b>. Amazon alerts will now come from this address.</p>" });
+            text: "This is a test from your CRM. Amazon alerts will now come from this address.",
+            html: "<p>This is a test from your <b>CRM</b>. Amazon alerts will now come from this address.</p>" });
           await rpc("svc_amz_smtp_test_save", { p_ok: true, p_detail: `Sent to ${to.join(", ")}` });
           return json(req, 200, { ok: true, to });
         } catch (e) {

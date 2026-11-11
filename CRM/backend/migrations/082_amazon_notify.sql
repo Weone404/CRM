@@ -109,7 +109,7 @@ BEGIN
       'password_changed', pw IS NOT NULL AND pw <> ''));   -- never the password
   END IF;
   c := coalesce((SELECT value::jsonb FROM public.amazon_config WHERE key = 'smtp'),
-                '{"host": "host2.dnsinweb.com", "port": 465, "username": "info@weoneaviation.in", "from_name": "We One CRM", "enabled": false}');
+                '{"host": "host2.dnsinweb.com", "port": 465, "username": "info@weoneaviation.in", "from_name": "CRM Alerts", "enabled": false}');
   RETURN c || jsonb_build_object(
     'password_set', EXISTS (SELECT 1 FROM vault.secrets WHERE name = 'crm_smtp_password'),
     'last_test', (SELECT value::jsonb FROM public.amazon_config WHERE key = 'smtp_test'),

@@ -543,7 +543,7 @@ export default function Amazon({ access }) {
       {view === 'settings' && access.is_admin && <Settings />}
       {access.can_approve && !chat && (
         <button type="button" onClick={() => setChat({ text: '' })} aria-label="Ask Claude"
-          className="fixed bottom-5 right-5 z-40 rounded-full pl-4 pr-5 py-3 text-white font-semibold shadow-lg inline-flex items-center gap-2"
+          className="fab-above-bar fixed right-4 sm:right-5 z-30 rounded-full pl-3.5 pr-4 py-2.5 sm:pl-4 sm:pr-5 sm:py-3 text-sm sm:text-base text-white font-semibold shadow-lg inline-flex items-center gap-2"
           style={{ background: 'linear-gradient(160deg,#D97757,#C15F3C)' }}><Icon name="sparkles" size={18} />Ask Claude</button>
       )}
       <ClaudeChat open={!!chat} preset={chat} onClose={() => setChat(null)} goDecisions={() => go('decisions')} />

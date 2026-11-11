@@ -15,7 +15,7 @@ function page(heading: string, rowsHtml: string, button: { url: string; label: s
 <h2 style="font-size:18px;margin:0 0 14px">${esc(heading)}</h2>
 ${rowsHtml}
 <a href="${esc(button.url)}" style="display:inline-block;margin-top:12px;background:#007aff;color:#fff;text-decoration:none;padding:10px 18px;border-radius:999px;font-weight:600">${esc(button.label)}</a>
-<p style="font-size:12px;color:#86868b;margin-top:22px">Sent by We One CRM. Change who gets these in CRM &gt; Amazon &gt; More &gt; Settings.</p>
+<p style="font-size:12px;color:#86868b;margin-top:22px">Sent by your CRM. Change who gets these in CRM &gt; Amazon &gt; More &gt; Settings.</p>
 </div></body></html>`;
 }
 const card = (title: string, body?: string | null, link?: string | null, linkLabel = "Open") =>

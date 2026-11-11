@@ -3,8 +3,8 @@
 // the detail view and the WhatsApp message all describe a trip the same way.
 
 export const SEGMENTS = [
-  { id: 'aviation', label: 'Aviation', icon: '🎓' },
-  { id: 'charter', label: 'Charter', icon: '🛩️' },
+  { id: 'aviation', label: 'We One Aviation', icon: '🎓' },
+  { id: 'charter', label: 'Book My Charter', icon: '🛩️' },
 ];
 
 export const segmentOf = (lead) => lead.segment || 'aviation';

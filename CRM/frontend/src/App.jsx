@@ -41,6 +41,8 @@ const Ads = lazy(() => import('./components/Ads'));
 // Tabs the birthday popup is allowed to appear over: the landing tab plus the
 // two people-facing views. Anywhere else it would be an interruption.
 const BIRTHDAY_TABS = ['leads', 'team', 'attendance'];
+// The Academy section groups these screens, in this order.
+const ACADEMY = ['students', 'team', 'attendance', 'tasks'];
 
 export default function App() {
   const [employee, setEmployee] = useState(null);
@@ -67,6 +69,7 @@ export default function App() {
   const setSegment = (value) => { setSegmentState(value); try { localStorage.setItem('lead_segment', value); } catch { /* ignore */ } };
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showMore, setShowMore] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [passwordForm, setPasswordForm] = useState({ old_password: '', new_password: '', confirm_password: '' });
   const [passwordError, setPasswordError] = useState('');
   const [birthdays, setBirthdays] = useState([]);
@@ -233,22 +236,40 @@ export default function App() {
     isEmployeeSession && { id: 'profile', label: 'My Profile', icon: 'profile' },
     isEmployeeSession && { id: 'leave', label: 'My Leave', icon: 'calendar' },
   ].filter(Boolean);
-  // Phones: the first tabs sit in a bottom bar (thumb reach); the rest open from "More".
-  const BAR = Math.min(4, tabs.length);
-  const barTabs = tabs.slice(0, BAR);
-  const moreTabs = tabs.slice(BAR);
-  const activeTab = tabs.some((t) => t.id === routeTab) ? routeTab : (tabs[0]?.id || 'tasks');
-  const go = (id) => { setShowMore(false); navigate(id); };
+  // Main sections: Leads, Academy (Students, Team, Attendance, Tasks), Amazon, ADS; everything else is under More.
+  // Each screen keeps its own address (#/students, #/tasks ...), so old links and bookmarks still work.
+  const academyKids = ACADEMY.map((id) => tabs.find((t) => t.id === id)).filter(Boolean);
+  const pick = (id) => tabs.find((t) => t.id === id);
+  const primary = [
+    pick('leads'),
+    academyKids.length > 0 && { id: 'academy', label: 'Academy', logo: true },
+    pick('amazon'),
+    pick('ads'),
+  ].filter(Boolean);
+  const moreTabs = tabs.filter((t) => !['leads', 'amazon', 'ads', ...ACADEMY].includes(t.id));
+  const lastAcademy = () => { try { const v = localStorage.getItem('academy_tab'); return academyKids.some((k) => k.id === v) ? v : null; } catch { return null; } };
+  const wanted = routeTab === 'academy' ? (lastAcademy() || academyKids[0]?.id) : routeTab;
+  const activeTab = tabs.some((t) => t.id === wanted) ? wanted : (primary[0]?.id === 'academy' ? academyKids[0]?.id : primary[0]?.id) || tabs[0]?.id || 'tasks';
+  const section = ACADEMY.includes(activeTab) ? 'academy' : activeTab;
+  const go = (id) => {
+    setShowMore(false); setShowMoreMenu(false);
+    if (id === 'academy') { navigate(lastAcademy() || academyKids[0]?.id); return; }
+    if (ACADEMY.includes(id)) { try { localStorage.setItem('academy_tab', id); } catch { /* ignore */ } }
+    navigate(id);
+  };
   const moreActive = moreTabs.some((t) => t.id === activeTab);
+  const tabIcon = (t, size, active) => (t.logo
+    ? <img src="/icons/academy-mark.png" alt="" width={size + 4} height={size} style={{ width: size + 4, height: size }} className={`nav-logo ${active ? 'is-active' : ''}`} />
+    : <Icon name={t.icon} size={size} strokeWidth={active ? 2.3 : 1.8} />);
 
   return (
-    <div className="min-h-screen pb-24 md:pb-0">
+    <div className="min-h-screen app-shell">
       {/* Top bar + tabs stay together at the top while scrolling */}
-      <header className="sticky top-0 z-40 glass-nav">
+      <header className="sticky top-0 z-40 glass-nav safe-top">
       <nav className="px-3 sm:px-6 py-2.5 flex justify-between items-center gap-2 relative">
         <h1 className="text-base sm:text-xl font-bold tracking-tight flex items-center gap-2 min-w-0 text-glass-primary">
-          <span className="inline-flex items-center justify-center h-8 w-8 rounded-[10px] text-white shrink-0" style={{ background: 'linear-gradient(160deg, #3D9BFF, #007AFF)', boxShadow: '0 2px 6px rgba(0,122,255,0.3), inset 0 1px 0 rgba(255,255,255,0.35)' }}><Icon name="plane" size={17} /></span>
-          <span className="truncate">We One Aviation <span className="font-normal text-glass-secondary">· CRM</span></span>
+          <img src="/icons/crm-mark.png" alt="" width={32} height={32} className="rounded-[9px] shrink-0" style={{ width: 32, height: 32, boxShadow: '0 1px 3px rgba(0,0,0,0.12), 0 0 0 0.5px rgba(0,0,0,0.06)' }} />
+          <span className="truncate">CRM</span>
         </h1>
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {canAccessLeads && (
@@ -263,28 +284,50 @@ export default function App() {
       </nav>
 
       {/* Tabs: tablet and desktop */}
-      <div className="hidden md:block overflow-x-auto whitespace-nowrap relative px-2 sm:px-4 pb-1" role="tablist" aria-label="Sections">
-        {tabs.map((t) => (
-          <button key={t.id} role="tab" aria-selected={activeTab === t.id} onClick={() => go(t.id)}
-            className={`glass-tab-btn inline-flex items-center gap-2 ${activeTab === t.id ? 'active' : ''}`}>
-            <Icon name={t.icon} size={16} />{t.label}
+      <div className="hidden md:flex items-center whitespace-nowrap relative px-2 sm:px-4 pb-1" role="tablist" aria-label="Sections">
+        {primary.map((t) => (
+          <button key={t.id} role="tab" aria-selected={section === t.id} onClick={() => go(t.id)}
+            className={`glass-tab-btn inline-flex items-center gap-2 ${section === t.id ? 'active' : ''}`}>
+            {tabIcon(t, 16, section === t.id)}{t.label}
           </button>
         ))}
+        {moreTabs.length > 0 && (
+          <div className="relative">
+            <button type="button" aria-haspopup="menu" aria-expanded={showMoreMenu} onClick={() => setShowMoreMenu((v) => !v)}
+              className={`glass-tab-btn inline-flex items-center gap-2 ${moreActive ? 'active' : ''}`}>
+              <Icon name="more" size={16} />{moreActive ? tabs.find((t) => t.id === activeTab)?.label : 'More'}<Icon name="chevronDown" size={14} />
+            </button>
+            {showMoreMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} aria-hidden="true" />
+                <div role="menu" aria-label="More" className="absolute left-0 top-full mt-1 z-50 min-w-[220px] more-menu p-1.5 animate-glass-in"
+                  onKeyDown={(e) => { if (e.key === 'Escape') setShowMoreMenu(false); }}>
+                  {moreTabs.map((t) => (
+                    <button key={t.id} role="menuitem" onClick={() => go(t.id)}
+                      className={`menu-item w-full flex items-center gap-3 px-3 min-h-[42px] rounded-xl text-sm text-left ${activeTab === t.id ? 'is-active' : ''}`}>
+                      <Icon name={t.icon} size={17} />{t.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
       </header>
 
       {/* Tabs: phones (bottom bar) */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 glass-nav" style={{ borderBottom: 'none', borderTop: '1px solid var(--glass-edge)', paddingBottom: 'env(safe-area-inset-bottom)' }} aria-label="Sections">
-        <div className="grid" style={{ gridTemplateColumns: `repeat(${barTabs.length + 1}, minmax(0, 1fr))` }}>
-          {barTabs.map((t) => (
-            <button key={t.id} onClick={() => go(t.id)} aria-current={activeTab === t.id ? 'page' : undefined}
-              className={`flex flex-col items-center justify-center gap-0.5 py-2 min-h-[56px] text-[11px] font-medium ${activeTab === t.id ? 'text-[var(--accent)]' : 'text-glass-muted'}`}>
-              <Icon name={t.icon} size={22} strokeWidth={activeTab === t.id ? 2.3 : 1.8} /><span className="truncate max-w-full px-1">{t.label}</span>
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 glass-nav tab-bar" aria-label="Sections">
+        <div className="grid" style={{ gridTemplateColumns: `repeat(${primary.length + 1}, minmax(0, 1fr))` }}>
+          {primary.map((t) => (
+            <button key={t.id} onClick={() => go(t.id)} aria-current={section === t.id ? 'page' : undefined} aria-label={t.label}
+              className={`tab-bar-btn ${section === t.id ? 'is-active' : ''}`}>
+              {tabIcon(t, 22, section === t.id)}<span className="truncate max-w-full px-1">{t.label}</span>
             </button>
           ))}
-          <button onClick={() => setShowMore(true)} aria-haspopup="dialog"
-            className={`flex flex-col items-center justify-center gap-0.5 py-2 min-h-[56px] text-[11px] font-medium ${moreActive ? 'text-[var(--accent)]' : 'text-glass-muted'}`}>
-            <Icon name="more" size={22} /><span>More</span>
+          <button onClick={() => setShowMore(true)} aria-haspopup="dialog" aria-label="More"
+            className={`tab-bar-btn ${moreActive ? 'is-active' : ''}`}>
+            <Icon name="more" size={22} strokeWidth={moreActive ? 2.3 : 1.8} /><span>More</span>
           </button>
         </div>
       </nav>
@@ -313,6 +356,15 @@ export default function App() {
 
       {/* Main Content */}
       <div className="p-4 sm:p-6 max-w-7xl mx-auto">
+        {section === 'academy' && academyKids.length > 1 && (
+          <div className="seg-control mb-4" role="tablist" aria-label="Academy" style={{ gridTemplateColumns: `repeat(${academyKids.length}, minmax(0, 1fr))` }}>
+            {academyKids.map((t) => (
+              <button key={t.id} role="tab" aria-selected={activeTab === t.id} onClick={() => go(t.id)} className={activeTab === t.id ? 'is-active' : ''}>
+                <Icon name={t.icon} size={16} /><span className="truncate">{t.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
         {activeTab === 'leads' && canAccessLeads && leadsError && (
           <div className="glass-card p-6 text-center animate-glass-in" style={{ borderColor: 'rgba(255,59,48,0.35)' }}>
             <div className="text-lg font-semibold text-red-800 mb-1 inline-flex items-center gap-2"><Icon name="alert" size={18} />Couldn't load leads</div>
@@ -337,10 +389,10 @@ export default function App() {
                 const fresh = untouched(list);
                 return (
                   <button key={s.id} role="tab" aria-selected={active} onClick={() => setSegment(s.id)}
-                    className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-sm sm:text-base font-semibold transition ${active ? 'bg-white text-glass-primary shadow-[0_3px_8px_rgba(0,0,0,0.12),0_3px_1px_rgba(0,0,0,0.04)]' : 'text-glass-secondary hover:text-glass-primary hover:bg-white/50'}`}>
-                    <span aria-hidden="true">{s.icon}</span>{s.label}
-                    <span className="text-xs font-medium opacity-80">({list.length})</span>
-                    {fresh > 0 && <span className="ml-1 min-w-[1.25rem] px-1.5 rounded-full bg-orange-500 text-white text-xs leading-5">{fresh}</span>}
+                    className={`flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 px-2 sm:px-3 rounded-lg text-[13px] sm:text-base font-semibold transition min-w-0 ${active ? 'bg-white text-glass-primary shadow-[0_3px_8px_rgba(0,0,0,0.12),0_3px_1px_rgba(0,0,0,0.04)]' : 'text-glass-secondary hover:text-glass-primary hover:bg-white/50'}`}>
+                    <span aria-hidden="true" className="hidden sm:inline">{s.icon}</span><span className="truncate">{s.label}</span>
+                    <span className="text-xs font-medium opacity-80 shrink-0">({list.length})</span>
+                    {fresh > 0 && <span className="ml-0.5 shrink-0 min-w-[1.25rem] px-1.5 rounded-full bg-orange-500 text-white text-xs leading-5">{fresh}</span>}
                   </button>
                 );
               })}
@@ -368,7 +420,7 @@ export default function App() {
             )}
             <div className="glass-card p-4">
               <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
-                <h2 className="text-lg font-semibold text-glass-primary">{segment === 'charter' ? 'Charter Leads' : 'Aviation Leads'}</h2>
+                <h2 className="text-lg font-semibold text-glass-primary">{segment === 'charter' ? 'Book My Charter Leads' : 'We One Aviation Leads'}</h2>
                 <div className="flex gap-2">
                   <button onClick={() => setShowAddQuery(true)} className="glass-btn px-4 py-2 inline-flex items-center gap-1.5 min-h-[40px]" style={{ background: '#248A3D' }}><Icon name="plus" size={16} />{segment === 'charter' ? 'Add Enquiry' : 'Add Query'}</button>
                   <button onClick={syncNow} className="glass-btn px-4 py-2 inline-flex items-center gap-1.5 min-h-[40px]"><Icon name="refresh" size={16} />Sync</button>

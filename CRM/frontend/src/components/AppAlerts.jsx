@@ -64,7 +64,7 @@ export function BusinessEmail() {
           <input aria-label="Business email password" type="password" autoComplete="new-password" className="glass-input w-full px-3 py-2 mt-1" value={pw}
             placeholder={c.password_set ? '•••••••• saved (type to change)' : 'Password of this mailbox'} onChange={(e) => setPw(e.target.value)} /></label>
         <label className="text-sm"><span className="font-semibold">Sender name</span>
-          <input aria-label="Sender name" className="glass-input w-full px-3 py-2 mt-1" maxLength={60} value={c.from_name || ''} onChange={set('from_name')} placeholder="We One CRM" /></label>
+          <input aria-label="Sender name" className="glass-input w-full px-3 py-2 mt-1" maxLength={60} value={c.from_name || ''} onChange={set('from_name')} placeholder="CRM Alerts" /></label>
         <div className="grid grid-cols-3 gap-2">
           <label className="text-sm col-span-2"><span className="font-semibold">Mail server</span>
             <input aria-label="Mail server" className="glass-input w-full px-3 py-2 mt-1" value={c.host || ''} onChange={set('host')} /></label>
@@ -150,14 +150,14 @@ export function PhoneApp({ notifications = true }) {
       <div className="glass-card p-4 space-y-3">
         <div className="flex items-center gap-3">
           <img src="/icons/icon-192.png" alt="" className="w-12 h-12 rounded-[12px]" />
-          <div><h3 className="font-bold">Install We One CRM on your phone</h3>
+          <div><h3 className="font-bold">Install CRM on your phone</h3>
             <div className="text-xs text-glass-secondary">{standalone ? 'Installed. You are using the app.' : 'The full CRM (Leads, Students, Tasks, Attendance, Amazon and everything else) opens full screen from its own icon. Free, no App Store needed.'}</div></div>
         </div>
         {!standalone && (ios ? (
           <ol className="text-sm list-decimal pl-5 space-y-1">
             <li>Open <b>crm.weoneaviation.in</b> in <b>Safari</b>.</li>
             <li>Tap the <b>Share</b> button (square with an arrow), then <b>Add to Home Screen</b>, then <b>Add</b>.</li>
-            <li>Open <b>We One CRM</b> from the new icon, sign in, and come back here to turn on notifications.</li>
+            <li>Open <b>CRM</b> from the new icon, sign in, and come back here to turn on notifications.</li>
           </ol>
         ) : canInstall ? (
           <button type="button" className="glass-btn px-4 py-2 text-sm" onClick={install}>Install app</button>
@@ -183,7 +183,7 @@ export function PhoneApp({ notifications = true }) {
         ) : !pushSupported() ? (
           <div className="text-sm" style={{ color: '#B25E00' }}>This browser cannot show notifications. Use Chrome on Android, or the installed app on iPhone.</div>
         ) : st.perm === 'denied' ? (
-          <div className="text-sm" style={{ color: '#C4261D' }}>Notifications are blocked for this app. Allow them in the phone's settings (Settings &gt; Notifications &gt; We One CRM), then come back.</div>
+          <div className="text-sm" style={{ color: '#C4261D' }}>Notifications are blocked for this app. Allow them in the phone's settings (Settings &gt; Notifications &gt; CRM), then come back.</div>
         ) : (
           <div className="flex flex-wrap gap-2">
             {st.on
