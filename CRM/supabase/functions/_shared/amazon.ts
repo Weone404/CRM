@@ -179,6 +179,21 @@ export class SpApi {
                includedData: "summaries,salesRanks,images" } });
   }
 
+  // Catalog search by keyword (top 20, Amazon's relevance order) for the morning market watch.
+  searchCatalog(keyword: string) {
+    return this.request("GET", "/catalog/2022-04-01/items", {
+      query: { keywords: keyword, marketplaceIds: this.marketplaceId, includedData: "summaries,salesRanks,images,attributes",
+               pageSize: "20", keywordsLocale: "en_IN" } });
+  }
+  // Solicitations: Amazon's own "Request a Review" (one per order, 5-30 days after delivery; Amazon decides eligibility).
+  solicitationActions(orderId: string) {
+    return this.request("GET", `/solicitations/v1/orders/${enc(orderId)}`, { query: { marketplaceIds: this.marketplaceId } });
+  }
+  requestReview(orderId: string) {
+    return this.request("POST", `/solicitations/v1/orders/${enc(orderId)}/solicitations/productReviewAndSellerFeedback`,
+      { query: { marketplaceIds: this.marketplaceId } });
+  }
+
   createReport(reportType: string, start: string, end: string, options?: Record<string, string>) {
     return this.request("POST", "/reports/2021-06-30/reports", {
       body: { reportType, marketplaceIds: [this.marketplaceId], dataStartTime: start, dataEndTime: end, reportOptions: options } })
@@ -395,6 +410,62 @@ export function parseCatalog(resp: any) {
     bsr: first(first(it.salesRanks)?.displayGroupRanks)?.rank ?? first(first(it.salesRanks)?.classificationRanks)?.rank ?? null,
     image_count: first(it.images)?.images?.length ?? null,
   }));
+}
+
+// Catalog keyword search -> ranked items with what we compare (no buyer data, no reviews: Amazon does not give them).
+export function parseSearch(resp: any) {
+  return (resp?.items || []).map((it: any, i: number) => {
+    const sum = first(it.summaries) || {};
+    const rank = first(it.salesRanks) || {};
+    const grp = first(rank.displayGroupRanks) || first(rank.classificationRanks) || {};
+    const imgs: any[] = first(it.images)?.images || [];
+    const main = imgs.filter((m) => m.variant === "MAIN").sort((a, b) => (a.height || 0) - (b.height || 0));
+    const pick = main.find((m) => (m.height || 0) >= 300) || main[main.length - 1] || imgs[0];
+    const attr = it.attributes || {};
+    const bullets = (attr.bullet_point || []).map((b: any) => String(b?.value ?? "")).filter(Boolean).slice(0, 10);
+    return {
+      asin: it.asin, rank: i + 1,
+      title: sum.itemName ?? first(attr.item_name)?.value ?? null,
+      brand: sum.brand ?? sum.brandName ?? first(attr.brand)?.value ?? null,
+      bsr: grp.rank ?? null, bsr_group: grp.title ?? null,
+      image: pick?.link ?? null,
+      images: new Set(imgs.map((m) => m.variant)).size || null,
+      bullets,
+    };
+  }).filter((x: any) => x.asin);
+}
+
+// Most used 2-3 word phrases in our own product names: the first keywords to watch when none are set yet.
+export function seedPhrases(titles: string[], max = 6) {
+  const stop = new Set(["a", "an", "and", "the", "of", "to", "in", "on", "for", "with", "by", "your", "you", "from", "as", "pack", "set", "x", "cm", "inch", "gsm"]);
+  const count = new Map<string, number>();
+  for (const t of titles) {
+    const w = String(t || "").toLowerCase().replace(/['’]/g, "").replace(/[^\p{L}\p{N}\s]+/gu, " ").split(/\s+/).filter(Boolean);
+    const seen = new Set<string>();
+    for (let n = 2; n <= 3; n++) {
+      for (let i = 0; i + n <= w.length; i++) {
+        const g = w.slice(i, i + n);
+        if (stop.has(g[0]) || stop.has(g[g.length - 1]) || /^\d/.test(g[0]) || g.some((x) => /^\d+$/.test(x) && !/^20\d\d$/.test(x))) continue;
+        const k = g.join(" ");
+        if (!seen.has(k)) { seen.add(k); count.set(k, (count.get(k) || 0) + 1); }
+      }
+    }
+  }
+  const out: string[] = [];
+  for (const [k] of [...count.entries()].filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)) {
+    if (out.some((o) => o.includes(k) || k.includes(o))) continue;    // no near-duplicates
+    out.push(k);
+    if (out.length >= max) break;
+  }
+  // Few repeated phrases (small catalogue): add the obvious searches for what we sell, if our names mention it.
+  const all = new Set(titles.join(" ").toLowerCase().replace(/[^\p{L}\p{N}\s]+/gu, " ").split(/\s+/));
+  const fallback = ["personalised diary", "diary with name", "customised diary", "personalised planner", "name diary for gift", "personalised notebook"];
+  for (const f of fallback) {
+    if (out.length >= Math.min(max, 5)) break;
+    const head = f.includes("planner") ? "planner" : f.includes("notebook") ? "notebook" : "diary";
+    if (all.has(head) && !out.includes(f)) out.push(f);
+  }
+  return out;
 }
 
 // GET_SALES_AND_TRAFFIC_REPORT for ONE day with asinGranularity=SKU -> one row per SKU for that day.

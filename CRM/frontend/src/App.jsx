@@ -42,6 +42,25 @@ const Ads = lazy(() => import('./components/Ads'));
 // Tabs the birthday popup is allowed to appear over: the landing tab plus the
 // two people-facing views. Anywhere else it would be an interruption.
 const BIRTHDAY_TABS = ['leads', 'team', 'attendance'];
+// Section access (Amazon, ADS). A slow network or a token refresh right after opening the app used to hide the
+// section until a reload; now: last known answer first, then up to 4 tries, and again whenever the app comes back to the screen.
+function loadAccess(fn, employee, set) {
+  const key = `access:${fn}:${employee?.id || employee?.name || ''}`;
+  try { const c = JSON.parse(sessionStorage.getItem(key) || 'null'); if (c) set(c); } catch { /* ignore */ }
+  let live = true, timer = null;
+  const tryLoad = (attempt = 0) => {
+    import('./backend/supabaseClient').then(({ supabase }) => supabase?.rpc(fn)).then((r) => {
+      if (!live) return;
+      if (r && !r.error && r.data) { set(r.data); try { sessionStorage.setItem(key, JSON.stringify(r.data)); } catch { /* ignore */ } return; }
+      throw new Error('retry');
+    }).catch(() => { if (live && attempt < 3) timer = setTimeout(() => tryLoad(attempt + 1), [1500, 4000, 10000][attempt]); });
+  };
+  tryLoad();
+  const again = () => { if (document.visibilityState === 'visible') tryLoad(); };
+  document.addEventListener('visibilitychange', again);
+  return () => { live = false; clearTimeout(timer); document.removeEventListener('visibilitychange', again); };
+}
+
 // The Academy section groups these screens, in this order.
 const ACADEMY = ['students', 'team', 'attendance', 'tasks'];
 
@@ -95,10 +114,7 @@ export default function App() {
   const [amzAccess, setAmzAccess] = useState(null);
   useEffect(() => {
     if (!employee || !USE_SUPABASE) { setAmzAccess(null); return undefined; }
-    let live = true;
-    import('./backend/supabaseClient').then(({ supabase }) => supabase?.rpc('api_amz_access'))
-      .then((r) => { if (live) setAmzAccess(r && !r.error ? r.data : null); }).catch(() => {});
-    return () => { live = false; };
+    return loadAccess('api_amz_access', employee, setAmzAccess);
   }, [employee]);
   const canAccessAmazon = USE_SUPABASE && !!amzAccess?.can_view;
   // Keep this phone's notification subscription fresh whenever the CRM opens (not only on the Amazon tab).
@@ -107,10 +123,7 @@ export default function App() {
   const [adsAccess, setAdsAccess] = useState(null);
   useEffect(() => {
     if (!employee || !USE_SUPABASE) { setAdsAccess(null); return undefined; }
-    let live = true;
-    import('./backend/supabaseClient').then(({ supabase }) => supabase?.rpc('api_ads_access'))
-      .then((r) => { if (live) setAdsAccess(r && !r.error ? r.data : null); }).catch(() => {});
-    return () => { live = false; };
+    return loadAccess('api_ads_access', employee, setAdsAccess);
   }, [employee]);
   const canAccessAds = USE_SUPABASE && !!adsAccess?.can_view;
   const canAccessLeads = department === 'Admin' || department === 'Sales';
@@ -199,7 +212,12 @@ export default function App() {
     await syncNow();
   };
 
-  const handleLogout = () => { if (USE_SUPABASE) signOutSupabase(); localStorage.removeItem('token'); localStorage.removeItem('employee'); setEmployee(null); };
+  const handleLogout = () => {
+    if (USE_SUPABASE) signOutSupabase();
+    localStorage.removeItem('token'); localStorage.removeItem('employee');
+    try { Object.keys(sessionStorage).filter((k) => k.startsWith('access:')).forEach((k) => sessionStorage.removeItem(k)); } catch { /* ignore */ }
+    setEmployee(null);
+  };
   const handleStudentLogout = () => { if (USE_SUPABASE) signOutSupabase(); localStorage.removeItem('student_token'); localStorage.removeItem('student'); setStudent(null); setShowStudentLogin(false); };
 
   const handleChangePassword = async (e) => {
@@ -238,6 +256,20 @@ export default function App() {
     isEmployeeSession && { id: 'profile', label: 'My Profile', icon: 'profile' },
     isEmployeeSession && { id: 'leave', label: 'My Leave', icon: 'calendar' },
   ].filter(Boolean);
+  // Change password and Logout live in an Account card: in Settings (Admin), My Profile (staff), or an Account page for everyone else.
+  if (!tabs.some((t) => t.id === 'settings' || t.id === 'profile')) tabs.push({ id: 'account', label: 'Account', icon: 'profile' });
+  const accountCard = (
+    <div className="glass-card p-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="min-w-0">
+        <div className="text-xs font-semibold uppercase tracking-wide text-glass-muted">Signed in as</div>
+        <div className="font-semibold text-glass-primary truncate">{employee.name}{department ? <span className="font-normal text-glass-secondary"> · {department}</span> : null}</div>
+      </div>
+      <div className="flex items-center gap-2">
+        <button type="button" onClick={() => setShowChangePassword(true)} className="glass-btn-ghost px-4 py-2 text-sm inline-flex items-center gap-2 min-h-[40px]"><Icon name="lock" size={16} />Change password</button>
+        <button type="button" onClick={handleLogout} className="glass-btn-ghost px-4 py-2 text-sm inline-flex items-center gap-2 min-h-[40px] text-red-600"><Icon name="logout" size={16} />Logout</button>
+      </div>
+    </div>
+  );
   // Main sections: Leads, Academy (Students, Team, Attendance, Tasks), Amazon, ADS; everything else is under More.
   // Each screen keeps its own address (#/students, #/tasks ...), so old links and bookmarks still work.
   const academyKids = ACADEMY.map((id) => tabs.find((t) => t.id === id)).filter(Boolean);
@@ -259,10 +291,10 @@ export default function App() {
     if (ACADEMY.includes(id)) { try { localStorage.setItem('academy_tab', id); } catch { /* ignore */ } }
     navigate(id);
   };
-  // Phones: as many sections as the width allows (about 72px each); the last slot is ⋯ (rest + password + logout).
+  // Phones: as many sections as the width allows (about 72px each); ⋯ appears only when some do not fit.
   const allNav = [...primary, ...moreTabs];
   const slots = Math.max(3, Math.floor(vw / 72));
-  const barItems = allNav.length <= slots - 1 ? allNav : allNav.slice(0, slots - 1);
+  const barItems = allNav.length <= slots ? allNav : allNav.slice(0, slots - 1);
   const sheetItems = allNav.slice(barItems.length);
   const sheetActive = sheetItems.some((t) => t.id === section);
   const tabIcon = (t, size, active) => (t.logo
@@ -285,8 +317,6 @@ export default function App() {
             </button>
           )}
           <span className="hidden lg:inline text-sm text-glass-secondary px-1">{employee.name}</span>
-          <button onClick={() => setShowChangePassword(true)} className="glass-btn-ghost px-2.5 py-2 text-sm hidden md:inline-flex items-center min-h-[40px]" title="Change password" aria-label="Change password"><Icon name="lock" size={16} /></button>
-          <button onClick={handleLogout} className="glass-btn-ghost px-3 py-2 text-sm hidden md:inline-flex items-center gap-1.5 min-h-[40px]"><Icon name="logout" size={16} />Logout</button>
         </div>
       </nav>
 
@@ -299,17 +329,19 @@ export default function App() {
 
       {/* Tabs: phones (bottom bar) */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 glass-nav tab-bar" aria-label="Sections">
-        <div className="grid" style={{ gridTemplateColumns: `repeat(${barItems.length + 1}, minmax(0, 1fr))` }}>
+        <div className="grid" style={{ gridTemplateColumns: `repeat(${barItems.length + (sheetItems.length > 0 ? 1 : 0)}, minmax(0, 1fr))` }}>
           {barItems.map((t) => (
             <button key={t.id} onClick={() => go(t.id)} aria-current={section === t.id ? 'page' : undefined} aria-label={t.label}
               className={`tab-bar-btn ${section === t.id ? 'is-active' : ''}`}>
               {tabIcon(t, 22, section === t.id)}<span className="truncate max-w-full px-1">{t.label}</span>
             </button>
           ))}
-          <button onClick={() => setShowMore(true)} aria-haspopup="dialog" aria-label="More" title="More"
-            className={`tab-bar-btn ${sheetActive ? 'is-active' : ''}`}>
-            <span className="nav-dots-mobile"><Icon name="more" size={24} strokeWidth={2.4} /></span>
-          </button>
+          {sheetItems.length > 0 && (
+            <button onClick={() => setShowMore(true)} aria-haspopup="dialog" aria-label="More" title="More"
+              className={`tab-bar-btn ${sheetActive ? 'is-active' : ''}`}>
+              <span className="nav-dots-mobile"><Icon name="more" size={24} strokeWidth={2.4} /></span>
+            </button>
+          )}
         </div>
       </nav>
 
@@ -326,9 +358,6 @@ export default function App() {
                   {tabIcon(t, 20, section === t.id)}{t.label}
                 </button>
               ))}
-              {sheetItems.length > 0 && <div className="h-px my-1" style={{ background: 'var(--border-subtle)' }} />}
-              <button onClick={() => { setShowMore(false); setShowChangePassword(true); }} className="flex items-center gap-3 px-3 min-h-[48px] rounded-xl text-base text-glass-primary"><Icon name="lock" size={20} />Change password</button>
-              <button onClick={handleLogout} className="flex items-center gap-3 px-3 min-h-[48px] rounded-xl text-base text-red-600"><Icon name="logout" size={20} />Logout</button>
             </div>
           </div>
         </div>,
@@ -422,8 +451,9 @@ export default function App() {
           {activeTab === 'partnerships' && canAccessFlightBridge && <FlightBridge />}
           {activeTab === 'amazon' && canAccessAmazon && <Amazon access={amzAccess} />}
           {activeTab === 'ads' && canAccessAds && <Ads access={adsAccess} />}
-          {activeTab === 'settings' && USE_SUPABASE && department === 'Admin' && <div className="space-y-4"><PhoneApp notifications={canAccessAmazon} /><BusinessEmail /><AIIntegrations /><Connections /></div>}
-          {activeTab === 'profile' && isEmployeeSession && <div className="space-y-4"><MyProfile />{USE_SUPABASE && <PhoneApp notifications={canAccessAmazon} />}</div>}
+          {activeTab === 'settings' && USE_SUPABASE && department === 'Admin' && <div className="space-y-4">{accountCard}<PhoneApp notifications={canAccessAmazon} /><BusinessEmail /><AIIntegrations /><Connections /></div>}
+          {activeTab === 'profile' && isEmployeeSession && <div className="space-y-4">{accountCard}<MyProfile />{USE_SUPABASE && <PhoneApp notifications={canAccessAmazon} />}</div>}
+          {activeTab === 'account' && <div className="space-y-4">{accountCard}{USE_SUPABASE && <PhoneApp notifications={canAccessAmazon} />}</div>}
           {activeTab === 'leave' && isEmployeeSession && <LeaveCalendar employeeId={employee.id} />}
         </Suspense>
       </div>

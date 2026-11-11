@@ -8,6 +8,7 @@ import { useRoute, navigate } from '../utils/route';
 import { ProductGallery, ProductEditor } from './AmazonEditor';
 import { Decisions, ClaudeChat, MorningSummary, MacConnect, AlertEmails, MyStyle, Profit } from './AmazonDecisions';
 import { syncPush } from './AppAlerts';
+import { Keywords, Competitors, ReviewRequests } from './AmazonMarket';
 import { inr, pct, ageText, dispatchText } from '../utils/amazon';
 
 // CRM > Amazon (Nitaniya on Amazon.in). Admin, plus people Admin grants in Settings.
@@ -238,73 +239,6 @@ function Sales({ listings }) {
   );
 }
 
-// ---------------------------------------------------------------- Keywords
-function Keywords() {
-  const [rows, load, err] = useLoad(() => rpc('api_amz_keywords'));
-  const [kw, setKw] = useState('');
-  const set = async (keyword, status) => { await run(rpc('api_amz_keyword_set', { p_keyword: keyword, p_status: status })); load(); };
-  return (
-    <div className="space-y-3">
-      <div className="glass-card p-3 text-sm text-glass-secondary flex flex-wrap gap-2 items-center">
-        Keyword volume and conversion by search term (Search Query Performance, Top Search Terms) {NEEDS_BR}. Until then the bank is built from
-        your listings, competitor titles and Sponsored Products search terms.
-      </div>
-      <form className="flex gap-2" onSubmit={async (e) => { e.preventDefault(); if (kw.trim()) { await set(kw, 'pinned'); setKw(''); } }}>
-        <input className="glass-input flex-1 px-3 py-2 text-sm" placeholder="Add a keyword, e.g. personalised diary 2027" value={kw} onChange={(e) => setKw(e.target.value)} />
-        <button className="glass-btn px-4 text-sm">Add</button>
-      </form>
-      <Err msg={err} />
-      {!rows ? <Empty>Loading…</Empty> : rows.length === 0 ? <Empty>No keywords yet. Claude adds candidates on its runs.</Empty> : (
-        <div className="glass-card divide-y" style={{ borderColor: 'var(--border-subtle)' }}>
-          {rows.map((k) => (
-            <div key={k.id} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
-              <span className="font-medium flex-1 min-w-[160px]">{k.keyword}</span>
-              <Chip>{k.source}</Chip>{k.placement && <Chip>{k.placement}</Chip>}
-              <Chip {...(k.status === 'pinned' ? { bg: 'rgba(52,199,89,0.14)', fg: '#1E7B34' } : k.status === 'rejected' ? {} : SEV.confirm)}>{k.status}</Chip>
-              {k.status !== 'pinned' && <button className="text-xs font-semibold" style={{ color: 'var(--accent)' }} onClick={() => set(k.keyword, 'pinned')}>Pin</button>}
-              {k.status !== 'rejected' && <button className="text-xs text-glass-muted" onClick={() => set(k.keyword, 'rejected')}>Reject</button>}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------- Competitors
-function Competitors({ myAsins }) {
-  const [rows, load, err] = useLoad(() => rpc('api_amz_competitors'));
-  const [asin, setAsin] = useState('');
-  const [mine, setMine] = useState('');
-  const add = async (e) => {
-    e.preventDefault();
-    await run(rpc('api_amz_competitor_set', { p_asin: asin, p_my_asin: mine || null, p_active: true }), 'Added. Price and rank arrive with the next sync.');
-    setAsin(''); load();
-  };
-  return (
-    <div className="space-y-3">
-      <form className="glass-card p-3 flex flex-wrap gap-2" onSubmit={add}>
-        <input className="glass-input px-3 py-2 text-sm flex-1 min-w-[140px]" placeholder="Rival ASIN (B0…)" value={asin} onChange={(e) => setAsin(e.target.value.toUpperCase())} />
-        <select className="glass-input px-3 py-2 text-sm" value={mine} onChange={(e) => setMine(e.target.value)}>
-          <option value="">Compare with…</option>{myAsins.map((a) => <option key={a} value={a}>{a}</option>)}
-        </select>
-        <button className="glass-btn px-4 text-sm" disabled={!/^B0[A-Z0-9]{8}$/.test(asin)}>Track</button>
-      </form>
-      <div className="text-xs text-glass-muted">Amazon does not share rivals' sales, ad spend or conversion. Shown: title, Buy Box price and seller, best-seller rank, image count.</div>
-      <Err msg={err} />
-      {!rows ? <Empty>Loading…</Empty> : rows.length === 0 ? <Empty>No rivals tracked yet.</Empty> : rows.map((c) => (
-        <div key={c.asin} className="glass-card p-3 text-sm flex flex-wrap justify-between gap-2">
-          <div className="min-w-0"><div className="font-semibold">{c.title || c.asin}</div><div className="text-xs text-glass-muted">{c.asin} · vs {c.my_asin || '—'} · updated {ageText(c.updated_at)}</div></div>
-          <div className="flex gap-1.5 flex-wrap items-start">
-            <Chip>{inr(c.price)}</Chip>{c.bsr && <Chip>BSR #{c.bsr}</Chip>}{c.image_count != null && <Chip>{c.image_count} images</Chip>}
-            <button className="text-xs text-glass-muted" onClick={async () => { await run(rpc('api_amz_competitor_set', { p_asin: c.asin, p_my_asin: c.my_asin, p_active: false })); load(); }}>Remove</button>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------- Account health
 function Health() {
   const [d, , err] = useLoad(() => rpc('api_amz_health', { p_days: 90 }));
@@ -413,6 +347,7 @@ function Settings() {
       <MacConnect />
       <MyStyle />
       <AlertEmails />
+      <ReviewRequests />
       <div className="glass-card p-4 space-y-3">
         <div className="flex flex-wrap justify-between items-center gap-2">
           <div><h3 className="font-bold">Environment variables</h3><p className="text-xs text-glass-muted">Stored in Supabase Vault. Never shown again in full; only the last 4 characters.</p></div>
@@ -438,7 +373,7 @@ function Settings() {
         {r.ads_daily_budget && <div className="flex flex-wrap gap-2 items-center text-sm"><span className="w-56">Total daily ad budget (₹)</span>
           <input type="number" defaultValue={r.ads_daily_budget.value.min} className="glass-input px-3 py-1.5 w-24" onBlur={(e) => setRule('ads_daily_budget', { ...r.ads_daily_budget.value, min: Number(e.target.value) })} /> to
           <input type="number" defaultValue={r.ads_daily_budget.value.max} className="glass-input px-3 py-1.5 w-24" onBlur={(e) => setRule('ads_daily_budget', { ...r.ads_daily_budget.value, max: Number(e.target.value) })} /></div>}
-        <div className="text-xs text-glass-muted">Amazon policy limits (title 75 characters, Item Highlights 125, backend 249 bytes, main image rules) are rows too; change them only when Amazon changes its policy.</div>
+        <div className="text-xs text-glass-muted">Amazon policy limits (title 75 characters, Item Highlights 125, hidden search words under 200 bytes on Amazon.in, main image rules) are rows too; change them only when Amazon changes its policy.</div>
       </div>
 
       <div className="glass-card p-4">
@@ -467,8 +402,8 @@ const TABS = [
   { id: 'more', label: 'More', icon: 'more' },
 ];
 const MORE = [
-  { id: 'keywords', label: 'Search words', hint: 'Words buyers type on Amazon', icon: 'search' },
-  { id: 'competitors', label: 'Competitors', hint: 'Watch other sellers\' prices', icon: 'globe' },
+  { id: 'keywords', label: 'Keywords', hint: 'Ideas from top competitors; add to all or chosen products', icon: 'search' },
+  { id: 'competitors', label: 'Competitors', hint: 'Every morning: who ranks above you', icon: 'globe' },
   { id: 'health', label: 'Account health', hint: 'Late dispatch, cancels, complaints', icon: 'heart' },
   { id: 'strategy', label: 'To-do list', hint: 'Plans and reminders', icon: 'calendar' },
   { id: 'activity', label: 'History', hint: 'Who changed what, and when', icon: 'clock' },
@@ -546,7 +481,7 @@ export default function Amazon({ access }) {
       {tab === 'products' && <Products access={access} listings={listings} findings={findings} go={go} reload={reloadAll} openSku={openSku} setOpenSku={setOpenSku} />}
       {tab === 'decisions' && <Decisions access={access} onChange={reloadAll} openProduct={openProduct} />}
       {tab === 'sales' && <Sales listings={listings} />}
-      {view === 'keywords' && <Keywords />}
+      {view === 'keywords' && <Keywords goDecisions={() => go('decisions')} />}
       {view === 'competitors' && <Competitors myAsins={myAsins} />}
       {view === 'health' && <Health />}
       {view === 'strategy' && <Strategy />}

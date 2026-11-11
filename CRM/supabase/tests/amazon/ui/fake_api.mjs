@@ -33,7 +33,11 @@ http.createServer(async (req, res) => {
   const sv = /^\/__svc\/(svc_[a-z_0-9]+)$/.exec(url.pathname);
   if (sv) {
     const ks = Object.keys(args);
-    const vs = ks.map((k) => (args[k] !== null && typeof args[k] === 'object' ? JSON.stringify(args[k]) : args[k]));
+    const st = (await pool.query(`SELECT unnest(proargnames) n, unnest(proargtypes::regtype[]::text[]) t FROM pg_proc
+                                   WHERE proname = $1 AND pronamespace = 'public'::regnamespace LIMIT 50`, [sv[1]])).rows;
+    const sOf = (k) => (st.find((r) => r.n === k) || {}).t;
+    const vs = ks.map((k) => (Array.isArray(args[k]) && sOf(k) === 'text[]' ? `{${args[k].map((x) => JSON.stringify(String(x))).join(',')}}`
+      : args[k] !== null && typeof args[k] === 'object' ? JSON.stringify(args[k]) : args[k]));
     const db = await pool.connect();
     try {
       await db.query('BEGIN'); await db.query('SET LOCAL ROLE service_role');

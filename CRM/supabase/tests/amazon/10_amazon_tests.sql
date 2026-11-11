@@ -62,12 +62,12 @@ SELECT pg_temp.ok(EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_chec
   '{"title": "2027 Diary A5!"}')->'blockers') b WHERE b->>'code' = 'title_special_chars'), 'G06 "!" blocked');
 SELECT pg_temp.ok((public.api_amz_check('listing', '69-E0DG-L8W8', jsonb_build_object('item_highlights', repeat('x', 126)))->>'ok')::boolean = false,
   'G07 Item Highlights 126 chars blocked');
--- 83 Devanagari letters = 249 bytes (passes); 84 = 252 bytes (blocked) although only 84 characters
+-- Amazon.in: under 200 bytes. 66 Devanagari letters = 198 bytes (passes); 67 = 201 bytes (blocked) although only 67 characters
 SELECT pg_temp.ok((public.api_amz_check('listing', '69-E0DG-L8W8', jsonb_build_object('backend_terms', repeat('ड', 83)))->'blockers')
   @> '[]' AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_check('listing', '69-E0DG-L8W8',
-  jsonb_build_object('backend_terms', repeat('ड', 83)))->'blockers') b WHERE b->>'code' = 'backend_terms_bytes'), 'X19a 249 bytes of Hindi passes');
+  jsonb_build_object('backend_terms', repeat('ड', 66)))->'blockers') b WHERE b->>'code' = 'backend_terms_bytes'), 'X19a 198 bytes of Hindi passes');
 SELECT pg_temp.ok(EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_check('listing', '69-E0DG-L8W8',
-  jsonb_build_object('backend_terms', repeat('ड', 84)))->'blockers') b WHERE b->>'code' = 'backend_terms_bytes'), 'X19b 84 Hindi letters = 252 bytes blocked');
+  jsonb_build_object('backend_terms', repeat('ड', 67)))->'blockers') b WHERE b->>'code' = 'backend_terms_bytes'), 'X19b 67 Hindi letters = 201 bytes blocked (Amazon.in limit)');
 SELECT pg_temp.ok(EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_check('listing', '69-E0DG-L8W8',
   '{"backend_terms": "diary 📒 planner"}')->'blockers') b WHERE b->>'code' = 'backend_no_emoji'), 'X19c emoji blocked');
 SELECT pg_temp.ok(EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_check('listing', '69-E0DG-L8W8',
@@ -651,6 +651,157 @@ BEGIN
   PERFORM pg_temp.ok(jsonb_array_length(public.svc_amz_notify_claim()->'email') = 0
     AND jsonb_array_length(public.svc_amz_notify_digest()->'items') = 0, 'N20 business email off: alerts and decisions are left for Gmail');
   RESET ROLE;
+END $$;
+RESET ROLE;
+
+-- O: market watch, Keywords section, Request a Review (083)
+DO $$
+DECLARE s1 text; s2 text; s3 text; a1 text; r jsonb; k1 bigint; k2 bigint; k3 bigint; n int; cid uuid; b text;
+BEGIN
+  RESET ROLE;
+  SELECT sku, asin INTO s1, a1 FROM public.amazon_listings WHERE NOT is_parent AND asin IS NOT NULL ORDER BY sku LIMIT 1;
+  SELECT sku INTO s2 FROM public.amazon_listings WHERE NOT is_parent AND sku <> s1 ORDER BY sku LIMIT 1;
+  SELECT sku INTO s3 FROM public.amazon_listings WHERE NOT is_parent AND sku NOT IN (s1, s2) ORDER BY sku LIMIT 1;
+  UPDATE public.amazon_change_queue SET status = 'cancelled' WHERE sku IN (s1, s2, s3) AND status = 'pending';
+  UPDATE public.amazon_listings SET title = 'Personalised Diary 2027 with Name', bullets = '["Hardcover A5 planner"]', description = 'Lined pages',
+    backend_terms = 'customised notebook' WHERE sku IN (s1, s2, s3);
+  PERFORM pg_temp.ok(public.svc_amz_keyword_seed(ARRAY['personalised diary', 'diary with name']) = 2
+    AND public.svc_amz_keyword_seed(ARRAY['x y']) = 0, 'O01 first run seeds keywords from our own names, only once');
+  SELECT id INTO k1 FROM public.amazon_keywords WHERE keyword = 'personalised diary';
+  SELECT id INTO k2 FROM public.amazon_keywords WHERE keyword = 'diary with name';
+  r := public.svc_amz_market_save(jsonb_build_array(
+    jsonb_build_object('keyword_id', k1, 'items', jsonb_build_array(
+      jsonb_build_object('asin', 'B0COMP00001', 'rank', 1, 'title', 'Doodlo Personalised Leather Journal Gift for Women', 'brand', 'Doodlo', 'bsr', 1200,
+                         'bullets', jsonb_build_array('Leather journal gift for women')),
+      jsonb_build_object('asin', 'B0COMP00002', 'rank', 2, 'title', 'Custom Leather Journal Gift for Women A5', 'brand', 'Papyrs', 'bsr', 3400),
+      jsonb_build_object('asin', a1, 'rank', 3, 'title', 'mine'),
+      jsonb_build_object('asin', 'B0COMP00003', 'rank', 4, 'title', 'Below me'))),
+    jsonb_build_object('keyword_id', k2, 'items', jsonb_build_array(
+      jsonb_build_object('asin', a1, 'rank', 1, 'title', 'mine'),
+      jsonb_build_object('asin', 'B0COMP00003', 'rank', 2, 'title', 'Below me'),
+      jsonb_build_object('asin', 'B0COMP00004', 'rank', 3, 'title', 'Also below'),
+      jsonb_build_object('asin', 'B0COMP00005', 'rank', 4, 'title', 'Far below')))),
+    '[{"asin": "B0COMP00001", "buybox_price": 449, "buybox_seller": "S1"}]');
+  PERFORM pg_temp.ok((SELECT my_best_rank FROM public.amazon_rank_daily WHERE keyword_id = k1) = 3
+    AND (SELECT jsonb_agg(w->>'asin' ORDER BY (w->>'rank')::int) FROM public.amazon_rank_daily, jsonb_array_elements(watched) w WHERE keyword_id = k1)
+        = '["B0COMP00001", "B0COMP00002"]', 'O02 at #3 only the two competitors above us are watched');
+  PERFORM pg_temp.ok((SELECT jsonb_agg(w->>'asin' ORDER BY (w->>'rank')::int) FROM public.amazon_rank_daily, jsonb_array_elements(watched) w WHERE keyword_id = k2)
+        = '["B0COMP00003", "B0COMP00004"]', 'O03 at #1 the two just below us are watched');
+  PERFORM pg_temp.ok((SELECT price FROM public.amazon_competitors WHERE asin = 'B0COMP00001') = 449
+    AND NOT EXISTS (SELECT 1 FROM public.amazon_competitors WHERE asin = 'B0COMP00005' AND active), 'O04 prices saved; far-below products are not tracked');
+  PERFORM pg_temp.ok(EXISTS (SELECT 1 FROM public.amazon_keywords WHERE keyword LIKE '%leather journal%' AND source = 'competitor' AND competitor_count = 2)
+    AND NOT EXISTS (SELECT 1 FROM public.amazon_keywords WHERE keyword IN ('leather', 'journal') AND source = 'competitor')
+    AND NOT EXISTS (SELECT 1 FROM public.amazon_keywords WHERE keyword LIKE '%doodlo%'), 'O05 ideas from words the competitors above use (no brand names)');
+
+  -- someone not in the top 20: watch the top 10
+  INSERT INTO public.amazon_keywords (keyword, source, status, track) VALUES ('diary for girls', 'user', 'pinned', true) RETURNING id INTO k3;
+  PERFORM public.svc_amz_market_save(jsonb_build_array(jsonb_build_object('keyword_id', k3, 'items',
+    (SELECT jsonb_agg(jsonb_build_object('asin', 'B0ZZZZZZ' || lpad(g::text, 3, '0'), 'rank', g, 'title', 'Diary ' || g)) FROM generate_series(1, 12) g))));
+  PERFORM pg_temp.ok((SELECT jsonb_array_length(watched) FROM public.amazon_rank_daily WHERE keyword_id = k3) = 10
+    AND (SELECT my_best_rank FROM public.amazon_rank_daily WHERE keyword_id = k3) IS NULL, 'O06 not in the results: the top 10 are watched');
+
+  SET ROLE authenticated; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  PERFORM pg_temp.fails($q$SELECT public.api_amz_keyword_add('best seller diary')$q$, '%sales words%', 'O07 sales words are refused');
+  PERFORM pg_temp.fails($q$SELECT public.api_amz_keyword_add('doodlo diary')$q$, '%brand%', 'O08 competitor brand names are refused');
+  r := public.api_amz_keyword_add('Leather  Journal!', false);
+  PERFORM pg_temp.ok(r->>'keyword' = 'leather journal', 'O09 keywords are cleaned (lowercase, no symbols, single spaces)');
+  k3 := (r->>'id')::bigint;
+  r := public.api_amz_keyword_apply(k3, ARRAY[s1, s2]);
+  RESET ROLE;
+  PERFORM pg_temp.ok((r->>'drafted')::int = 2 AND (SELECT count(*) FROM public.amazon_keyword_products WHERE keyword_id = k3 AND status = 'pending') = 2,
+    'O10 apply to selected products: one waiting Decision each');
+  PERFORM pg_temp.ok((SELECT after->>'backend_terms' FROM public.amazon_change_queue WHERE id =
+      (SELECT change_id FROM public.amazon_keyword_products WHERE keyword_id = k3 AND sku = s1)) = 'customised notebook leather journal',
+    'O11 only the missing words are added to hidden search words');
+  INSERT INTO public.amazon_keywords (keyword, source, status) VALUES ('gift for women', 'user', 'pinned')
+    ON CONFLICT (lower(keyword)) DO UPDATE SET status = 'pinned' RETURNING id INTO k1;
+  SET ROLE authenticated; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  PERFORM public.api_amz_keyword_apply(k1, ARRAY[s1]);
+  RESET ROLE;
+  PERFORM pg_temp.ok((SELECT count(*) FROM public.amazon_change_queue WHERE sku = s1 AND status = 'pending' AND reason LIKE 'Keywords:%') = 1
+    AND (SELECT after->>'backend_terms' FROM public.amazon_change_queue WHERE sku = s1 AND status = 'pending' AND reason LIKE 'Keywords:%')
+        = 'customised notebook leather journal gift women', 'O12 a second keyword merges into the same waiting Decision (stop words skipped)');
+  SET ROLE authenticated; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  r := public.api_amz_keyword_add('personalised diary 2027', false);
+  PERFORM public.api_amz_keyword_apply((r->>'id')::bigint, ARRAY[s3]);
+  RESET ROLE;
+  PERFORM pg_temp.ok((SELECT status FROM public.amazon_keyword_products WHERE keyword_id = (r->>'id')::bigint AND sku = s3) = 'covered',
+    'O13 words already in the name: nothing to change');
+  RESET ROLE;
+  UPDATE public.amazon_listings SET backend_terms = rtrim(repeat('notebook ', 22)) WHERE sku = s3;
+  SET ROLE authenticated;
+  r := public.api_amz_keyword_apply(k3, ARRAY[s3]);
+  RESET ROLE;
+  PERFORM pg_temp.ok((r->>'no_room')::int = 1 AND (SELECT detail FROM public.amazon_keyword_products WHERE keyword_id = k3 AND sku = s3) LIKE 'No room%199 bytes%',
+    'O14 never goes past Amazon.in''s byte limit; says why');
+  SET ROLE authenticated;
+  PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000c', false);
+  PERFORM pg_temp.fails(format('SELECT public.api_amz_keyword_apply(%s)', k3), '%not allowed%', 'O15 people without approve right cannot apply');
+  PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+
+  -- the Decision goes live -> keywords live; then remove one keyword from one product
+  RESET ROLE;
+  SELECT change_id INTO cid FROM public.amazon_keyword_products WHERE keyword_id = k3 AND sku = s1;
+  UPDATE public.amazon_change_queue SET status = 'approved' WHERE id = cid;
+  UPDATE public.amazon_change_queue SET status = 'executing' WHERE id = cid;
+  UPDATE public.amazon_change_queue SET status = 'live' WHERE id = cid;
+  UPDATE public.amazon_listings SET backend_terms = 'customised notebook leather journal gift women' WHERE sku = s1;
+  PERFORM pg_temp.ok((SELECT status FROM public.amazon_keyword_products WHERE keyword_id = k3 AND sku = s1) = 'live'
+    AND (SELECT status FROM public.amazon_keyword_products WHERE keyword_id = k1 AND sku = s1) = 'live', 'O16 approved and live: keywords show Live');
+  SET ROLE authenticated;
+  r := public.api_amz_keyword_remove(k1, ARRAY[s1]);
+  RESET ROLE;
+  SELECT after->>'backend_terms' INTO b FROM public.amazon_change_queue WHERE sku = s1 AND status = 'pending' AND reason LIKE 'Keywords:%';
+  PERFORM pg_temp.ok(b = 'customised notebook leather journal' AND (SELECT status FROM public.amazon_keyword_products WHERE keyword_id = k1 AND sku = s1) = 'removing',
+    'O17 remove: a Decision without those words, other keywords kept');
+  SET ROLE authenticated;
+  r := public.api_amz_keyword_edit(k3, 'leather notebook');
+  RESET ROLE;
+  PERFORM pg_temp.ok((SELECT status FROM public.amazon_keywords WHERE id = k3) = 'rejected'
+    AND EXISTS (SELECT 1 FROM public.amazon_keyword_products kp JOIN public.amazon_keywords k ON k.id = kp.keyword_id
+                 WHERE k.keyword = 'leather notebook' AND kp.sku IN (s1, s2) AND kp.status IN ('pending', 'covered')),
+    'O18 edit: the new words replace the old on the same products');
+  UPDATE public.amazon_keywords SET apply_future = true WHERE keyword = 'leather notebook';
+  n := public.svc_amz_keyword_autoapply();
+  PERFORM pg_temp.ok(n >= 1, 'O19 "also future products": new products get the keyword as a Decision');
+
+  -- Claude's keyword ideas
+  INSERT INTO public.amazon_claude_requests (question, kind) VALUES ('ideas', 'keywords') RETURNING id INTO n;
+  r := public.svc_amz_bridge_answer(n, '', '[{"keyword": "dairy with name", "type": "spelling", "why": "Common misspelling"},
+    {"keyword": "free gift diary", "type": "gift"}, "planner for girls"]', '[{"kind": "price", "sku": "x", "after": {"price": 1}}]');
+  PERFORM pg_temp.ok((r->>'keywords')::int = 2 AND (r->>'drafts')::int = 0
+    AND EXISTS (SELECT 1 FROM public.amazon_keywords WHERE keyword = 'dairy with name' AND kind = 'spelling' AND source = 'claude')
+    AND NOT EXISTS (SELECT 1 FROM public.amazon_keywords WHERE keyword = 'free gift diary'), 'O20 Claude''s ideas are added, sales words dropped, no drafts');
+
+  -- Request a Review
+  INSERT INTO public.amazon_orders (order_id, purchase_date, status, items) VALUES
+    ('403-REV-0001', now() - interval '10 days', 'Shipped', '[{"asin": "B0X"}]'),
+    ('403-REV-0002', now() - interval '2 days', 'Shipped', '[]'),
+    ('403-REV-0003', now() - interval '12 days', 'Canceled', '[]') ON CONFLICT DO NOTHING;
+  SET ROLE service_role;
+  r := public.svc_amz_review_candidates();
+  PERFORM pg_temp.ok(r @> '[{"order_id": "403-REV-0001"}]' AND NOT r @> '[{"order_id": "403-REV-0002"}]' AND NOT r @> '[{"order_id": "403-REV-0003"}]',
+    'O21 review requests: shipped orders 5-35 days old only');
+  PERFORM public.svc_amz_review_result('403-REV-0001', 'B0X', 'sent', 'ok');
+  PERFORM pg_temp.ok(NOT public.svc_amz_review_candidates() @> '[{"order_id": "403-REV-0001"}]', 'O22 never asked twice');
+  RESET ROLE;
+  SET ROLE authenticated;
+  PERFORM public.api_amz_reviews(false);
+  RESET ROLE; SET ROLE service_role;
+  PERFORM pg_temp.ok(public.svc_amz_review_candidates() = '[]', 'O23 switched off: nothing is sent');
+  RESET ROLE; SET ROLE authenticated;
+  PERFORM public.api_amz_reviews(true);
+  r := public.api_amz_reviews(NULL);
+  PERFORM pg_temp.ok((r->>'sent_30d')::int = 1 AND (r->>'enabled')::boolean, 'O24 the CRM shows how many were sent');
+  r := public.api_amz_keywords();
+  PERFORM pg_temp.ok((r->>'byte_limit')::int = 199 AND jsonb_array_length(r->'products') >= 3 AND jsonb_array_length(r->'keywords') >= 5, 'O25 Keywords page data');
+  r := public.api_amz_market();
+  PERFORM pg_temp.ok(jsonb_array_length(r->'keywords') >= 2 AND r->'competitors' @> '[{"asin": "B0COMP00001", "price": 449}]', 'O26 Competitors page data');
+  RESET ROLE;
+  PERFORM pg_temp.ok(NOT has_function_privilege('authenticated', 'public.svc_amz_market_save(jsonb, jsonb)', 'execute')
+    AND NOT has_table_privilege('authenticated', 'public.amazon_keyword_products', 'select'), 'O27 market data is written by the server only');
+  r := public.svc_amz_market_requests();
+  PERFORM pg_temp.ok((r->>'report') IS NOT NULL AND (public.svc_amz_market_requests()->>'report') IS NULL, 'O28 one morning report per day');
 END $$;
 RESET ROLE;
 

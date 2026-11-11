@@ -1,11 +1,11 @@
 // amazon-sync: pulls Amazon data into the CRM and runs approved changes.
 // Called by pg_cron (header x-cron-token, see migration 073) or by an Admin from the CRM ("Sync now").
-// Body: {jobs: ["listings","pricing","execute","reports","finances"]}
+// Body: {jobs: ["listings","pricing","execute","reports","finances","orders","market","reviews"]}
 // Every job takes its own lock (svc_amz_run_begin), so overlapping runs skip instead of doubling up,
 // and every run is recorded in amazon_sync_runs (the CRM shows data age from it).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { SpApi, SpApiError, LwaError, parseListing, parseCompetitiveSummary, parseCatalog, parseOrdersReport, parseOrder, parseOrderItems, parseFeedbackReport,
-  parsePerformance, istDay, istDayRange } from "../_shared/amazon.ts";
+  parsePerformance, parseSearch, seedPhrases, istDay, istDayRange } from "../_shared/amazon.ts";
 import { execute, reconcile } from "../_shared/amazon_exec.ts";
 import { asUser, cors, cronOk, json, HttpError, loadApi, rpc, scrub } from "../_shared/amazon_deno.ts";
 
@@ -214,8 +214,69 @@ async function orders(api: SpApi, _s: Record<string, string>, t0: number) {
   return { items: n, detail: `${rows.length} orders, items for ${withItems.length}` };
 }
 
+// Morning market watch: search every tracked keyword, keep our rank and ONLY the competitors above us, price them,
+// then ask Claude for the morning report (and weekly keyword ideas). Keywords marked "also future products" are applied.
+async function market(api: SpApi, _s: Record<string, string>, t0: number) {
+  let t = await rpc("svc_amz_market_targets");
+  if (!t?.keywords?.length) {
+    await rpc("svc_amz_keyword_seed", { p_phrases: seedPhrases(t?.my_titles || []) });
+    t = await rpc("svc_amz_market_targets");
+  }
+  const results: any[] = [];
+  let failed = 0, lastErr = "";
+  for (const k of t?.keywords || []) {
+    if (Date.now() - t0 > DEADLINE_MS - 40_000) break;               // leave time for prices + saving
+    try { results.push({ keyword_id: k.id, items: parseSearch(await api.searchCatalog(k.keyword)) }); }
+    catch (e) {
+      if (e instanceof SpApiError && (e.status === 403 || e.status === 401)) {
+        throw new Error("Amazon refused the catalogue search (access denied). In Seller Central > Develop Apps, give the app the " +
+          "'Product Listing' role, then authorise again.");
+      }
+      failed++; lastErr = e instanceof Error ? e.message : String(e);
+    }
+  }
+  if (!results.length) throw new Error(`No keyword could be searched${lastErr ? `: ${lastErr.slice(0, 200)}` : ""}`);
+  const saved = await rpc("svc_amz_market_save", { p_results: results, p_prices: [] });
+  const watched: string[] = await rpc("svc_amz_market_watched");
+  let priced = 0;
+  for (let i = 0; i < watched.length && i < 40 && Date.now() - t0 < DEADLINE_MS; i += 20) {
+    try { priced += await rpc("svc_amz_upsert_pricing", { p_items: parseCompetitiveSummary(await api.competitiveSummary(watched.slice(i, i + 20)), _s.AMZ_SELLER_ID) }); }
+    catch (e) { console.log("market prices skipped", String(e).slice(0, 200)); break; }
+  }
+  await rpc("svc_amz_market_daily_refresh");
+  const auto = await rpc("svc_amz_keyword_autoapply");
+  await rpc("svc_amz_market_requests");
+  return { items: results.length,
+    detail: `${results.length} keywords, ${saved?.competitors ?? 0} competitors, ${saved?.ideas ?? 0} ideas, ${priced} prices` +
+      `${auto ? `, ${auto} new-product keyword drafts` : ""}${failed ? `, ${failed} searches failed` : ""}` };
+}
+
+// Request a Review for shipped orders (Amazon's own button; it decides who is eligible, 5-30 days after delivery).
+async function reviews(api: SpApi, _s: Record<string, string>, t0: number) {
+  const list: { order_id: string; asin: string | null }[] = await rpc("svc_amz_review_candidates");
+  let sent = 0, notYet = 0;
+  for (const o of list.slice(0, 25)) {
+    if (Date.now() - t0 > DEADLINE_MS) break;
+    try {
+      const a = await api.solicitationActions(o.order_id);
+      const can = (a?._links?.actions || []).some((x: any) => x?.name === "productReviewAndSellerFeedback");
+      if (!can) { await rpc("svc_amz_review_result", { p_order: o.order_id, p_asin: o.asin, p_status: "not_eligible", p_detail: "Not eligible yet" }); notYet++; continue; }
+      await api.requestReview(o.order_id);
+      await rpc("svc_amz_review_result", { p_order: o.order_id, p_asin: o.asin, p_status: "sent", p_detail: "Requested" });
+      sent++;
+    } catch (e) {
+      const msg = e instanceof SpApiError && (e.status === 403 || e.status === 401)
+        ? "Amazon refused (access denied): give the app the 'Buyer Solicitation' role in Seller Central > Develop Apps, then authorise again."
+        : (e instanceof Error ? e.message : String(e));
+      await rpc("svc_amz_review_result", { p_order: o.order_id, p_asin: o.asin, p_status: "error", p_detail: msg.slice(0, 280) });
+      if (e instanceof SpApiError && (e.status === 403 || e.status === 401)) throw new Error(msg);
+    }
+  }
+  return { items: sent, detail: `${sent} review requests sent, ${notYet} not eligible yet` };
+}
+
 const JOBS: Record<string, (api: SpApi, s: Record<string, string>, t0: number) => Promise<{ items: number; detail?: string }>> =
-  { listings, pricing, execute: executeJob, reports, finances, orders };
+  { listings, pricing, execute: executeJob, reports, finances, orders, market, reviews };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors(req) });

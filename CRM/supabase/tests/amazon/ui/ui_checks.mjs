@@ -268,7 +268,41 @@ if (pendingNow) {
   await page.keyboard.press('Escape');
 } else ok(true, 'UI44 (no pending decision to open)');
 
-for (const label of ['Search words', 'Competitors', 'Account health', 'To-do list', 'History']) {
+// Keywords + Competitors (083): seed one morning check through the server API, then use the screens
+{
+  const kws = await svc('svc_amz_market_targets', {});
+  if (!kws.keywords.length) await svc('svc_amz_keyword_seed', { p_phrases: ['personalised diary', 'diary with name'] });
+  const t = await svc('svc_amz_market_targets', {});
+  const mineAsin = (await rpcAs('api_amz_keywords')).products[0]?.asin;
+  await svc('svc_amz_market_save', { p_results: t.keywords.map((k) => ({ keyword_id: k.id, items: [
+    { asin: 'B0UICOMP001', rank: 1, title: 'Leather Journal Gift for Women A5', brand: 'Doodlo', bsr: 900, images: 7 },
+    { asin: 'B0UICOMP002', rank: 2, title: 'Custom Leather Journal Gift for Women', brand: 'Papyrs', bsr: 2100, images: 6 },
+    { asin: mineAsin, rank: 3, title: 'mine' }] })), p_prices: [] });
+  await more('Keywords');
+  await page.getByText('Leather journal', { exact: false }).first().waitFor({ timeout: 5000 }).catch(() => {});
+  ok((await page.getByRole('button', { name: 'Every product' }).count()) > 0, 'UI57 Keywords shows ideas from the competitors above you, with "Every product"');
+  // apply one idea to two selected products through the picker
+  const ideaName = (await rpcAs('api_amz_keywords')).keywords.find((k) => k.source === 'competitor' && k.keyword.includes('leather journal'))?.keyword;
+  const row = page.locator('.kw-row', { hasText: ideaName }).first();
+  await row.getByRole('button', { name: 'Selected…' }).click();
+  const dlgK = page.getByRole('dialog');
+  await dlgK.getByRole('checkbox').nth(0).check().catch(() => {});
+  const boxes = dlgK.locator('.picker-row input[type=checkbox]');
+  await boxes.nth(0).check(); await boxes.nth(1).check();
+  await dlgK.getByRole('button', { name: /^Add to 2 products$/ }).click();
+  await page.waitForTimeout(900);
+  const after = await rpcAs('api_amz_keywords');
+  const lj = after.keywords.find((k) => k.keyword === ideaName);
+  ok(lj && lj.products.filter((p) => p.status === 'pending' || p.status === 'covered').length === 2, 'UI58 apply to selected products: 2 products, waiting in Decisions');
+  ok(!/249 bytes/.test(await page.locator('body').innerText()) && /199 bytes/.test(await page.locator('body').innerText()), 'UI59 Amazon.in 199-byte limit shown (not the old 249)');
+  await page.screenshot({ path: `${SHOTS}/amz_keywords.png`, fullPage: true });
+  await more('Competitors');
+  await page.getByText('Market this morning').waitFor({ timeout: 5000 });
+  ok((await page.getByText('Above you').count()) >= 2 && (await page.locator('.you-rank').first().innerText()).trim() === '#3', 'UI60 Competitors: you are #3, the 2 above you are shown');
+  await page.screenshot({ path: `${SHOTS}/amz_competitors.png`, fullPage: true });
+}
+
+for (const label of ['Keywords', 'Competitors', 'Account health', 'To-do list', 'History']) {
   await more(label);
 }
 await nav('Home');

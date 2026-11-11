@@ -120,7 +120,7 @@ function Ideas({ field, listing, current, onUse, onClose }) {
     return (
       <div key={id} className="rounded-2xl p-3 space-y-2" style={{ background: 'rgba(0,122,255,0.06)', boxShadow: 'inset 0 0 0 0.5px rgba(0,122,255,0.35)' }}>
         <div className="flex justify-between items-center text-[11px] text-glass-muted"><span>{by}</span>
-          {field === 'title' && <span>{chars(val)}/75</span>}{field === 'backend_terms' && <span>{utf8Bytes(val)}/249 bytes</span>}</div>
+          {field === 'title' && <span>{chars(val)}/75</span>}{field === 'backend_terms' && <span>{utf8Bytes(val)}/199 bytes</span>}</div>
         <textarea aria-label={`Idea ${id}`} className="glass-input w-full px-3 py-2 text-sm" rows={field === 'title' ? 2 : field === 'bullets' ? 6 : 4}
           value={val} onChange={(e) => setEdits((s) => ({ ...s, [id]: e.target.value }))} />
         <button type="button" className="glass-btn px-3 py-1.5 text-sm" onClick={() => onUse(val)}>Use this</button>
@@ -392,7 +392,7 @@ export function ProductEditor({ listing, access, onClose, onSaved }) {
               <textarea aria-label="Description" className="glass-input w-full px-3 py-2 text-sm" rows={6} value={description} onChange={(e) => setDescription(e.target.value)} />
             </Field>
             {ideas === 'description' && <Ideas field="description" listing={l} current={{}} onUse={(t) => { setDescription(t); setIdeas(''); }} onClose={() => setIdeas('')} />}
-            <Field label="Hidden search words" hint="Buyers never see these. Words that are not in the name, separated by spaces." count={utf8Bytes(backend)} max={249} unit="bytes" ai={() => setIdeas('backend_terms')}>
+            <Field label="Hidden search words" hint="Buyers never see these. Words that are not in the name, separated by spaces." count={utf8Bytes(backend)} max={199} unit="bytes" ai={() => setIdeas('backend_terms')}>
               <textarea aria-label="Hidden search words" className="glass-input w-full px-3 py-2 text-sm" rows={3} value={backend} onChange={(e) => setBackend(e.target.value)} />
             </Field>
             {ideas === 'backend_terms' && <Ideas field="backend_terms" listing={l} current={{ title }} onUse={(t) => { setBackend(t); setIdeas(''); }} onClose={() => setIdeas('')} />}

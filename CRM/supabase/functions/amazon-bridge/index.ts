@@ -29,7 +29,7 @@ Deno.serve(async (req) => {
       case "answer": {
         if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, "Missing message id");
         const drafts = Array.isArray(body.drafts) ? body.drafts.slice(0, 30) : null;
-        const options = Array.isArray(body.options) ? body.options.slice(0, 5) : null;
+        const options = Array.isArray(body.options) ? body.options.slice(0, 40) : null;   // 5 suggestions, or up to 40 keyword ideas
         return json(req, 200, await rpc("svc_amz_bridge_answer", {
           p_id: id, p_answer: String(body.answer ?? "").slice(0, 8000), p_options: options, p_drafts: drafts, p_by: "mac" }));
       }

@@ -586,3 +586,25 @@ input[type="datetime-local"].glass-input { color-scheme: light; }
 /* Same look as a card, but without paint containment so the ⋯ menu can open over the page */
 .amz-tabbar { position: relative; z-index: 20; background: var(--card); border: 1px solid var(--glass-edge);
   box-shadow: var(--glass-shadow), var(--specular); border-radius: var(--radius-lg); }
+
+/* ───────── Keywords & Competitors ───────── */
+.kw-row { background: var(--card); border: 1px solid var(--glass-edge); border-radius: 18px; padding: 14px 16px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04); transition: box-shadow .2s var(--ease), border-color .2s var(--ease); }
+.kw-row.is-open { border-color: rgba(0,122,255,.25); box-shadow: 0 6px 20px rgba(0,0,0,.07); }
+.picker-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 14px; cursor: pointer; background: rgba(255,255,255,.75);
+  border: 1px solid transparent; transition: background-color .15s var(--ease), border-color .15s var(--ease); }
+.picker-row.is-on { background: rgba(0,122,255,.08); border-color: rgba(0,122,255,.3); }
+.byte-meter { display: inline-block; width: 48px; height: 4px; border-radius: 9999px; background: rgba(118,118,128,.2); overflow: hidden; vertical-align: middle; }
+.byte-meter > span { display: block; height: 100%; border-radius: 9999px; }
+.comp-card { border-radius: 16px; padding: 12px; background: rgba(255,255,255,.7); border: 1px solid rgba(0,0,0,.05);
+  transition: box-shadow .2s var(--ease), transform .3s var(--spring); }
+.rank-badge { position: absolute; top: -6px; left: -6px; min-width: 24px; height: 24px; padding: 0 6px; border-radius: 9999px; background: #1d1d1f; color: #fff;
+  font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 2px 6px rgba(0,0,0,.2); }
+.you-rank { min-width: 40px; height: 28px; padding: 0 10px; border-radius: 9999px; background: #007AFF; color: #fff; font-weight: 700; font-size: 14px;
+  display: inline-flex; align-items: center; justify-content: center; }
+@media (hover: hover) and (pointer: fine) {
+  .kw-row:hover { box-shadow: 0 4px 14px rgba(0,0,0,.06); }
+  .picker-row:hover:not(.is-on) { background: #fff; border-color: rgba(0,0,0,.06); }
+  .comp-card:hover { box-shadow: 0 6px 18px rgba(0,0,0,.08); transform: translateY(-1px); }
+}
+@media (prefers-reduced-motion: reduce) { .comp-card, .kw-row, .picker-row { transition: none; } .comp-card:hover { transform: none; } }

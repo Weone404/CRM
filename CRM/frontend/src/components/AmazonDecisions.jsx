@@ -172,7 +172,7 @@ function DecisionCard({ c, access, busy, onApprove, onChanged, openProduct }) {
 }
 
 // ---------------------------------------------------------------- pop-ups
-function Modal({ title, onClose, children, wide, z = 50 }) {
+export function Modal({ title, onClose, children, wide, z = 50 }) {
   useEffect(() => {
     const k = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', k);

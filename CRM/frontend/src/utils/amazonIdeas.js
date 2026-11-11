@@ -1,7 +1,7 @@
 // Instant "Generate with AI" ideas, made in the browser from the product's own facts (no paid AI, no network).
 // Only facts already on the listing are used (size, colour, cover, pages, ruling, closure ...), so no claim is invented.
 // Every idea is checked against the same limits the database guard uses (title 75 chars, a word at most twice,
-// no sales words, hidden search words 249 bytes). Claude's ideas (asynchronous) come from api_amz_suggest instead.
+// no sales words, hidden search words under 200 bytes on Amazon.in). Claude's ideas (asynchronous) come from api_amz_suggest instead.
 import { utf8Bytes } from './amazon';
 
 const v0 = (a, k) => {
@@ -144,7 +144,7 @@ export function backendIdeas(l, keywords = []) {
       const parts = w.split(' ');
       if (parts.some((x) => seen.has(x))) continue;
       const next = out ? `${out} ${parts.join(' ')}` : parts.join(' ');
-      if (utf8Bytes(next) > 249) break;
+      if (utf8Bytes(next) > 199) break;   // Amazon.in: under 200 bytes
       out = next; parts.forEach((x) => seen.add(x));
     }
     return out;

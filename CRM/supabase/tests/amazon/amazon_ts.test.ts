@@ -345,3 +345,27 @@ describe("fixes and feedback", () => {
       { order_id: "408-8", rating: 3, comment: "Ok", responded: true }]);
   });
 });
+
+// ---------------------------------------------------------------- market watch parsers (083)
+import { parseSearch, seedPhrases } from "../../functions/_shared/amazon.ts";
+test("parseSearch: rank order, brand, best-seller rank, main image, key points", () => {
+  const r = parseSearch({ items: [
+    { asin: "B0AAA00001", summaries: [{ itemName: "Leather Journal", brand: "Doodlo" }],
+      salesRanks: [{ displayGroupRanks: [{ title: "Office Products", rank: 1234 }] }],
+      images: [{ images: [{ variant: "MAIN", link: "https://m.media-amazon.com/a_SL75_.jpg", height: 75 },
+                          { variant: "MAIN", link: "https://m.media-amazon.com/a_SL500_.jpg", height: 500 }, { variant: "PT01", link: "x", height: 500 }] }],
+      attributes: { bullet_point: [{ value: "Gift for women" }, { value: "A5" }] } },
+    { asin: "B0AAA00002", summaries: [{}], attributes: { item_name: [{ value: "Planner" }], brand: [{ value: "Papyrs" }] } },
+    { summaries: [{ itemName: "no asin" }] }] });
+  expect(r.length).toBe(2);
+  expect(r[0]).toMatchObject({ asin: "B0AAA00001", rank: 1, brand: "Doodlo", bsr: 1234, bsr_group: "Office Products", images: 2,
+    image: "https://m.media-amazon.com/a_SL500_.jpg", bullets: ["Gift for women", "A5"] });
+  expect(r[1]).toMatchObject({ rank: 2, title: "Planner", brand: "Papyrs", bsr: null });
+});
+test("seedPhrases: most used 2-3 word phrases from our names, no near-duplicates, no filler", () => {
+  const p = seedPhrases(["Personalised Diary 2027 with Name, A5", "Personalised Diary with Name for Women", "Customised Planner 2027 with Name",
+    "Personalised Diary Gift Set"]);
+  expect(p[0]).toBe("personalised diary");
+  expect(p.some((x) => x.startsWith("with") || x.endsWith("with"))).toBe(false);
+  expect(p.some((x) => /^\d/.test(x))).toBe(false);          // never starts with a year or number
+});
