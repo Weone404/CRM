@@ -5,6 +5,7 @@ import { confirmDialog, promptDialog } from './ui/dialogs';
 import Icon from './icons';
 import { useRoute, navigate, setParams } from '../utils/route';
 import { ClientWizard, ImportAccounts } from './AdsClientWizard';
+import AdsLeads from './AdsLeads';
 import { PERIODS, periodRange, todayIn, money, int, pct, ratio, delta, isNum, LOWER_IS_BETTER, toCsv, STATUS_LABEL } from '../utils/ads';
 
 // CRM > ADS: paid advertising for one or more clients (Google Ads, Meta).
@@ -757,11 +758,12 @@ function Settings() {
 const TABS = [
   { id: 'home', label: 'Home', icon: 'chart' },
   { id: 'campaigns', label: 'Campaigns', icon: 'rocket' },
-  { id: 'leads', label: 'Leads & Revenue', short: 'Leads', icon: 'funnel' },
+  { id: 'adsleads', label: 'Ads Leads', short: 'Leads', icon: 'leads' },
   { id: 'approvals', label: 'Approvals', icon: 'check' },
   { id: 'more', label: 'More', icon: 'more' },
 ];
 const MORE = [
+  { id: 'leads', label: 'Leads & Revenue', icon: 'funnel', hint: 'CRM leads matched to campaigns by UTM, and recorded revenue' },
   { id: 'recommendations', label: 'Recommendations', icon: 'sparkles', hint: 'Rule-based suggestions with the data behind them' },
   { id: 'clients', label: 'Clients', icon: 'team', hint: 'Business profile, economics and targets' },
   { id: 'accounts', label: 'Ad accounts', icon: 'globe', hint: 'Google Ads and Meta accounts per client' },
@@ -834,7 +836,8 @@ export default function Ads({ access }) {
       )}
       {tab === 'home' && <Home ctx={ctx} access={access} go={go} />}
       {tab === 'campaigns' && <Campaigns ctx={ctx} access={access} />}
-      {tab === 'leads' && <LeadsRevenue ctx={ctx} access={access} clients={clients} />}
+      {tab === 'adsleads' && <AdsLeads access={access} />}
+      {view === 'leads' && <LeadsRevenue ctx={ctx} access={access} clients={clients} />}
       {tab === 'approvals' && <Approvals access={access} onChange={reloadPending} />}
       {view === 'recommendations' && <Recommendations ctx={ctx} onChange={reloadPending} />}
       {view === 'clients' && <Clients access={access} clients={clients} reload={reloadClients} clientsErr={clientsErr} />}
