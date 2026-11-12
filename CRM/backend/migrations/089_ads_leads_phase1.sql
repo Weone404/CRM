@@ -1,4 +1,4 @@
--- 085: ADS Phase 1 - data integrity for Ads leads.
+-- 089: ADS Phase 1 - data integrity for Ads leads.
 --   * ADS-only. Nothing outside ADS is created, replaced or written: the organic intake
 --     (svc_ingest_website_lead / svc_ingest_charter_lead / crm-leads), the `lead`, `student` and
 --     `audit_log` tables are untouched. `lead` and `student` are only READ (to link the same person).
@@ -7,7 +7,7 @@
 --   * Every ad enquiry is logged (ads_enquiry), even repeats and rejects; replays are idempotent.
 --   * Append-only stage, assignment and contact history; consent history; verified lead-to-student
 --     links; configurable retention. Pilot Training and Charter use separate stage lists.
--- Additive only: no existing row is changed. Re-runnable. Rollback: 085_ads_leads_phase1_down.sql.
+-- Additive only: no existing row is changed. Re-runnable. Rollback: 089_ads_leads_phase1_down.sql.
 
 -- ===========================================================================================
 -- 1. Normalisation helpers

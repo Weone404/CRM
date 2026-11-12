@@ -1,5 +1,5 @@
--- Rollback of 085_ads_leads_phase1.sql.
--- Removes only the ADS Phase 1 objects (085 never changed anything outside ADS). WARNING: this drops Ads leads, enquiry log, consent history and student links.
+-- Rollback of 089_ads_leads_phase1.sql.
+-- Removes only the ADS Phase 1 objects (089 never changed anything outside ADS). WARNING: this drops Ads leads, enquiry log, consent history and student links.
 -- Export them first if any real data exists:  SELECT * FROM public.ads_lead; ... (or a pg_dump of these tables).
 DROP FUNCTION IF EXISTS public.svc_ads_ingest_enquiry(jsonb,text);
 
