@@ -191,7 +191,7 @@ export class GoogleAds {
   async metrics(customerId: string, since: string, until: string): Promise<MetricRow[]> {
     const rows = await this.search(customerId,
       "SELECT campaign.id, segments.date, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, " +
-      `metrics.conversions_value, metrics.video_views FROM campaign WHERE segments.date BETWEEN '${since}' AND '${until}'`);
+      `metrics.conversions_value, metrics.video_trueview_views FROM campaign WHERE segments.date BETWEEN '${since}' AND '${until}'`);
     return rows.map(parseGoogleMetric);
   }
   async campaignState(customerId: string, campaignId: string): Promise<{ status: string; daily_budget: number | null }> {
@@ -232,7 +232,7 @@ export function parseGoogleMetric(r: any): MetricRow {
     campaign_external_id: String(r.campaign?.id), day: r.segments?.date,
     impressions: num(m.impressions) ?? 0, clicks: num(m.clicks) ?? 0, spend: microsToUnits(m.costMicros) ?? 0,
     conversions: num(m.conversions) ?? 0, conversion_value: num(m.conversionsValue) ?? 0,
-    reach: null, video_views: num(m.videoViews), raw: {},
+    reach: null, video_views: num(m.videoTrueviewViews), raw: {},   // v26: metrics.video_views was replaced by video_trueview_views
   };
 }
 
