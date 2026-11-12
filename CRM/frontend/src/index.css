@@ -664,3 +664,8 @@ input[type="datetime-local"].glass-input { color-scheme: light; }
 .decision-thumb > span { position: absolute; left: 3px; bottom: 3px; font-size: 9px; font-weight: 700; background: rgba(0,0,0,.6); color: #fff; padding: 0 5px; border-radius: 6px; }
 @media (hover: hover) and (pointer: fine) { .studio-slot:hover:not(.is-on) { background: rgba(118,118,128,.08); } }
 @media (prefers-reduced-motion: reduce) { .studio-slot { transition: none; } }
+.designer { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) { .designer { grid-template-columns: minmax(0, 1fr) 320px; } }
+.designer-canvas { width: 100%; max-width: 640px; aspect-ratio: 1 / 1; border-radius: 14px; border: 1px solid rgba(0,0,0,.08); touch-action: none; cursor: grab; background: #fff; display: block; margin: 0 auto; }
+.swatch-dot { width: 22px; height: 22px; border-radius: 9999px; border: 2px solid rgba(0,0,0,.15); }
+.swatch-dot.is-on { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #007AFF; }

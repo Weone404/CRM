@@ -995,7 +995,7 @@ BEGIN
   PERFORM pg_temp.ok((SELECT after->'images'->0->>'url' = 'https://x.supabase.co/storage/v1/object/public/amazon-images/m.jpg'
       AND (after->'images'->0->>'white_bg')::boolean AND after->'images'->0->>'has_text' = 'false'
       AND jsonb_array_length(after->'images') = jsonb_array_length(before->'images') AND status = 'pending' FROM public.amazon_change_queue WHERE id = cid)
-    AND (SELECT status = 'sent' AND sent_change = cid FROM public.amazon_studio_assets WHERE id = m1),
+    AND (SELECT status = 'sent' AND sent_change = cid AND meta->>'sent_slot' = '1' FROM public.amazon_studio_assets WHERE id = m1),
     'ST07 send: a waiting Decision that swaps only the main photo (white background recorded)');
   PERFORM pg_temp.ok((SELECT guard_result->>'ok' FROM public.amazon_change_queue WHERE id = cid) IS NOT NULL, 'ST08 the Decision is checked like any other');
   -- a product with no photos yet: the new main photo still carries its white-background check
@@ -1030,6 +1030,43 @@ BEGIN
     AND NOT has_function_privilege('authenticated', 'public.svc_amz_studio_claim()', 'execute')
     AND NOT has_table_privilege('authenticated', 'public.amazon_studio_assets', 'select')
     AND (public.api_amz_access() ? 'employee_id'), 'ST14 permissions: only the server stores files and makes Decisions');
+END $$;
+RESET ROLE;
+
+
+-- SD: Studio text & pointers (087)
+DO $$
+DECLARE s1 text; r jsonb; t jsonb;
+BEGIN
+  RESET ROLE;
+  SELECT sku INTO s1 FROM public.amazon_listings WHERE NOT is_parent ORDER BY sku LIMIT 1;
+  UPDATE public.amazon_listings SET title = 'Personalised Diary 2027 with Name, A5 Faux Leather',
+    bullets = '["PREMIUM COVER: Faux leather with gold foil", "SECURE MAGNETIC CLASP: keeps pages safe", "192 Ruled Pages: 80 GSM paper", "plain bullet without colon"]',
+    description = 'Size 21 x 15 cm. Ribbon bookmark.', attributes = '{"size": [{"value": "A5"}]}' WHERE sku = s1;
+  PERFORM pg_temp.ok(crm_private.amz_callouts((SELECT bullets FROM public.amazon_listings WHERE sku = s1)) = ARRAY['Premium Cover', 'Secure Magnetic Clasp', '192 Ruled Pages'],
+    'SD01 callouts come from the product''s own key points');
+  t := crm_private.amz_truth(s1, ARRAY['Magnetic clasp', 'Waterproof cover', 'Best gift ever', '50% off ₹299', '192 pages', '300 pages', 'B5 size', 'Ribbon bookmark']);
+  PERFORM pg_temp.ok((t->0->>'ok')::boolean AND NOT (t->1->>'ok')::boolean AND (t->1->'problems'->>0) LIKE '%waterproof%'
+    AND NOT (t->2->>'ok')::boolean AND NOT (t->3->>'ok')::boolean AND (t->4->>'ok')::boolean AND NOT (t->5->>'ok')::boolean
+    AND NOT (t->6->>'ok')::boolean AND (t->7->>'ok')::boolean, 'SD02 truth: real facts pass; made-up claims, sales words, prices, wrong numbers and sizes fail');
+  SET ROLE service_role;
+  r := public.svc_amz_studio_design(s1, s1 || '/design/a.jpg', 2000, 2000, 500000,
+    '[{"type": "pointer", "text": "Magnetic clasp"}, {"type": "badge", "text": "Waterproof"}]', NULL, '[{"code": "small", "ok": false, "message": "too small"}]', NULL);
+  RESET ROLE;
+  PERFORM pg_temp.ok((r->>'score')::int = 40 AND (SELECT kind = 'design' AND jsonb_array_length(layers) = 2 FROM public.amazon_studio_assets WHERE id = (r->>'id')::uuid),
+    'SD03 the server scores the design itself (a false claim caps it at 40) and keeps the layers editable');
+  SET ROLE service_role;
+  PERFORM pg_temp.fails(format($q$SELECT public.svc_amz_studio_send(%L, '3', 'https://x.supabase.co/a.jpg', NULL)$q$, (r->>'id')), '%scored 40/100%', 'SD03b a design with a false claim cannot be sent, even by the server');
+  RESET ROLE;
+  SET ROLE service_role;
+  r := public.svc_amz_studio_design(s1, s1 || '/design/b.jpg', 2000, 2000, 500000, '[{"type": "pointer", "text": "Magnetic clasp"}, {"type": "badge", "text": "Ribbon bookmark"}]', NULL, '[]', NULL);
+  RESET ROLE;
+  PERFORM pg_temp.ok((r->>'score')::int = 100 AND r->'checks' @> '[{"code": "truth", "ok": true}]', 'SD04 a true, readable design scores 100');
+  SET ROLE authenticated; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  r := public.api_amz_studio_facts(s1);
+  PERFORM pg_temp.ok(jsonb_array_length(r->'callouts') = 3 AND r->'facts'->>'size' = 'a5' AND r->>'dimensions' = '21 x 15 cm', 'SD05 editor facts: callouts, size, dimensions');
+  PERFORM pg_temp.fails(format($q$SELECT public.svc_amz_studio_design(%L, 'x', 1, 1, 1, '[]', NULL, '[]', NULL)$q$, s1), '%permission denied%', 'SD06 browser cannot store a design directly (no self-scoring)');
+  RESET ROLE;
 END $$;
 RESET ROLE;
 

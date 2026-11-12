@@ -19,7 +19,12 @@ http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   if (url.pathname.startsWith('/__as/')) { sub = url.pathname.slice(6); return send(res, 200, { sub }); }
   if (url.pathname === '/__calls') return send(res, 200, calls);
-  let raw = ''; for await (const c of req) raw += c;
+  const chunks = []; for await (const c of req) chunks.push(Buffer.from(c));
+  const buf = Buffer.concat(chunks); const raw = buf.toString('utf8');
+  let form = null;
+  if ((req.headers['content-type'] || '').startsWith('multipart/form-data')) {
+    try { form = await new Response(buf, { headers: { 'content-type': req.headers['content-type'] } }).formData(); } catch { form = null; }
+  }
   let args = {}; try { args = raw ? JSON.parse(raw) : {}; } catch { args = { multipart: raw.length }; }
   if (url.pathname.startsWith('/functions/v1/')) {
     const fn = url.pathname.split('/').pop(); calls.push({ fn, args });
@@ -35,6 +40,15 @@ http.createServer(async (req, res) => {
           await db.query('BEGIN'); await db.query('SET LOCAL ROLE service_role');
           const r = await db.query('SELECT public.svc_amz_studio_send($1, $2, $3, NULL) AS r', [args.asset, args.slot, 'https://example.invalid/amazon-images/studio.jpg']);
           await db.query('COMMIT'); return send(res, 200, r.rows[0].r);
+        } catch (e) { await db.query('ROLLBACK'); return send(res, 422, { detail: e.message }); } finally { db.release(); }
+      }
+      if (form && form.get('design') === '1') {
+        const db = await pool.connect();
+        try {
+          await db.query('BEGIN'); await db.query('SET LOCAL ROLE service_role');
+          const r = await db.query('SELECT public.svc_amz_studio_design($1, $2, 2000, 2000, $3, $4::jsonb, $5::uuid, $6::jsonb, NULL) AS r',
+            [form.get('sku'), `${form.get('sku')}/design/t.jpg`, (form.get('file')?.size) || 0, form.get('layers') || '[]', form.get('parent') || null, form.get('checks') || '[]']);
+          await db.query('COMMIT'); calls.push({ fn: 'studio-design', bytes: form.get('file')?.size || 0 }); return send(res, 200, r.rows[0].r);
         } catch (e) { await db.query('ROLLBACK'); return send(res, 422, { detail: e.message }); } finally { db.release(); }
       }
       return send(res, 200, { id: null });

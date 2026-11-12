@@ -314,7 +314,7 @@ export function buildPatches(after: Record<string, any>, mk: string, lang: strin
   const text = (name: string, v: string) => patches.push({ op: "replace", path: `/attributes/${name}`,
     value: [{ value: v, language_tag: lang, marketplace_id: mk }] });
   for (const [k, v] of Object.entries(after)) {
-    if (v === undefined || v === null) continue;
+    if (v === undefined || (v === null && k !== "swatch_image")) continue;   // null swatch = remove it (Undo)
     switch (k) {
       case "title": text("item_name", String(v)); break;
       case "description": text("product_description", String(v)); break;

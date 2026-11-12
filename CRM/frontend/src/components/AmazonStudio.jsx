@@ -4,6 +4,7 @@ import { showToast } from '../utils/toast';
 import { confirmDialog } from './ui/dialogs';
 import Icon from './icons';
 import { Modal } from './AmazonDecisions';
+import { Designer } from './AmazonDesigner';
 
 // CRM > Amazon > Studio (part 1: photos).
 // Your real diary photos -> the Mac checks them -> cut-out (2 options) -> main photo on pure white / clean colour swatch
@@ -79,7 +80,7 @@ function SwatchPicker({ asset, url, onClose, onPick }) {
   );
 }
 
-function AssetCard({ a, url, slot, canSend, busy, onJob, onSend, onDelete, onSwatch }) {
+function AssetCard({ a, url, slot, canSend, busy, onJob, onSend, onDelete, onSwatch, onDesign }) {
   const pending = a.kind === 'upload' && a.score == null;
   return (
     <div className={`studio-card ${a.status === 'sent' ? 'is-sent' : ''}`} data-asset={a.kind}>
@@ -94,6 +95,8 @@ function AssetCard({ a, url, slot, canSend, busy, onJob, onSend, onDelete, onSwa
           {a.kind === 'upload' && !pending && slot !== 'swatch' && <button type="button" className="glass-btn-ghost px-2.5 py-1.5 text-xs" disabled={busy} onClick={() => onJob('cutout', a)}>Make cut-out</button>}
           {['upload', 'cutout'].includes(a.kind) && slot === 'swatch' && <button type="button" className="glass-btn-ghost px-2.5 py-1.5 text-xs" disabled={busy || !url} onClick={() => onSwatch(a)}>Choose swatch area</button>}
           {a.kind === 'cutout' && slot !== 'swatch' && <button type="button" className="glass-btn-ghost px-2.5 py-1.5 text-xs" disabled={busy} onClick={() => onJob('main', a)}>Make main photo</button>}
+          {!['1', 'swatch'].includes(slot) && !pending && a.status !== 'deleted' && onDesign && (
+            <button type="button" className="glass-btn-ghost px-2.5 py-1.5 text-xs" disabled={busy} onClick={() => onDesign(a)}>{a.kind === 'design' ? 'Edit text & pointers' : 'Add text & pointers'}</button>)}
           {canSend && fits(slot, a) && a.status === 'ready' && !pending && (
             <button type="button" className="glass-btn px-2.5 py-1.5 text-xs" disabled={busy || (a.score != null && a.score < 70)} title={a.score != null && a.score < 70 ? 'Score under 70: fix the issues first' : ''}
               onClick={() => onSend(a)}>Send to Decisions</button>)}
@@ -112,6 +115,7 @@ export function Studio({ access, goDecisions }) {
   const [urls, setUrls] = useState({});
   const [busy, setBusy] = useState(false);
   const [picker, setPicker] = useState(null);
+  const [designer, setDesigner] = useState(null);
   const fileRef = useRef(null);
   const load = useCallback(async () => {
     try {
@@ -152,6 +156,19 @@ export function Studio({ access, goDecisions }) {
     try { await studio({ action: 'send', asset: a.id, slot }); showToast('Waiting in Decisions > Photos', 'success'); load(); }
     catch (e) { showToast(e.message, 'error'); } finally { setBusy(false); }
   };
+  const openDesigner = (a) => {
+    if (a.kind === 'design') {
+      const parent = (d?.assets || []).find((x) => x.id === a.parent);
+      setDesigner({ base: { ...(parent || { id: null, kind: 'main' }), layers: a.layers || [] }, baseUrl: parent ? urls[parent.id] : null });
+    } else setDesigner({ base: { ...a, layers: [] }, baseUrl: urls[a.id] });
+  };
+  const uploadDesign = async ({ blob, layers, checks, parent }) => {
+    const fd = new FormData();
+    fd.append('file', new File([blob], 'design.jpg', { type: 'image/jpeg' })); fd.append('sku', sku); fd.append('design', '1');
+    fd.append('parent', parent || ''); fd.append('layers', JSON.stringify(layers)); fd.append('checks', JSON.stringify(checks));
+    fd.append('width', '2000'); fd.append('height', '2000');
+    return studio(fd, true);
+  };
   const del = async (a) => {
     if (!(await confirmDialog('Delete this photo from Studio?', { confirmText: 'Delete', danger: true }))) return;
     try { await rpc('api_amz_studio_delete', { p_id: a.id }); load(); } catch (e) { showToast(e.message, 'error'); }
@@ -185,7 +202,7 @@ export function Studio({ access, goDecisions }) {
           <div className="glass-card p-2 studio-slots" role="tablist" aria-label="Photo slots">
             {SLOTS.map((s) => {
               const img = s.id === 'swatch' ? product?.swatch : images[Number(s.id) - 1]?.url;
-              const sent = assets.find((a) => a.status === 'sent' && fits(s.id, a));
+              const sent = assets.find((a) => a.status === 'sent' && a.meta?.sent_slot === s.id);
               return (
                 <button key={s.id} type="button" role="tab" aria-selected={slot === s.id} className={`studio-slot ${slot === s.id ? 'is-on' : ''}`} onClick={() => setSlot(s.id)}>
                   <span className="studio-slot-img">{img ? <img src={img} alt="" loading="lazy" /> : <span className="text-glass-muted text-[10px]">empty</span>}</span>
@@ -206,11 +223,11 @@ export function Studio({ access, goDecisions }) {
                 <div className="text-sm text-glass-secondary rounded-xl px-3 py-4 text-center" style={{ background: 'rgba(118,118,128,0.06)' }}>
                   {slot === '1' ? 'Upload a photo, make a cut-out, then "Make main photo". The best ones appear here.'
                     : slot === 'swatch' ? 'Upload a cover photo, then "Choose swatch area".'
-                    : 'Upload a photo for this slot, or make a main photo. Text & pointers arrive in part 2.'}
+                    : 'Upload a photo (or make a main photo), then "Add text & pointers". Templates: features, size, inside pages, gift ideas.'}
                 </div>
               ) : (
                 <div className="studio-cards">{options.map((a) => <AssetCard key={a.id} a={a} url={urls[a.id]} slot={slot} canSend={d.can_send} busy={busy}
-                  onJob={job} onSend={send} onDelete={del} onSwatch={(x) => setPicker(x)} />)}</div>
+                  onJob={job} onSend={send} onDelete={del} onSwatch={(x) => setPicker(x)} onDesign={openDesigner} />)}</div>
               )}
               {d.can_send && assets.some((a) => a.status === 'sent') && goDecisions && <button type="button" className="text-xs font-semibold" style={{ color: 'var(--accent)' }} onClick={goDecisions}>Review in Decisions →</button>}
             </div>
@@ -218,12 +235,13 @@ export function Studio({ access, goDecisions }) {
               <div className="glass-card p-4 space-y-2">
                 <div className="font-semibold text-sm">Your photos and cut-outs</div>
                 <div className="studio-cards">{inputs.map((a) => <AssetCard key={a.id} a={a} url={urls[a.id]} slot={slot} canSend={false} busy={busy}
-                  onJob={job} onSend={send} onDelete={del} onSwatch={(x) => setPicker(x)} />)}</div>
+                  onJob={job} onSend={send} onDelete={del} onSwatch={(x) => setPicker(x)} onDesign={openDesigner} />)}</div>
               </div>
             )}
           </div>
         </div>
       )}
+      {designer && <Designer sku={sku} base={designer.base} baseUrl={designer.baseUrl} upload={uploadDesign} onClose={() => setDesigner(null)} onSaved={load} />}
       {picker && <SwatchPicker asset={picker} url={urls[picker.id]} onClose={() => setPicker(null)} onPick={(a, box) => { setPicker(null); job('swatch', a, { box }); }} />}
     </div>
   );

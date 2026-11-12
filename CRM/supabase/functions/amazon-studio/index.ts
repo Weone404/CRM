@@ -1,5 +1,7 @@
 // amazon-studio: Studio photos for the signed-in user (Amazon > Studio).
 //   multipart {file, sku}                 -> stores the photo in the PRIVATE 'amazon-studio' bucket and queues its check on the Mac
+//   multipart {file, sku, design=1, parent, layers, checks} -> a finished text & pointer design (made in the browser);
+//                                            the truth check and score are made on the server from the layers
 //   {action:"urls", ids:[...]}            -> short-lived links to view Studio photos (private bucket)
 //   {action:"send", asset, slot}          -> copies the chosen photo to the public 'amazon-images' bucket (Amazon needs a public
 //                                            link) and creates a waiting Decision. Admin / approvers only. Nothing goes to Amazon here.
@@ -34,9 +36,17 @@ Deno.serve(async (req) => {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const ext = kind(bytes);
       if (!ext) throw new HttpError(415, "Only JPG or PNG photos (on iPhone: Settings > Camera > Formats > Most Compatible)");
-      const path = `${sku}/up/${crypto.randomUUID()}.${ext}`;
+      const design = String(form?.get("design") ?? "") === "1";
+      const path = `${sku}/${design ? "design" : "up"}/${crypto.randomUUID()}.${ext}`;
       const { error } = await admin.storage.from("amazon-studio").upload(path, bytes, { contentType: ext === "jpg" ? "image/jpeg" : "image/png" });
       if (error) throw new Error(error.message);
+      if (design) {
+        const parse = (k: string) => { try { return JSON.parse(String(form?.get(k) ?? "null")); } catch { return null; } };
+        const parent = String(form?.get("parent") ?? "");
+        return json(req, 200, await rpcAdmin("svc_amz_studio_design", { p_sku: sku, p_path: path,
+          p_width: Number(form?.get("width")) || null, p_height: Number(form?.get("height")) || null, p_bytes: bytes.length,
+          p_layers: parse("layers") ?? [], p_parent: /^[0-9a-f-]{36}$/.test(parent) ? parent : null, p_client_checks: parse("checks") ?? [], p_by: me }));
+      }
       return json(req, 200, await rpcAdmin("svc_amz_studio_upload", { p_sku: sku, p_path: path, p_bytes: bytes.length, p_by: me }));
     }
     const body = await req.json().catch(() => ({}));
