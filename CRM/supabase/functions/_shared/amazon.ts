@@ -442,6 +442,42 @@ export function parseSearch(resp: any) {
   }).filter((x: any) => x.asin);
 }
 
+// Competitor photo study: each listing's photos in Amazon's order (MAIN, PT01..PT08), one ~500 px copy each (enough to see
+// what the photo shows, small enough for Claude). Our own listings are left out.
+export function parseStudyItems(resp: any, ownAsins: string[] = [], max = 10) {
+  const own = new Set(ownAsins);
+  const order = (v: string) => (v === "MAIN" ? 0 : /^PT(\d\d)$/.test(v) ? Number(v.slice(2)) : 99);
+  return (resp?.items || []).filter((it: any) => it?.asin && !own.has(it.asin)).slice(0, max).map((it: any) => {
+    const sum = first(it.summaries) || {};
+    const rank = first(it.salesRanks) || {};
+    const grp = first(rank.displayGroupRanks) || first(rank.classificationRanks) || {};
+    const byVariant = new Map<string, any[]>();
+    for (const m of first(it.images)?.images || []) {
+      if (!m?.link || !m?.variant || order(m.variant) > 8) continue;
+      byVariant.set(m.variant, [...(byVariant.get(m.variant) || []), m]);
+    }
+    const images = [...byVariant.entries()].sort((a, b) => order(a[0]) - order(b[0])).map(([variant, list]) => {
+      const pick = [...list].sort((a, b) => Math.abs((a.height || 0) - 500) - Math.abs((b.height || 0) - 500))[0];
+      return { variant, url: pick.link };
+    });
+    return { asin: it.asin, title: sum.itemName ?? null, brand: sum.brand ?? sum.brandName ?? null, bsr: grp.rank ?? null, images };
+  });
+}
+
+// Pexels search -> backgrounds we may use (free licence). Photos whose description mentions people are left out
+// (no implied endorsement, no faces); Claude checks the finished scene again.
+const PEOPLE = /\b(person|people|man|men|woman|women|girl|boy|child|children|kid|baby|face|portrait|hand|hands|couple|lady|guy|student|model)\b/i;
+export function parsePexels(resp: any) {
+  return (resp?.photos || []).filter((p: any) => p?.src?.original && /^https:\/\/images\.pexels\.com\/photos\/\d+\//.test(p.src.original)
+      && !PEOPLE.test(String(p.alt || "")) && Math.min(p.width || 0, p.height || 0) >= 1600)
+    .map((p: any) => ({
+      id: p.id, alt: String(p.alt || "").slice(0, 120), width: p.width, height: p.height,
+      thumb: p.src.medium, preview: p.src.large,
+      url: `${p.src.original.split("?")[0]}?auto=compress&cs=tinysrgb&w=2400`,
+      credit: { name: String(p.photographer || "").slice(0, 80), url: p.photographer_url, photo: p.url },
+    }));
+}
+
 // Most used 2-3 word phrases in our own product names: the first keywords to watch when none are set yet.
 export function seedPhrases(titles: string[], max = 6) {
   const stop = new Set(["a", "an", "and", "the", "of", "to", "in", "on", "for", "with", "by", "your", "you", "from", "as", "pack", "set", "x", "cm", "inch", "gsm"]);

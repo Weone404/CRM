@@ -4,6 +4,7 @@
 // POST /functions/v1/amazon-settings | amazon-execute | amazon-sync -> canned answers (Amazon is not called in UI tests).
 import http from 'node:http';
 import { createRequire } from 'node:module';
+const PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const require = createRequire(process.env.PG_MODULE_DIR + '/');
 const { Pool } = require('pg');
 const pool = new Pool({ max: 8, host: process.env.PGHOST, port: Number(process.env.PGPORT), user: 'postgres', database: process.env.PGDATABASE });
@@ -33,7 +34,18 @@ http.createServer(async (req, res) => {
     if (fn === 'amazon-upload') return send(res, 200, { url: `https://example.invalid/amazon-images/test/${calls.length}.png` });
     if (fn === 'amazon-sync') return send(res, 200, { status: 'ok', results: [{ job: 'listings', status: 'ok' }] });
     if (fn === 'amazon-studio') {
-      if (args.action === 'urls') return send(res, 200, {});
+      if (args.action === 'urls') return send(res, 200, Object.fromEntries((args.ids || []).map((id) => [id, PIXEL])));
+      if (args.action === 'bg_search') return send(res, 200, { page: 1, photos: [1, 2, 3].map((i) => ({ id: i, alt: `Wooden desk ${i}`, width: 4000, height: 4000, thumb: PIXEL, preview: PIXEL,
+        url: `https://images.pexels.com/photos/${i}/pexels-photo-${i}.jpeg?auto=compress&cs=tinysrgb&w=2400`, credit: { name: `Photographer ${i}`, url: 'https://www.pexels.com/@p', photo: `https://www.pexels.com/photo/${i}/` } })) });
+      if (args.action === 'study') {
+        const db = await pool.connect();
+        try {
+          await db.query('BEGIN'); await db.query('SET LOCAL ROLE service_role');
+          const items = [1, 2, 3].map((i) => ({ asin: `B0TEST000${i}`, title: `Competitor diary ${i}`, images: [{ variant: 'MAIN', url: `https://m.media-amazon.com/images/I/c${i}.jpg` }, { variant: 'PT01', url: `https://m.media-amazon.com/images/I/c${i}b.jpg` }] }));
+          const r = await db.query('SELECT public.svc_amz_studio_study($1, $2, $3::jsonb, NULL) AS r', [args.sku, args.keyword, JSON.stringify(items)]);
+          await db.query('COMMIT'); return send(res, 200, r.rows[0].r);
+        } catch (e) { await db.query('ROLLBACK'); return send(res, 422, { detail: e.message }); } finally { db.release(); }
+      }
       if (args.action === 'send') {
         const db = await pool.connect();
         try {

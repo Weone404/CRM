@@ -5,6 +5,7 @@ import { confirmDialog } from './ui/dialogs';
 import Icon from './icons';
 import { Modal } from './AmazonDecisions';
 import { Designer } from './AmazonDesigner';
+import { ScenePicker, Guide } from './AmazonStudioScenes';
 
 // CRM > Amazon > Studio (part 1: photos).
 // Your real diary photos -> the Mac checks them -> cut-out (2 options) -> main photo on pure white / clean colour swatch
@@ -31,9 +32,9 @@ const SLOTS = [
   ...[2, 3, 4, 5, 6, 7, 8, 9].map((n) => ({ id: String(n), label: `Photo ${n}`, hint: 'Lifestyle, features with pointers, size, inside pages, how to add your name.' })),
   { id: 'swatch', label: 'Colour swatch', hint: 'A small square of the real cover texture. No text, no logo.' },
 ];
-const KIND = { upload: 'Your photo', cutout: 'Cut-out', main: 'Main photo', swatch: 'Swatch', design: 'Design' };
+const KIND = { upload: 'Your photo', cutout: 'Cut-out', main: 'Main photo', swatch: 'Swatch', design: 'Design', scene: 'Lifestyle scene', background: 'AI background' };
 const LEVEL = { ok: ['✓', '#1E7B34'], warn: ['!', '#B25E00'], bad: ['✕', '#C4261D'] };
-const fits = (slot, a) => (slot === '1' ? a.kind === 'main' : slot === 'swatch' ? a.kind === 'swatch' : ['main', 'upload', 'design'].includes(a.kind));
+const fits = (slot, a) => (slot === '1' ? a.kind === 'main' : slot === 'swatch' ? a.kind === 'swatch' : ['main', 'upload', 'design', 'scene'].includes(a.kind));
 const scoreStyle = (s) => (s == null ? {} : s >= 85 ? { background: 'rgba(52,199,89,0.16)', color: '#1E7B34' } : s >= 70 ? { background: 'rgba(255,149,0,0.16)', color: '#B25E00' } : { background: 'rgba(255,59,48,0.14)', color: '#C4261D' });
 
 function Score({ s }) {
@@ -80,21 +81,23 @@ function SwatchPicker({ asset, url, onClose, onPick }) {
   );
 }
 
-function AssetCard({ a, url, slot, canSend, busy, onJob, onSend, onDelete, onSwatch, onDesign }) {
+function AssetCard({ a, url, slot, canSend, busy, onJob, onSend, onDelete, onSwatch, onDesign, onScene }) {
   const pending = a.kind === 'upload' && a.score == null;
   return (
     <div className={`studio-card ${a.status === 'sent' ? 'is-sent' : ''}`} data-asset={a.kind}>
       <div className="studio-thumb">
         {url ? <img src={url} alt={KIND[a.kind]} loading="lazy" /> : <span className="text-glass-muted"><Icon name="image" size={20} /></span>}
-        <span className="studio-kind">{KIND[a.kind]}{a.meta?.mode ? ` · ${a.meta.mode === 'fine' ? 'fine edges' : 'soft edges'}` : ''}</span>
+        <span className="studio-kind">{KIND[a.kind]}{a.meta?.mode ? ` · ${a.meta.mode === 'fine' ? 'fine edges' : 'soft edges'}` : ''}{a.kind === 'scene' ? (a.meta?.bg?.source === 'ai' ? ' · AI background' : ' · Pexels') : ''}</span>
         <Score s={a.score} />
       </div>
       <div className="p-2.5 space-y-2">
         {pending ? <div className="text-[11px] text-glass-muted">Checking on your Mac…</div> : <Checks list={a.checks} />}
+        {a.kind === 'scene' && a.meta?.bg?.credit?.name && <div className="text-[10px] text-glass-muted">Background: <a href={a.meta.bg.credit.photo || 'https://www.pexels.com'} target="_blank" rel="noopener noreferrer" className="underline">{a.meta.bg.credit.name} on Pexels</a></div>}
         <div className="flex flex-wrap gap-1.5">
           {a.kind === 'upload' && !pending && slot !== 'swatch' && <button type="button" className="glass-btn-ghost px-2.5 py-1.5 text-xs" disabled={busy} onClick={() => onJob('cutout', a)}>Make cut-out</button>}
           {['upload', 'cutout'].includes(a.kind) && slot === 'swatch' && <button type="button" className="glass-btn-ghost px-2.5 py-1.5 text-xs" disabled={busy || !url} onClick={() => onSwatch(a)}>Choose swatch area</button>}
           {a.kind === 'cutout' && slot !== 'swatch' && <button type="button" className="glass-btn-ghost px-2.5 py-1.5 text-xs" disabled={busy} onClick={() => onJob('main', a)}>Make main photo</button>}
+          {a.kind === 'cutout' && slot !== 'swatch' && onScene && <button type="button" className="glass-btn-ghost px-2.5 py-1.5 text-xs" disabled={busy || !url} onClick={() => onScene(a)}>Make lifestyle scene</button>}
           {!['1', 'swatch'].includes(slot) && !pending && a.status !== 'deleted' && onDesign && (
             <button type="button" className="glass-btn-ghost px-2.5 py-1.5 text-xs" disabled={busy} onClick={() => onDesign(a)}>{a.kind === 'design' ? 'Edit text & pointers' : 'Add text & pointers'}</button>)}
           {canSend && fits(slot, a) && a.status === 'ready' && !pending && (
@@ -116,6 +119,8 @@ export function Studio({ access, goDecisions }) {
   const [busy, setBusy] = useState(false);
   const [picker, setPicker] = useState(null);
   const [designer, setDesigner] = useState(null);
+  const [scene, setScene] = useState(null);
+  const [guide, setGuide] = useState(false);
   const fileRef = useRef(null);
   const load = useCallback(async () => {
     try {
@@ -143,11 +148,12 @@ export function Studio({ access, goDecisions }) {
     if (fileRef.current) fileRef.current.value = '';
     load();
   };
-  const job = async (kind, a, params = {}) => {
+  const job = async (kind, a, params = {}, extra = []) => {
     setBusy(true);
-    try { await rpc('api_amz_studio_job', { p_sku: sku, p_kind: kind, p_assets: [a.id], p_params: params });
-      showToast(kind === 'cutout' ? 'Your Mac is cutting it out (two options, about a minute).' : kind === 'main' ? 'Your Mac is making the main photo.' : 'Your Mac is making the swatch.', 'success'); load(); }
-    catch (e) { showToast(e.message, 'error'); } finally { setBusy(false); }
+    try { await rpc('api_amz_studio_job', { p_sku: sku, p_kind: kind, p_assets: a ? [a.id, ...extra] : null, p_params: params });
+      showToast({ cutout: 'Your Mac is cutting it out (two options, about a minute).', main: 'Your Mac is making the main photo.', swatch: 'Your Mac is making the swatch.',
+        scene: 'Your Mac is making the scene; Claude then looks at it.', aibg: 'Your Mac is making 2 AI backgrounds (a few minutes).' }[kind], 'success'); load(); return true; }
+    catch (e) { showToast(e.message, 'error'); return false; } finally { setBusy(false); }
   };
   const send = async (a) => {
     const label = SLOTS.find((s) => s.id === slot)?.label;
@@ -178,7 +184,9 @@ export function Studio({ access, goDecisions }) {
   const images = product?.images || [];
   const current = slot === 'swatch' ? product?.swatch : images[Number(slot) - 1]?.url;
   const meta = SLOTS.find((s) => s.id === slot);
-  const assets = d?.assets || [];
+  const all = d?.assets || [];
+  const assets = useMemo(() => all.filter((a) => a.sku === sku && a.kind !== 'background'), [all, sku]);
+  const backgrounds = useMemo(() => all.filter((a) => a.kind === 'background'), [all]);
   const options = useMemo(() => assets.filter((a) => fits(slot, a)), [assets, slot]);
   const inputs = useMemo(() => assets.filter((a) => (slot === 'swatch' ? ['upload', 'cutout'].includes(a.kind) : ['upload', 'cutout'].includes(a.kind)) && !fits(slot, a)), [assets, slot]);
   const waiting = (d?.jobs || []).filter((j) => ['waiting', 'working'].includes(j.status));
@@ -192,11 +200,12 @@ export function Studio({ access, goDecisions }) {
         </select>
         <input ref={fileRef} type="file" accept="image/jpeg,image/png" multiple className="hidden" onChange={(e) => upload(e.target.files)} />
         <button type="button" className="glass-btn px-4 py-2 text-sm inline-flex items-center gap-2" disabled={busy || !sku} onClick={() => fileRef.current?.click()}><Icon name="plus" size={15} />Upload photos</button>
+        <button type="button" className="glass-btn-ghost px-4 py-2 text-sm" disabled={!sku} onClick={() => setGuide(true)}>Guide</button>
         <button type="button" className="glass-btn-ghost px-4 py-2 text-sm" disabled title="Part 4: 3D and Reels videos">Video (soon)</button>
         <span className={`studio-mac ${d?.mac_online ? 'is-on' : ''}`} title="Photo jobs run on your Mac Mini">{d?.mac_online ? 'Mac online' : 'Mac offline: jobs wait'}{waiting.length ? ` · ${waiting.length} working` : ''}</span>
       </div>
       <div className="text-xs text-glass-secondary px-1">Tip: daylight near a window, a plain sheet, phone held straight. Front, back, spine, open pages and a name close-up. JPG or PNG.</div>
-      {failed.map((j) => <div key={j.id} className="glass-card px-3 py-2 text-xs" style={{ color: '#C4261D' }}>{j.kind === 'cutout' ? 'Cut-out' : j.kind === 'main' ? 'Main photo' : j.kind === 'swatch' ? 'Swatch' : 'Photo check'} failed: {j.error}</div>)}
+      {failed.map((j) => <div key={j.id} className="glass-card px-3 py-2 text-xs" style={{ color: '#C4261D' }}>{{ cutout: 'Cut-out', main: 'Main photo', swatch: 'Swatch', scene: 'Lifestyle scene', aibg: 'AI backgrounds', study: 'Competitor study' }[j.kind] || 'Photo check'} failed: {j.error}</div>)}
       {!d ? <div className="text-center text-glass-muted py-10 text-sm">Loading…</div> : (
         <div className="studio-grid">
           <div className="glass-card p-2 studio-slots" role="tablist" aria-label="Photo slots">
@@ -223,11 +232,11 @@ export function Studio({ access, goDecisions }) {
                 <div className="text-sm text-glass-secondary rounded-xl px-3 py-4 text-center" style={{ background: 'rgba(118,118,128,0.06)' }}>
                   {slot === '1' ? 'Upload a photo, make a cut-out, then "Make main photo". The best ones appear here.'
                     : slot === 'swatch' ? 'Upload a cover photo, then "Choose swatch area".'
-                    : 'Upload a photo (or make a main photo), then "Add text & pointers". Templates: features, size, inside pages, gift ideas.'}
+                    : 'Upload a photo, make a cut-out, then "Make lifestyle scene" or "Add text & pointers". Templates: features, size, inside pages, gift ideas.'}
                 </div>
               ) : (
                 <div className="studio-cards">{options.map((a) => <AssetCard key={a.id} a={a} url={urls[a.id]} slot={slot} canSend={d.can_send} busy={busy}
-                  onJob={job} onSend={send} onDelete={del} onSwatch={(x) => setPicker(x)} onDesign={openDesigner} />)}</div>
+                  onJob={job} onSend={send} onDelete={del} onSwatch={(x) => setPicker(x)} onDesign={openDesigner} onScene={(x) => setScene(x)} />)}</div>
               )}
               {d.can_send && assets.some((a) => a.status === 'sent') && goDecisions && <button type="button" className="text-xs font-semibold" style={{ color: 'var(--accent)' }} onClick={goDecisions}>Review in Decisions →</button>}
             </div>
@@ -235,13 +244,18 @@ export function Studio({ access, goDecisions }) {
               <div className="glass-card p-4 space-y-2">
                 <div className="font-semibold text-sm">Your photos and cut-outs</div>
                 <div className="studio-cards">{inputs.map((a) => <AssetCard key={a.id} a={a} url={urls[a.id]} slot={slot} canSend={false} busy={busy}
-                  onJob={job} onSend={send} onDelete={del} onSwatch={(x) => setPicker(x)} onDesign={openDesigner} />)}</div>
+                  onJob={job} onSend={send} onDelete={del} onSwatch={(x) => setPicker(x)} onDesign={openDesigner} onScene={(x) => setScene(x)} />)}</div>
               </div>
             )}
           </div>
         </div>
       )}
-      {designer && <Designer sku={sku} base={designer.base} baseUrl={designer.baseUrl} upload={uploadDesign} onClose={() => setDesigner(null)} onSaved={load} />}
+      {designer && <Designer sku={sku} brand={d?.brand} base={designer.base} baseUrl={designer.baseUrl} upload={uploadDesign} onClose={() => setDesigner(null)} onSaved={load} />}
+      {scene && <ScenePicker sku={sku} cut={scene} cutUrl={urls[scene.id]} studio={studio} pexelsReady={d?.pexels_ready} aiStatus={d?.ai_status}
+        backgrounds={backgrounds} urls={urls} busy={busy} onClose={() => setScene(null)}
+        onMake={async (params, bgId) => { if (await job('scene', scene, params, bgId ? [bgId] : [])) setScene(null); }}
+        onAi={(params) => job('aibg', null, params)} />}
+      {guide && <Guide sku={sku} studio={studio} rpc={rpc} canEdit={d?.can_send} onClose={() => { setGuide(false); load(); }} />}
       {picker && <SwatchPicker asset={picker} url={urls[picker.id]} onClose={() => setPicker(null)} onPick={(a, box) => { setPicker(null); job('swatch', a, { box }); }} />}
     </div>
   );

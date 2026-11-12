@@ -364,6 +364,9 @@ function Settings() {
           <button className="glass-btn px-4 py-2 text-sm" disabled={!rot} onClick={async () => { await run(rpc('api_amz_settings_save', { p_name: 'AMZ_SECRET_ROTATED_ON', p_value: rot }), 'Saved'); setRot(''); load(); }}>Save</button>
         </div>
         {s.rotation_days_left != null && <div className="text-xs" style={{ color: s.rotation_days_left <= 30 ? '#C4261D' : undefined }}>Amazon requires a new client secret every 180 days: due {s.rotation_due} ({s.rotation_days_left} days left). After rotating, the old secret keeps working for 7 days.</div>}
+        <details className="text-sm" open={!s.PEXELS_API_KEY?.set}><summary className="cursor-pointer font-medium">Studio backgrounds: free Pexels key (optional)</summary><div className="space-y-2 mt-2">
+          <SecretRow name="PEXELS_API_KEY" label="Pexels API key" hint="pexels.com/api > Your API key (free)" meta={s.PEXELS_API_KEY} onSaved={load} />
+          <div className="text-[11px] text-glass-muted">Used only to search free stock backgrounds for lifestyle scenes. Free: 200 searches an hour.</div></div></details>
         <details className="text-sm"><summary className="cursor-pointer font-medium">Amazon Ads keys (optional)</summary><div className="space-y-2 mt-2">{ADS_FIELDS.map(([n, l, h]) => <SecretRow key={n} name={n} label={l} hint={h} meta={s[n]} onSaved={load} />)}</div></details>
       </div>
 

@@ -8,6 +8,7 @@
 //   {action:"studio_claim"}                            -> next Studio photo job + short-lived links to its input photos
 //   {action:"studio_file", id, sku, b64}               -> stores one result photo in the PRIVATE Studio bucket -> {path}
 //   {action:"studio_done", id, ok, result?, error?, files?:[{kind, path, width, height, checks, score, meta}]} -> finishes the job
+//   {action:"studio_ai", status}                       -> the Mac's AI-background setup state (shown in Studio)
 // The helper never sees Amazon keys, never approves, and can only draft listing/price/dispatch changes.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { admin, cors, json, HttpError, rpc } from "../_shared/amazon_deno.ts";
@@ -51,7 +52,7 @@ Deno.serve(async (req) => {
           const { data } = await admin.storage.from("amazon-studio").createSignedUrl(i.path, 900);
           inputs.push({ id: i.id, url: data?.signedUrl, ext: String(i.path).split(".").pop() });
         }
-        return json(req, 200, { job: r.job, inputs });
+        return json(req, 200, { job: r.job, inputs, ...(r.study ? { study: r.study } : {}) });
       }
       case "studio_file": {                            // one result photo per request (keeps requests small)
         if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, "Missing job id");
@@ -68,12 +69,15 @@ Deno.serve(async (req) => {
       case "studio_done": {
         if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, "Missing job id");
         const files = (Array.isArray(body.files) ? body.files : []).slice(0, 4)
-          .filter((f: any) => ["cutout", "main", "swatch"].includes(f?.kind) && typeof f.path === "string" && f.path.includes(`/job${id}/`))
+          .filter((f: any) => ["cutout", "main", "swatch", "scene", "background"].includes(f?.kind) && typeof f.path === "string" && f.path.includes(`/job${id}/`))
           .map((f: any) => ({ kind: f.kind, path: f.path, width: f.width, height: f.height, bytes: f.bytes, checks: f.checks ?? [],
                               score: f.score ?? null, meta: f.meta ?? {} }));
         return json(req, 200, await rpc("svc_amz_studio_finish", { p_job: id, p_ok: body.ok !== false, p_result: body.result ?? {},
           p_error: body.error ? String(body.error).slice(0, 300) : null, p_files: files }));
       }
+      case "studio_ai":
+        await rpc("svc_amz_studio_ai_status", { p_status: String(body.status ?? "").slice(0, 200) });
+        return json(req, 200, { ok: true });
       default:
         throw new HttpError(400, "Unknown action");
     }

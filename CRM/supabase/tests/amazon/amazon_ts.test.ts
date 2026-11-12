@@ -391,3 +391,31 @@ test("Studio swatch: replaces the swatch photo; null removes it (Undo)", () => {
   const b = bp({ swatch_image: null }, "A21TJRUUN4KGV", "en_IN").patches;
   expect(b[0].op).toBe("delete");
 });
+
+import { parsePexels, parseStudyItems } from "../../functions/_shared/amazon.ts";
+test("Pexels: only large Pexels photos without people; 2400 px link and photographer credit", () => {
+  const r = parsePexels({ photos: [
+    { id: 1, width: 4000, height: 4000, alt: "Wooden desk with coffee", photographer: "Ana", photographer_url: "https://www.pexels.com/@ana", url: "https://www.pexels.com/photo/1/",
+      src: { original: "https://images.pexels.com/photos/1/pexels-photo-1.jpeg", medium: "m", large: "l" } },
+    { id: 2, width: 4000, height: 4000, alt: "Woman writing in a notebook", src: { original: "https://images.pexels.com/photos/2/p.jpeg" } },
+    { id: 3, width: 1000, height: 900, alt: "desk", src: { original: "https://images.pexels.com/photos/3/p.jpeg" } },
+    { id: 4, width: 4000, height: 4000, alt: "desk", src: { original: "https://evil.example.com/photos/4/p.jpeg" } },
+  ] });
+  expect(r.map((p) => p.id)).toEqual([1]);
+  expect(r[0].url).toBe("https://images.pexels.com/photos/1/pexels-photo-1.jpeg?auto=compress&cs=tinysrgb&w=2400");
+  expect(r[0].credit.name).toBe("Ana");
+});
+test("Competitor study: photos in Amazon's order, ~500 px each, own listings left out", () => {
+  const r = parseStudyItems({ items: [
+    { asin: "B0OWN00001", images: [] },
+    { asin: "B0COMP0001", summaries: [{ itemName: "Diary", brand: "X" }], images: [{ images: [
+      { variant: "PT02", link: "https://m.media-amazon.com/images/I/p2.jpg", height: 500 },
+      { variant: "MAIN", link: "https://m.media-amazon.com/images/I/big.jpg", height: 2000 },
+      { variant: "MAIN", link: "https://m.media-amazon.com/images/I/m.jpg", height: 450 },
+      { variant: "PT01", link: "https://m.media-amazon.com/images/I/p1.jpg", height: 75 },
+      { variant: "SWCH", link: "https://m.media-amazon.com/images/I/s.jpg", height: 30 } ] }] },
+  ] }, ["B0OWN00001"]);
+  expect(r.length).toBe(1);
+  expect(r[0].images.map((i) => i.variant)).toEqual(["MAIN", "PT01", "PT02"]);
+  expect(r[0].images[0].url).toContain("/m.jpg");
+});

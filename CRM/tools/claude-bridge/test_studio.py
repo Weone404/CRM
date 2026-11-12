@@ -43,4 +43,16 @@ sw = Image.open(out / "swatch.jpg")
 ok(sw.size == (500, 500) and r["files"][0]["checks"][0]["ok"], "ST-PY6 swatch: 500x500 plain texture")
 r, _ = job("nope", [tmp / "cover.jpg"])
 ok(r["ok"] is False and "Unknown" in r["error"], "ST-PY7 unknown job reported, not crashed")
+# lifestyle scene: real cut-out on a background, product colour unchanged, shadow under it, note added
+Image.new("RGB", (3000, 2000), (190, 160, 120)).save(tmp / "bg.jpg")
+r, out = job("scene", [tmp / "cut.png", tmp / "bg.jpg"], {"x": 0.5, "y": 0.5, "scale": 0.4, "note": True})
+f = r["files"][0]
+arr = np.asarray(Image.open(out / "scene.jpg").convert("RGB")).astype(int)
+ok(r["ok"] and f["kind"] == "scene" and arr.shape[:2] == (2000, 2000) and (out / "scene_small.jpg").exists(), "ST-PY8 scene: 2000x2000 + small copy for Claude")
+ok(abs(arr[1000, 1000][0] - 160) < 8 and abs(arr[1000, 1000][1] - 90) < 8, "ST-PY9 scene: the product's own colour is untouched")
+ok(arr[f["meta"]["y"] + 1100 + 15, 1000].sum() < 470 - 25 and abs(arr[300, 200].sum() - 470) < 10, "ST-PY10 scene: a soft shadow under the product only")
+ok(any(c["code"] == "note" and c["ok"] for c in f["checks"]) and arr[1960 - 20, 70].sum() > 600, "ST-PY11 scene: 'Props not included' note in the corner")
+r, out = job("sheet", [tmp / "sharp.jpg", tmp / "dark.jpg", tmp / "cover.jpg"], {"groups": [{"label": "B0X", "count": 2}, {"label": "Ours", "count": 1}]})
+ok([x["name"] for x in r["files"]] == ["sheet_0.jpg", "sheet_1.jpg"] and Image.open(out / "sheet_0.jpg").width > Image.open(out / "sheet_1.jpg").width,
+   "ST-PY12 contact sheets: one numbered strip per listing")
 print("ALL STUDIO PY TESTS PASSED" if not fails else f"{fails} FAILED"); sys.exit(1 if fails else 0)

@@ -3,7 +3,7 @@
 
   python3 studio.py <job.json> <outdir>
 
-job.json: {"kind": "check" | "cutout" | "main" | "swatch", "inputs": ["/path/a.jpg", ...], "params": {...}}
+job.json: {"kind": "check" | "cutout" | "main" | "swatch" | "scene" | "sheet", "inputs": ["/path/a.jpg", ...], "params": {...}}
 Writes <outdir>/result.json: {"ok": true, "result": {...}, "files": [{"name", "kind", "width", "height", "checks", "score"}]}
 
 Rule: the product's own pixels are never redrawn. Cut-out only removes the background; the main photo only places the
@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 MAIN_SIZE = 2000          # Amazon zoom needs >= 1000 px; 2000 gives a sharp zoom
 MAIN_FILL = 0.85          # product fills ~85% of the frame (Amazon guidance for the main image)
@@ -149,6 +149,109 @@ def make_swatch(path, box, out_path):
                "message": "Plain texture, no text" if spread < 40 else "Busy area: make sure there is no text or logo in it"}]
     return checks, {"spread": round(spread, 1)}
 
+SCENE_SIZE = 2000
+FONTS = ["/System/Library/Fonts/Helvetica.ttc", "/System/Library/Fonts/SFNS.ttf", "/Library/Fonts/Arial.ttf",
+         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
+
+
+def font(size):
+    for f in FONTS:
+        if Path(f).exists():
+            try:
+                return ImageFont.truetype(f, size)
+            except OSError:
+                continue
+    return ImageFont.load_default(size=size)
+
+
+def cover_square(im, side):
+    """Fill a square with the background photo (centre crop, like CSS cover)."""
+    r = max(side / im.width, side / im.height)
+    im = im.resize((max(side, round(im.width * r)), max(side, round(im.height * r))), Image.LANCZOS)
+    x, y = (im.width - side) // 2, (im.height - side) // 2
+    return im.crop((x, y, x + side, y + side))
+
+
+def make_scene(cut_path, bg_path, params, out_path, small_path):
+    """Real cut-out on a background photo. The product's pixels are only scaled; the background is softened a little so the
+    product stays the sharp subject, and a soft shadow grounds it. Optional small "Props not included" note."""
+    side = SCENE_SIZE
+    bg = cover_square(load(bg_path).convert("RGB"), side).filter(ImageFilter.GaussianBlur(1.6))
+    cut = load(cut_path).convert("RGBA")
+    a = np.asarray(cut)[:, :, 3]
+    ys, xs = np.where(a > 8)
+    if len(xs) == 0:
+        raise ValueError("The cut-out is empty")
+    cut = cut.crop((xs.min(), ys.min(), xs.max() + 1, ys.max() + 1))
+    scale = float(params.get("scale", 0.5))
+    w = side * scale
+    h = w * cut.height / cut.width
+    if h > side * 0.85:                       # tall products: keep inside the frame
+        h = side * 0.85
+        w = h * cut.width / cut.height
+    cut = cut.resize((max(1, round(w)), max(1, round(h))), Image.LANCZOS)
+    cx, cy = float(params.get("x", 0.5)) * side, float(params.get("y", 0.55)) * side
+    x = int(min(max(cx - cut.width / 2, side * 0.02), side * 0.98 - cut.width))
+    y = int(min(max(cy - cut.height / 2, side * 0.02), side * 0.98 - cut.height))
+    # soft drop shadow + contact shadow under the product
+    alpha = cut.split()[3]
+    shadow = Image.new("L", (side, side), 0)
+    off = int(cut.width * 0.025)
+    shadow.paste(alpha.point(lambda v: int(v * 0.38)), (x + off, y + off * 2))
+    d = ImageDraw.Draw(shadow)
+    d.ellipse((x + cut.width * 0.04, y + cut.height - cut.height * 0.03, x + cut.width * 0.96, y + cut.height + cut.height * 0.035), fill=95)
+    shadow = shadow.filter(ImageFilter.GaussianBlur(max(6, cut.width * 0.03)))
+    dark = Image.new("RGB", (side, side), (25, 20, 15))
+    bg = Image.composite(dark, bg, shadow)
+    bg.paste(cut, (x, y), cut)
+    if params.get("note", True):
+        f = font(38)
+        text = "Props not included"
+        d = ImageDraw.Draw(bg, "RGBA")
+        tw = d.textlength(text, font=f)
+        px, py = 44, side - 44 - 64
+        d.rounded_rectangle((px, py, px + tw + 48, py + 64), radius=32, fill=(255, 255, 255, 215))
+        d.text((px + 24, py + 12), text, font=f, fill=(29, 29, 31, 255))
+    bg.save(out_path, "JPEG", quality=92, subsampling=0, optimize=True)
+    small = bg.copy()
+    small.thumbnail((1024, 1024))
+    small.save(small_path, "JPEG", quality=85)
+    area = cut.width * cut.height / (side * side) * 100
+    size = Path(out_path).stat().st_size
+    checks = [
+        {"code": "hero", "ok": 15 <= area <= 70, "level": "ok" if 15 <= area <= 70 else "warn",
+         "message": f"Product covers {area:.0f}% of the photo" + ("" if area >= 15 else ": make it bigger so buyers see it") + ("" if area <= 70 else ": make it smaller so the scene shows")},
+        {"code": "note", "ok": bool(params.get("note", True)), "level": "ok" if params.get("note", True) else "warn",
+         "message": "\"Props not included\" note added" if params.get("note", True) else "No props note: only fine if nothing else in the photo could look included"},
+        {"code": "size", "ok": True, "level": "ok", "message": f"{side}x{side} px"},
+        {"code": "bytes", "ok": size < MAX_BYTES, "level": "ok" if size < MAX_BYTES else "bad", "message": f"{size / 1e6:.1f} MB"},
+    ]
+    return checks, {"product_area_pct": round(area, 1), "bytes": size, "x": x, "y": y}
+
+
+def make_sheet(paths, out_path, label=""):
+    """One strip of numbered thumbnails (a listing's photos in order) so Claude can look at many photos cheaply."""
+    tile, gap = 320, 12
+    n = max(1, len(paths))
+    sheet = Image.new("RGB", (n * tile + (n + 1) * gap, tile + 2 * gap + 44), (235, 235, 238))
+    d = ImageDraw.Draw(sheet)
+    f = font(28)
+    d.text((gap, 8), label[:80], font=f, fill=(29, 29, 31))
+    for i, p in enumerate(paths):
+        try:
+            im = load(p).convert("RGB")
+        except Exception:
+            im = Image.new("RGB", (tile, tile), (200, 200, 200))
+        im.thumbnail((tile, tile))
+        cell = Image.new("RGB", (tile, tile), (255, 255, 255))
+        cell.paste(im, ((tile - im.width) // 2, (tile - im.height) // 2))
+        x = gap + i * (tile + gap)
+        sheet.paste(cell, (x, 44 + gap))
+        d.rounded_rectangle((x + 6, 44 + gap + 6, x + 50, 44 + gap + 46), radius=8, fill=(0, 98, 204))
+        d.text((x + 18, 44 + gap + 10), str(i + 1), font=f, fill=(255, 255, 255))
+    sheet.save(out_path, "JPEG", quality=85)
+
+
 
 def run(job, outdir):
     kind, inputs, params = job["kind"], job.get("inputs") or [], job.get("params") or {}
@@ -174,6 +277,22 @@ def run(job, outdir):
         checks, m = make_swatch(inputs[0], params.get("box") or {}, outdir / "swatch.jpg")
         files.append({"name": "swatch.jpg", "kind": "swatch", "width": 500, "height": 500, "checks": checks,
                       "score": 100 if checks[0]["ok"] else 80, "meta": m})
+    elif kind == "scene":
+        if len(inputs) < 2:
+            raise ValueError("The background photo is missing")
+        checks, m = make_scene(inputs[0], inputs[1], params, outdir / "scene.jpg", outdir / "scene_small.jpg")
+        score = 100 - sum(30 if c["level"] == "bad" else 10 for c in checks if not c["ok"])
+        files.append({"name": "scene.jpg", "kind": "scene", "width": SCENE_SIZE, "height": SCENE_SIZE, "checks": checks, "score": score,
+                      "meta": m, "preview": "scene_small.jpg"})
+    elif kind == "sheet":
+        # params.groups: [{"label": "...", "count": n}] over the flat inputs list
+        k = 0
+        for gi, g in enumerate(params.get("groups") or []):
+            n = int(g.get("count", 0))
+            name = f"sheet_{gi}.jpg"
+            make_sheet(inputs[k:k + n], outdir / name, g.get("label", ""))
+            files.append({"name": name, "kind": "sheet"})
+            k += n
     else:
         raise ValueError(f"Unknown job kind {kind}")
     return {"ok": True, "result": result, "files": files}

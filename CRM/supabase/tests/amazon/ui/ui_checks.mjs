@@ -15,6 +15,7 @@ const rpcAs = async (fn, args = {}) => (await fetch(`${API}/rest/v1/rpc/${fn}`, 
 
 const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+page.setDefaultTimeout(30000);
 const consoleErrors = [];
 page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) consoleErrors.push(m.text()); });
 page.on('pageerror', (e) => consoleErrors.push(String(e)));
@@ -390,6 +391,52 @@ if (pendingNow) {
   ok((await page.locator('.studio-card[data-asset="design"]').count()) === 1, 'UI76 the design appears as an option for photo 2');
   await page.locator('.studio-slot', { hasText: 'Main photo' }).click();
   ok((await page.locator('.studio-card[data-asset="design"]').count()) === 0, 'UI77 designs (with text) are never offered for the main photo');
+  // part 3: lifestyle scene from a cut-out (Pexels), guide (study, shoot list, brand kit)
+  await svc('svc_amz_studio_asset', { p_sku: prod.sku, p_kind: 'cutout', p_path: `${prod.sku}/job/c.png`, p_width: 900, p_height: 1200, p_bytes: 1000,
+    p_checks: [], p_score: null, p_meta: { mode: 'soft' }, p_parent: up.id, p_by: null });
+  await more('Competitors'); await more('Studio');                   // re-open so Studio loads the new cut-out
+  await page.locator('.studio-slot', { hasText: 'Photo 3' }).click();
+  await page.locator('.studio-card[data-asset="cutout"]').first().waitFor({ timeout: 6000 });
+  await page.locator('.studio-card[data-asset="cutout"]').first().getByRole('button', { name: 'Make lifestyle scene' }).click();
+  let sp = page.getByRole('dialog', { name: 'Make a lifestyle scene' });
+  await sp.waitFor({ timeout: 5000 });
+  ok((await sp.getByText('Add the free Pexels key once').count()) === 1 || (await sp.getByRole('tab', { name: 'AI backgrounds' }).getAttribute('aria-selected')) === 'true', 'UI78 scene picker: without the Pexels key it says how to add it (AI tab still works)');
+  await page.keyboard.press('Escape');
+  await rpcAs('api_amz_settings_save', { p_name: 'PEXELS_API_KEY', p_value: 'testkey12345' });
+  await more('Competitors'); await more('Studio');
+  await page.locator('.studio-slot', { hasText: 'Photo 3' }).waitFor({ timeout: 6000 });
+  await page.locator('.studio-slot', { hasText: 'Photo 3' }).click();
+  await page.locator('.studio-card[data-asset="cutout"]').first().getByRole('button', { name: 'Make lifestyle scene' }).click();
+  sp = page.getByRole('dialog', { name: 'Make a lifestyle scene' });
+  await sp.locator('.scene-bg').first().waitFor({ timeout: 5000 });
+  ok((await sp.locator('.scene-bg').count()) === 3 && (await sp.getByText('Photos provided by').count()) === 1, 'UI79 stock backgrounds load with the Pexels credit');
+  await sp.locator('.scene-bg').first().click();
+  ok((await sp.locator('.scene-stage > img').count()) === 1 && (await sp.locator('.scene-note').count()) === 1, 'UI80 live preview: your cut-out on the background + props note');
+  await page.screenshot({ path: `${SHOTS}/amz_scene_picker.png`, fullPage: false });
+  await sp.getByRole('button', { name: 'Make scene' }).click();
+  await page.waitForTimeout(900);
+  const sj = (await rpcAs('api_amz_studio', { p_sku: prod.sku })).jobs.find((j) => j.kind === 'scene');
+  ok(sj && sj.params.bg.source === 'pexels' && sj.params.bg.url.startsWith('https://images.pexels.com/') && sj.params.note === true, 'UI81 Make scene queues a Mac job with the chosen Pexels photo');
+  await page.getByRole('button', { name: 'Guide', exact: true }).click();
+  const gd = page.getByRole('dialog', { name: 'Photo guide' });
+  await gd.locator('[data-shot]').first().waitFor({ timeout: 5000 });
+  ok((await gd.locator('[data-shot]').count()) >= 7, 'UI82 guide: shoot list for this product');
+  await gd.getByRole('button', { name: 'Study top listings' }).click();
+  await page.waitForTimeout(1200);
+  ok((await gd.getByRole('button', { name: 'Studying…' }).count()) === 1, 'UI83 study started (runs on the Mac)');
+  for (let i = 0; i < 4; i++) {
+    const c2 = await svc('svc_amz_studio_claim', {}); if (!c2?.job) break;
+    if (c2.job.kind === 'study') { await svc('svc_amz_studio_finish', { p_job: c2.job.id, p_ok: true, p_result: { competitors: [{ asin: 'B0TEST0001', types: ['white_main', 'lifestyle'] }, { asin: 'B0TEST0002', types: ['white_main', 'size_scale'] }], own: ['white_main'], notes: ['Most show the diary in hand'] }, p_error: null, p_files: [] }); break; }
+    await svc('svc_amz_studio_finish', { p_job: c2.job.id, p_ok: false, p_result: null, p_error: 'test', p_files: [] });
+  }
+  await page.waitForTimeout(5600);
+  ok((await gd.getByText('Most show the diary in hand').count()) === 1 && (await gd.locator('[data-shot="lifestyle"]').innerText()).includes('50% of top listings'), 'UI84 study result: notes + what share of top listings show each shot');
+  await gd.getByRole('combobox', { name: 'Font' }).selectOption('serif');
+  await gd.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.waitForTimeout(700);
+  ok((await rpcAs('api_amz_studio', { p_sku: prod.sku })).brand.font === 'serif', 'UI85 brand kit saved');
+  await page.screenshot({ path: `${SHOTS}/amz_guide.png`, fullPage: false });
+  await page.keyboard.press('Escape');
   await nav('Decisions');
   await page.locator('.cat-chip', { hasText: 'Photos' }).click().catch(() => {});
   ok((await page.locator('.decision-thumb.is-new').count()) >= 1, 'UI71 Decisions show the new photo as a thumbnail (changed one outlined)');

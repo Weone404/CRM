@@ -1070,4 +1070,96 @@ BEGIN
 END $$;
 RESET ROLE;
 
+-- SC: Studio part 3 (088): scenes, AI backgrounds, competitor study, brand kit, guide
+DO $$
+DECLARE s1 text; s2 text; r jsonb; up uuid; c1 uuid; bg uuid; sc uuid; jid bigint; sid bigint;
+BEGIN
+  RESET ROLE;
+  SELECT sku INTO s1 FROM public.amazon_listings WHERE NOT is_parent ORDER BY sku LIMIT 1;
+  SELECT sku INTO s2 FROM public.amazon_listings WHERE NOT is_parent AND sku <> s1 ORDER BY sku LIMIT 1;
+  UPDATE public.amazon_listings SET images = '[{"url": "https://m.media-amazon.com/images/I/own1.jpg"}]' WHERE sku = s1;
+  DELETE FROM public.amazon_studio_jobs;
+  up := public.svc_amz_studio_asset(s1, 'upload', s1 || '/up/sc.jpg', 3000, 3000, 1, '[]', 100, '{}', NULL, NULL);
+  c1 := public.svc_amz_studio_asset(s1, 'cutout', s1 || '/j/sc.png', 1500, 2000, 1, '[]', NULL, '{}', up, NULL);
+  SET ROLE authenticated; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  PERFORM pg_temp.fails(format($q$SELECT public.api_amz_studio_job(%L, 'scene', ARRAY[%L]::uuid[], '{"bg": {"source": "pexels", "url": "https://evil.example.com/a.jpg"}}')$q$, s1, c1),
+    '%Pexels background%', 'SC01 a scene background must be a real Pexels photo link (nothing else is downloaded)');
+  PERFORM pg_temp.fails(format($q$SELECT public.api_amz_studio_job(%L, 'scene', ARRAY[%L]::uuid[], '{"bg": {"source": "pexels", "url": "https://images.pexels.com/photos/1/a.jpg"}}')$q$, s1, up),
+    '%cannot be used%', 'SC02 a scene needs a cut-out');
+  r := public.api_amz_studio_job(s1, 'scene', ARRAY[c1], '{"bg": {"source": "pexels", "url": "https://images.pexels.com/photos/1234/pexels-photo-1234.jpeg?auto=compress&w=2400",
+      "credit": {"name": "Ana", "url": "https://www.pexels.com/@ana", "photo": "javascript:alert(1)"}}, "x": 5, "scale": 0.01}');
+  PERFORM pg_temp.ok((r->'params'->>'x')::numeric = 0.9 AND (r->'params'->>'scale')::numeric = 0.25 AND (r->'params'->>'note')::boolean
+    AND r->'params'->'bg'->'credit'->>'photo' IS NULL AND r->'params'->'bg'->'credit'->>'name' = 'Ana' AND length(r->'params'->>'product') > 5,
+    'SC03 scene job: position/size kept in range, "Props not included" on by default, only Pexels credit links kept, product facts for Claude');
+  PERFORM pg_temp.fails(format($q$SELECT public.api_amz_studio_job(%L, 'aibg', NULL, '{"theme": "desk", "words": "a woman writing"}')$q$, s1),
+    '%without people%', 'SC04 AI backgrounds never include people, hands, logos or text');
+  r := public.api_amz_studio_job(s1, 'aibg', NULL, '{"theme": "desk", "words": "teak wood, morning light <script>"}');
+  PERFORM pg_temp.ok(r->'params'->>'words' = 'teak wood, morning light script' AND r->'params' ? 'seed', 'SC05 AI background job: theme + cleaned words + seed');
+  RESET ROLE; SET ROLE service_role;
+  r := public.svc_amz_studio_claim();
+  PERFORM pg_temp.ok(r->'job'->>'kind' = 'scene', 'SC06 AI jobs wait until quicker photo jobs are done');
+  jid := (r->'job'->>'id')::bigint;
+  r := public.svc_amz_studio_finish(jid, true, '{}', NULL, jsonb_build_array(
+    jsonb_build_object('kind', 'scene', 'path', s1 || '/job9/s.jpg', 'width', 2000, 'height', 2000, 'score', 85,
+      'checks', '[{"code": "claude", "ok": false, "level": "bad", "message": "The pen looks included"}]'::jsonb),
+    jsonb_build_object('kind', 'background', 'path', s1 || '/job9/b.jpg')));
+  sc := (r->'assets'->>0)::uuid;
+  PERFORM pg_temp.ok(jsonb_array_length(r->'assets') = 1 AND (SELECT score = 40 AND parent = c1 AND meta->'bg'->>'source' = 'pexels' FROM public.amazon_studio_assets WHERE id = sc),
+    'SC07 a scene Claude flags (props look included) is capped at 40; a scene job cannot add backgrounds');
+  PERFORM pg_temp.fails(format($q$SELECT public.svc_amz_studio_send(%L, '3', 'https://x.supabase.co/a.jpg', NULL)$q$, sc), '%scored 40/100%', 'SC08 a flagged scene cannot be sent');
+  r := public.svc_amz_studio_claim(); jid := (r->'job'->>'id')::bigint;
+  r := public.svc_amz_studio_finish(jid, true, '{}', NULL, jsonb_build_array(jsonb_build_object('kind', 'background', 'path', s1 || '/job10/b.jpg', 'width', 2000, 'height', 2000,
+    'meta', '{"source": "ai", "model": "Z-Image-Turbo"}'::jsonb)));
+  bg := (r->'assets'->>0)::uuid;
+  PERFORM pg_temp.fails(format($q$SELECT public.svc_amz_studio_send(%L, '3', 'https://x.supabase.co/a.jpg', NULL)$q$, bg), '%not a product photo%', 'SC09 a background alone is never sent');
+  up := public.svc_amz_studio_asset(s2, 'cutout', s2 || '/j/c.png', 1, 1, 1, '[]', NULL, '{}', NULL, NULL);
+  RESET ROLE; SET ROLE authenticated;
+  r := public.api_amz_studio_job(s2, 'scene', ARRAY[up, bg], '{"bg": {"source": "ai"}}');
+  PERFORM pg_temp.ok(r->'params'->'bg'->>'source' = 'ai' AND r->'asset_ids'->>1 = bg::text, 'SC10 an AI background can be reused for another product');
+  r := public.api_amz_studio(s2);
+  PERFORM pg_temp.ok(r ? 'pexels_ready' AND r->'brand'->>'name' = 'Nitaniya' AND EXISTS (SELECT 1 FROM jsonb_array_elements(r->'assets') a WHERE a->>'id' = bg::text),
+    'SC11 Studio shows Pexels status, brand kit and shared backgrounds');
+  RESET ROLE; SET ROLE service_role;
+  UPDATE public.amazon_studio_jobs SET status = 'done' WHERE status = 'waiting';
+  sc := public.svc_amz_studio_asset(s1, 'scene', s1 || '/j/ok.jpg', 2000, 2000, 1, '[]', 90, '{"bg": {"source": "pexels", "credit": {"name": "Ana"}}}', c1, NULL);
+  r := public.svc_amz_studio_send(sc, '4', 'https://x.supabase.co/storage/v1/object/public/amazon-images/s.jpg', NULL);
+  RESET ROLE;
+  PERFORM pg_temp.ok((SELECT summary LIKE 'New lifestyle photo 2%' AND reason LIKE '%Pexels photo by Ana%' AND after->'images'->1->>'url' LIKE '%/s.jpg'
+      FROM public.amazon_change_queue WHERE id = (r->>'change')::uuid), 'SC12 a good scene becomes a waiting Decision that names the photo source');
+
+  -- competitor study
+  SET ROLE service_role;
+  PERFORM pg_temp.fails(format($q$SELECT public.svc_amz_studio_study(%L, 'diary', '[{"asin": "bad"}]', NULL)$q$, s1), '%no other listings%', 'SC13 nothing to study -> clear message');
+  r := public.svc_amz_studio_study(s1, 'personalised diary', '[{"asin": "B0AAAAAAA1", "title": "A", "images": [{"variant": "MAIN", "url": "https://m.media-amazon.com/images/I/a1.jpg"},
+      {"variant": "PT01", "url": "https://evil.example.com/x.jpg"}]}, {"asin": "B0AAAAAAA2", "title": "B", "images": [{"variant": "MAIN", "url": "https://m.media-amazon.com/images/I/b1.jpg"}]}]', NULL);
+  sid := (r->>'study')::bigint;
+  PERFORM pg_temp.fails(format($q$SELECT public.svc_amz_studio_study(%L, 'x', '[{"asin": "B0AAAAAAA1"}]', NULL)$q$, s1), '%already running%', 'SC14 one study at a time per product');
+  r := public.svc_amz_studio_claim(); jid := (r->'job'->>'id')::bigint;
+  PERFORM pg_temp.ok(r->'job'->>'kind' = 'study' AND jsonb_array_length(r->'study'->'items'->0->'images') = 1 AND r->'study'->'own'->0->>'url' LIKE '%own1.jpg',
+    'SC15 the Mac gets only Amazon photo links (others dropped) plus this product''s photos');
+  PERFORM public.svc_amz_studio_finish(jid, true, '{"competitors": [{"asin": "B0AAAAAAA1", "types": ["white_main", "lifestyle", "size_scale"]},
+      {"asin": "B0AAAAAAA2", "types": ["white_main", "lifestyle"]}], "own": ["white_main"], "notes": ["Most show the diary in hand"]}', NULL, '[]');
+  RESET ROLE;
+  SET ROLE authenticated;
+  r := public.api_amz_studio_guide(s1);
+  PERFORM pg_temp.ok(r->'study'->>'status' = 'done' AND (r->'study'->>'competitors')::int = 2 AND (r->'study'->>'avg_photos')::numeric = 2.5
+      AND EXISTS (SELECT 1 FROM jsonb_array_elements(r->'shots') x WHERE x->>'code' = 'lifestyle' AND (x->>'competitors_pct')::int = 100 AND NOT (x->>'have')::boolean)
+      AND EXISTS (SELECT 1 FROM jsonb_array_elements(r->'shots') x WHERE x->>'code' = 'white_main' AND (x->>'have')::boolean)
+      AND EXISTS (SELECT 1 FROM jsonb_array_elements(r->'shots') x WHERE x->>'code' = 'size_scale' AND (x->>'competitors_pct')::int = 50),
+    'SC16 guide: what competitors show vs what this product has (shoot list)');
+  -- brand kit
+  PERFORM pg_temp.fails($q$SELECT public.api_amz_studio_brand_save('{"colors": ["red"]}')$q$, '%hex codes%', 'SC17 brand colours must be hex codes');
+  r := public.api_amz_studio_brand_save('{"name": "Nitaniya", "colors": ["#112233", "#A67C1A"], "font": "serif", "name_spot": "bottom-right"}');
+  PERFORM pg_temp.ok(r->>'font' = 'serif' AND r->'colors'->>0 = '#112233', 'SC18 Admin saves the brand kit');
+  PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000c', false);
+  PERFORM pg_temp.fails($q$SELECT public.api_amz_studio_brand_save('{"font": "system"}')$q$, '%', 'SC19 only Admin changes the brand kit');
+  PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  r := public.api_amz_studio_designs(NULL);
+  PERFORM pg_temp.ok(jsonb_typeof(r) = 'array' AND jsonb_array_length(r) >= 1 AND r->0 ? 'layers', 'SC20 designs from any product can be copied (layers)');
+  PERFORM pg_temp.fails($q$SELECT public.svc_amz_studio_study('x', 'y', '[]', NULL)$q$, '%permission denied%', 'SC21 browser cannot start a study without Amazon''s data (server only)');
+  RESET ROLE;
+  PERFORM pg_temp.ok('PEXELS_API_KEY' = ANY (crm_private.amz_secret_names()), 'SC22 the free Pexels key is a Vault setting');
+END $$;
+RESET ROLE;
+
 \echo ALL SQL TESTS PASSED

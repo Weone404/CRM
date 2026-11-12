@@ -3,10 +3,14 @@
 //   multipart {file, sku, design=1, parent, layers, checks} -> a finished text & pointer design (made in the browser);
 //                                            the truth check and score are made on the server from the layers
 //   {action:"urls", ids:[...]}            -> short-lived links to view Studio photos (private bucket)
+//   {action:"bg_search", query, page}      -> free Pexels backgrounds (key in Settings; the key never leaves this function)
+//   {action:"study", sku, keyword}        -> reads Amazon's catalog for the keyword (top 10 other listings + their photos)
+//                                            and asks the Mac (Claude) what kinds of photos they show
 //   {action:"send", asset, slot}          -> copies the chosen photo to the public 'amazon-images' bucket (Amazon needs a public
 //                                            link) and creates a waiting Decision. Admin / approvers only. Nothing goes to Amazon here.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { admin, asUser, cors, json, HttpError, URL_ } from "../_shared/amazon_deno.ts";
+import { admin, asUser, cors, json, HttpError, URL_, loadApi, scrub } from "../_shared/amazon_deno.ts";
+import { parsePexels, parseStudyItems } from "../_shared/amazon.ts";
 
 const MAX = 15 * 1024 * 1024;
 const kind = (b: Uint8Array): "jpg" | "png" | null =>
@@ -60,6 +64,36 @@ Deno.serve(async (req) => {
         if (data?.signedUrl) out[r.id] = data.signedUrl;
       }
       return json(req, 200, out);
+    }
+    if (body.action === "bg_search") {
+      const q = String(body.query ?? "").replace(/[^A-Za-z0-9 ,.-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 60);
+      if (q.length < 2) throw new HttpError(400, "Type what kind of background you want");
+      const page = Math.min(10, Math.max(1, Number(body.page) || 1));
+      const { data: sec } = await admin.rpc("svc_amz_secrets");
+      const key = (sec as Record<string, string> | null)?.PEXELS_API_KEY;
+      if (!key) throw new HttpError(412, "Add the free Pexels key in Amazon > Settings first (pexels.com/api)");
+      const res = await fetch(`https://api.pexels.com/v1/search?${new URLSearchParams({ query: q, orientation: "square", size: "large", per_page: "30", page: String(page) })}`,
+        { headers: { Authorization: key }, signal: AbortSignal.timeout(15000) });
+      if (res.status === 429) throw new HttpError(429, "Pexels limit reached for this hour. Try again later.");
+      if (res.status === 401 || res.status === 403) throw new HttpError(412, "Pexels refused the key. Check it in Amazon > Settings.");
+      if (!res.ok) throw new HttpError(502, `Pexels did not answer (${res.status})`);
+      const photos = parsePexels(await res.json());
+      return json(req, 200, { photos, page, remaining: res.headers.get("X-Ratelimit-Remaining") });
+    }
+    if (body.action === "study") {
+      const sku = String(body.sku ?? "");
+      const keyword = String(body.keyword ?? "").replace(/\s+/g, " ").trim();
+      if (!/^[A-Za-z0-9._-]{1,40}$/.test(sku)) throw new HttpError(400, "Missing product");
+      if (keyword.length < 3 || keyword.length > 80) throw new HttpError(400, "Type the search words buyers use (3-80 characters)");
+      const { data: mine } = await admin.from("amazon_listings").select("asin");
+      const { api, secrets } = await loadApi();
+      let items;
+      try {
+        items = parseStudyItems(await api.searchCatalog(keyword), (mine || []).map((r: { asin: string }) => r.asin).filter(Boolean));
+      } catch (e) {
+        throw new HttpError(502, `Amazon catalog: ${scrub(e instanceof Error ? e.message : String(e), secrets).slice(0, 160)}`);
+      }
+      return json(req, 200, await rpcAdmin("svc_amz_studio_study", { p_sku: sku, p_keyword: keyword, p_items: items, p_by: me }));
     }
     if (body.action === "send") {
       if (!access.can_approve) throw new HttpError(403, "Only Admin can send Studio photos to Decisions");

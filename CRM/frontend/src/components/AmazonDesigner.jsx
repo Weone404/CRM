@@ -10,6 +10,9 @@ import { Modal } from './AmazonDecisions';
 
 const S = 2000;
 const FONT = '-apple-system, "SF Pro Display", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+// Brand kit fonts (only fonts every device already has, so the preview and the saved image match)
+const FONTS = { system: FONT, serif: 'Georgia, "Times New Roman", Times, serif', rounded: '"SF Pro Rounded", ui-rounded, "Arial Rounded MT Bold", "Trebuchet MS", sans-serif' };
+const SPOT = { 'top-left': [0.16, 0.06], 'top-right': [0.84, 0.06], 'bottom-left': [0.16, 0.95], 'bottom-right': [0.84, 0.95] };
 const COLORS = [['Black', '#1d1d1f'], ['White', '#ffffff'], ['Brown', '#7A4A24'], ['Gold', '#A67C1A'], ['Blue', '#0062CC']];
 const BGS = [['None', ''], ['White', '#ffffff'], ['Dark', '#1d1d1f'], ['Cream', '#F6EFE4']];
 const PAGES = [['White', '#ffffff'], ['Cream', '#F6EFE4'], ['Light grey', '#F2F2F4']];
@@ -58,7 +61,7 @@ function wrap(ctx, text, maxW) {
 }
 function rr(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
 function labelBox(ctx, l) {
-  ctx.font = `${l.weight || 700} ${l.size}px ${FONT}`;
+  ctx.font = `${l.weight || 700} ${l.size}px ${FONTS[l.font] || FONT}`;
   const lines = wrap(ctx, l.text, S * (l.type === 'text' ? 0.86 : 0.42));
   const w = Math.max(...lines.map((t) => ctx.measureText(t).width), 10);
   const lh = l.size * 1.18; const padX = l.bg ? l.size * 0.55 : 0; const padY = l.bg ? l.size * 0.32 : 0;
@@ -131,7 +134,7 @@ export function localChecks(ctx, layers, imgW) {
 }
 
 // ---------------------------------------------------------------- editor
-export function Designer({ sku, base, baseUrl, upload, onClose, onSaved }) {
+export function Designer({ sku, base, baseUrl, upload, onClose, onSaved, brand }) {
   const view = useRef(null);
   const [img, setImg] = useState(null);
   const [imgErr, setImgErr] = useState(false);
@@ -143,10 +146,20 @@ export function Designer({ sku, base, baseUrl, upload, onClose, onSaved }) {
   const [truth, setTruth] = useState([]);
   const [local, setLocal] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [others, setOthers] = useState([]);
   const drag = useRef(null);
+  const font = brand?.font && brand.font !== 'system' ? brand.font : undefined;
+  const palette = useMemo(() => {
+    const seen = new Set(); const out = [];
+    for (const [n, v] of [...(brand?.colors || []).map((c, i) => [`Brand ${i + 1}`, c]), ...COLORS]) { const k = v.toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push([n, v]); } }
+    return out.slice(0, 8);
+  }, [brand]);
   const boxes = useRef([]);
 
   useEffect(() => { rpc('api_amz_studio_facts', { p_sku: sku }).then(setFacts).catch(() => setFacts({ callouts: [] })); }, [sku]);
+  useEffect(() => { rpc('api_amz_studio_designs', { p_except: null }).then((r) => setOthers((r || []).filter((x) => x.id !== base.id))).catch(() => {}); }, [base.id]);
+  // copy another design's text & pointers (e.g. the same template for every colour); the truth check runs again for this product
+  const copyFrom = (id) => { const o = others.find((x) => x.id === id); if (!o) return; setLayers(o.layers.map(({ id, ...l }) => L(l))); setSel(null); };
   useEffect(() => {
     if (!baseUrl) { setImgErr(true); return; }
     const i = new Image(); i.crossOrigin = 'anonymous'; i.onload = () => setImg(i); i.onerror = () => setImgErr(true); i.src = baseUrl;
@@ -181,7 +194,7 @@ export function Designer({ sku, base, baseUrl, upload, onClose, onSaved }) {
   const add = (type, text = '') => {
     const l = L({ type, text: text || (type === 'pointer' ? 'Detail' : type === 'badge' ? 'Badge' : 'Heading'), x: 0.5, y: type === 'text' ? 0.1 : 0.85,
       ...(type === 'pointer' ? { x: 0.22, y: 0.2 + (layers.length % 4) * 0.18, tx: 0.42, ty: 0.3 + (layers.length % 4) * 0.12, size: 60 } : {}),
-      ...(type === 'text' ? { size: 100, bg: '' } : {}) });
+      ...(type === 'text' ? { size: 100, bg: '' } : {}), ...(font ? { font } : {}) });
     setLayers((ls) => [...ls, l]); setSel(l.id);
   };
   const upd = (id, patch) => setLayers((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)));
@@ -216,14 +229,23 @@ export function Designer({ sku, base, baseUrl, upload, onClose, onSaved }) {
         <div className="designer-side space-y-3">
           <div className="flex flex-wrap gap-2">
             <select className="glass-input px-2 py-1.5 text-sm flex-1 min-w-[150px]" aria-label="Template" defaultValue=""
-              onChange={(e) => { if (e.target.value) { const t = templateLayers(e.target.value, facts || {}); if (!t.length) showToast('Not available for this product (its details do not support it)', 'error'); else { setLayers(t); setSel(null); } } }}>
+              onChange={(e) => { if (e.target.value) { const t = templateLayers(e.target.value, facts || {}); if (!t.length) showToast('Not available for this product (its details do not support it)', 'error'); else { setLayers(font ? t.map((l) => ({ ...l, font })) : t); setSel(null); } } }}>
               {TEMPLATES.map(([v, l]) => <option key={v} value={v}>{v ? `Template: ${l}` : 'Choose a template…'}</option>)}
             </select>
+            {others.length > 0 && (
+              <select className="glass-input px-2 py-1.5 text-sm flex-1 min-w-[150px]" aria-label="Copy from another design" value="" onChange={(e) => copyFrom(e.target.value)}>
+                <option value="">Copy text from a design…</option>
+                {others.map((o) => <option key={o.id} value={o.id}>{(o.color || o.sku)}{o.sku === sku ? ' (this product)' : ''} · {(o.layers[0]?.text || '').slice(0, 30)} · {o.score ?? '?'}</option>)}
+              </select>)}
           </div>
           <div className="flex flex-wrap gap-1.5">
             <button type="button" className="glass-btn-ghost px-3 py-1.5 text-xs" onClick={() => add('text')}>+ Heading</button>
             <button type="button" className="glass-btn-ghost px-3 py-1.5 text-xs" onClick={() => add('pointer')}>+ Pointer</button>
             <button type="button" className="glass-btn-ghost px-3 py-1.5 text-xs" onClick={() => add('badge')}>+ Badge</button>
+            {brand?.name && <button type="button" className="glass-btn-ghost px-3 py-1.5 text-xs" onClick={() => {
+              const [x, y] = SPOT[brand.name_spot] || SPOT['bottom-right'];
+              const l = L({ type: 'badge', text: brand.name, x, y, size: 52, weight: 700, bg: '', color: brand.colors?.[1] || '#1d1d1f', ...(font ? { font } : {}) });
+              setLayers((ls) => [...ls, l]); setSel(l.id); }}>+ Brand name</button>}
           </div>
           {facts?.callouts?.length > 0 && (
             <div>
@@ -235,7 +257,7 @@ export function Designer({ sku, base, baseUrl, upload, onClose, onSaved }) {
             <div className="rounded-xl p-2.5 space-y-2" style={{ background: 'rgba(0,122,255,0.06)' }}>
               <input className="glass-input w-full px-2.5 py-1.5 text-sm" value={cur.text} maxLength={80} onChange={(e) => upd(cur.id, { text: e.target.value })} aria-label="Text" />
               <label className="flex items-center gap-2 text-xs">Size<input type="range" min={40} max={160} value={cur.size} onChange={(e) => upd(cur.id, { size: Number(e.target.value) })} className="flex-1" /><span className="w-8 text-right">{cur.size}</span></label>
-              <div className="flex flex-wrap gap-1 items-center text-xs">Text:{COLORS.map(([n, v]) => <button key={n} type="button" title={n} aria-label={`Text ${n}`} className={`swatch-dot ${cur.color === v ? 'is-on' : ''}`} style={{ background: v }} onClick={() => upd(cur.id, { color: v })} />)}</div>
+              <div className="flex flex-wrap gap-1 items-center text-xs">Text:{palette.map(([n, v]) => <button key={n} type="button" title={n} aria-label={`Text ${n}`} className={`swatch-dot ${cur.color === v ? 'is-on' : ''}`} style={{ background: v }} onClick={() => upd(cur.id, { color: v })} />)}</div>
               <div className="flex flex-wrap gap-1 items-center text-xs">Background:{BGS.map(([n, v]) => <button key={n} type="button" className={`px-2 py-0.5 rounded-full border text-[11px] ${cur.bg === v ? 'border-blue-500 font-semibold' : 'border-transparent'}`} onClick={() => upd(cur.id, { bg: v })}>{n}</button>)}</div>
               <button type="button" className="text-xs" style={{ color: '#C4261D' }} onClick={() => { setLayers((ls) => ls.filter((l) => l.id !== cur.id)); setSel(null); }}>Delete this label</button>
             </div>
