@@ -332,6 +332,13 @@ export function buildPatches(after: Record<string, any>, mk: string, lang: strin
         // Flagged colour-swatch photo: remove it; Amazon then uses the cover photo for the colour swatch.
         if (v === true) patches.push({ op: "delete", path: "/attributes/swatch_product_image_locator", value: [{ marketplace_id: mk }] });
         break;
+      case "swatch_image": {
+        // Clean colour swatch made in Studio (public link). null = remove the swatch (Undo of a swatch that did not exist before).
+        const u = (v as any)?.url;
+        if (u) patches.push({ op: "replace", path: "/attributes/swatch_product_image_locator", value: [{ media_location: u, marketplace_id: mk }] });
+        else patches.push({ op: "delete", path: "/attributes/swatch_product_image_locator", value: [{ marketplace_id: mk }] });
+        break;
+      }
       case "handling_days": case "quantity": break;   // sent above as one fulfillment_availability merge
       case "images": {
         // Ordered photos; the first is the cover. Slots that had a photo before and are now empty are deleted.

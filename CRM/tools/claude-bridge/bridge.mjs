@@ -9,7 +9,7 @@
 //  - Usage limit / errors: the message is released and retried later; after 3 tries the user gets a clear message.
 // No npm packages needed (Node 18+).
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, mkdirSync, writeFileSync, statSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -142,14 +142,136 @@ async function selfUpdate() {
   } catch { /* try again later */ }
 }
 
+
+// ---------------------------------------------------------------- Studio (product photos)
+// Photo jobs from CRM > Amazon > Studio run here with FREE open tools in their own Python environment
+// (~/.nitaniya-bridge/studio/venv): rembg + IS-Net (Apache-2.0) for cut-outs, Pillow for the white main photo and swatches.
+// One job at a time, ~1.3-2.4 GB RAM. Results go only to the CRM's PRIVATE Studio storage; nothing is ever sent to Amazon from here.
+const STUDIO_DIR = join(CONF, "studio");
+const STUDIO_PY = join(STUDIO_DIR, "studio.py");
+const VENV_PY = join(STUDIO_DIR, "venv", "bin", "python");
+const STUDIO_RAW = RAW.replace(/bridge\.mjs$/, "studio.py");
+const STUDIO_TIMEOUT_MS = 10 * 60e3;
+let studioCheckedAt = 0;
+let studioSetupError = "";
+let studioRetryAt = 0;
+
+function run(cmd, args, timeoutMs = 120000) {
+  return new Promise((resolve) => {
+    let out = "";
+    let p;
+    try { p = spawn(cmd, args, { env: process.env }); } catch (e) { resolve({ code: -1, out: String(e) }); return; }
+    const t = setTimeout(() => p.kill("SIGTERM"), timeoutMs);
+    p.stdout.on("data", (d) => { out += d; if (out.length > 20000) out = out.slice(-20000); });
+    p.stderr.on("data", (d) => { out += d; if (out.length > 20000) out = out.slice(-20000); });
+    p.on("error", (e) => { clearTimeout(t); resolve({ code: -1, out: String(e) }); });
+    p.on("close", (code) => { clearTimeout(t); resolve({ code, out }); });
+  });
+}
+
+async function findPython() {
+  const cands = ["/opt/homebrew/bin/python3.12", "/opt/homebrew/bin/python3", "/usr/local/bin/python3.12", "/usr/local/bin/python3",
+    "/Library/Frameworks/Python.framework/Versions/Current/bin/python3", "/usr/bin/python3"];
+  for (const c of cands) {
+    if (!existsSync(c)) continue;
+    const r = await run(c, ["-c", "import sys; print(int((3, 10) <= sys.version_info[:2] < (3, 14)))"], 20000);
+    if (r.code === 0 && r.out.trim().endsWith("1")) return c;
+  }
+  return null;
+}
+
+// Sets up (once) and refreshes (every 6 h) the Studio worker. Returns "" when ready, else a plain-words problem.
+async function ensureStudio() {
+  if (studioSetupError && Date.now() < studioRetryAt) return studioSetupError;
+  mkdirSync(STUDIO_DIR, { recursive: true });
+  if (!existsSync(STUDIO_PY) || Date.now() - studioCheckedAt > 6 * 3600e3) {
+    try {
+      const res = await fetch(STUDIO_RAW, { signal: AbortSignal.timeout(20000) });
+      const code = res.ok ? await res.text() : "";
+      if (code.includes("Nitaniya Studio worker")) writeFileSync(STUDIO_PY, code);
+      studioCheckedAt = Date.now();
+    } catch { /* keep the old copy */ }
+  }
+  if (!existsSync(STUDIO_PY)) return (studioSetupError = "Could not download the Studio worker. Check the Mac's internet.");
+  if (!existsSync(VENV_PY)) {
+    const py = await findPython();
+    if (!py) {
+      studioRetryAt = Date.now() + 30 * 60e3;
+      return (studioSetupError = "Studio needs Python 3.10-3.13 on the Mac. Install Python 3.12 from python.org (free), then it starts by itself.");
+    }
+    log("Studio: first-time setup (free tools, about 5 minutes)…");
+    let r = await run(py, ["-m", "venv", join(STUDIO_DIR, "venv")], 120000);
+    if (r.code === 0) r = await run(VENV_PY, ["-m", "pip", "install", "--quiet", "--upgrade", "pip"], 600000);
+    if (r.code === 0) r = await run(VENV_PY, ["-m", "pip", "install", "--quiet", "rembg[cpu]==2.0.67", "pillow", "numpy"], 1200000);
+    if (r.code !== 0) {
+      try { rmSync(join(STUDIO_DIR, "venv"), { recursive: true, force: true }); } catch { /* ignore */ }
+      studioRetryAt = Date.now() + 30 * 60e3;
+      log("Studio setup failed:", r.out.slice(-400));
+      return (studioSetupError = "Studio setup on the Mac failed (installing free photo tools). It will retry in 30 minutes.");
+    }
+    log("Studio: setup done.");
+  }
+  studioSetupError = "";
+  return "";
+}
+
+// One Studio job, if any. Returns true when a job was handled.
+async function studioJob() {
+  const r = await call({ action: "studio_claim" });
+  if (!r?.job) return false;
+  const job = r.job;
+  log(`studio job ${job.id} (${job.kind}) for ${job.sku}`);
+  const hb = setInterval(() => { call({ action: "ping" }).catch(() => {}); }, 30000);
+  const dir = mkdtempSync(join(tmpdir(), "nitaniya-studio-"));
+  try {
+    const problem = await ensureStudio();
+    if (problem) { await call({ action: "studio_done", id: job.id, ok: false, error: problem }); return true; }
+    const inputs = [];
+    for (const [i, inp] of (r.inputs || []).entries()) {
+      const res = await fetch(inp.url, { signal: AbortSignal.timeout(60000) });
+      if (!res.ok) throw new Error(`could not download the photo (${res.status})`);
+      const p = join(dir, `in${i}.${inp.ext === "png" ? "png" : "jpg"}`);
+      writeFileSync(p, Buffer.from(await res.arrayBuffer()));
+      inputs.push(p);
+    }
+    const jobFile = join(dir, "job.json");
+    writeFileSync(jobFile, JSON.stringify({ kind: job.kind, inputs, params: job.params || {} }));
+    const outDir = join(dir, "out");
+    const ran = await run(VENV_PY, [STUDIO_PY, jobFile, outDir], STUDIO_TIMEOUT_MS);
+    const resPath = join(outDir, "result.json");
+    if (!existsSync(resPath)) throw new Error(ran.code === null || ran.code === -1 ? "the photo job took too long" : "the photo tool stopped (low memory?)");
+    const res = JSON.parse(readFileSync(resPath, "utf8"));
+    if (!res.ok) { await call({ action: "studio_done", id: job.id, ok: false, error: res.error || "failed" }); return true; }
+    const files = [];
+    for (const f of res.files || []) {
+      const fp = join(outDir, f.name);
+      if (!existsSync(fp) || statSync(fp).size > 15 * 1024 * 1024) continue;
+      const up = await call({ action: "studio_file", id: job.id, sku: job.sku, b64: readFileSync(fp).toString("base64") });
+      files.push({ ...f, path: up.path, bytes: up.bytes });
+    }
+    await call({ action: "studio_done", id: job.id, sku: job.sku, ok: true, result: res.result || {}, files });
+    log(`studio job ${job.id}: done (${files.length} photo${files.length === 1 ? "" : "s"})`);
+  } catch (e) {
+    log(`studio job ${job.id}: ${e.message}`);
+    await call({ action: "studio_done", id: job.id, ok: false, error: `Mac: ${String(e.message).slice(0, 200)}` }).catch(() => {});
+  } finally {
+    clearInterval(hb);
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+  return true;
+}
+
 let pausedUntil = 0;
 log("Nitaniya Live Claude helper started. Claude:", CLAUDE);
 for (;;) {
   try {
-    if (Date.now() < pausedUntil) { await call({ action: "ping" }).catch(() => {}); await sleep(IDLE_MS * 10); continue; }
     if (Date.now() > nextUpdate) await selfUpdate();
-    const r = await call({ action: "claim" });
-    if (!r?.job) { await sleep(IDLE_MS); continue; }
+    // Claude messages first; photo jobs when there is no message (or while Claude's usage limit pauses messages)
+    const r = Date.now() < pausedUntil ? null : await call({ action: "claim" });
+    if (!r?.job) {
+      if (!(await studioJob())) { if (Date.now() < pausedUntil) await call({ action: "ping" }).catch(() => {}); await sleep(IDLE_MS); }
+      continue;
+    }
     const job = r.job;
     log(`message ${job.id} (${job.kind})`);
     const hb = setInterval(() => { call({ action: "ping" }).catch(() => {}); }, 30000);   // stay "online" while thinking

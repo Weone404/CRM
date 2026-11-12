@@ -27,6 +27,18 @@ http.createServer(async (req, res) => {
     if (fn === 'amazon-execute') return send(res, 200, { status: 'executing' });
     if (fn === 'amazon-upload') return send(res, 200, { url: `https://example.invalid/amazon-images/test/${calls.length}.png` });
     if (fn === 'amazon-sync') return send(res, 200, { status: 'ok', results: [{ job: 'listings', status: 'ok' }] });
+    if (fn === 'amazon-studio') {
+      if (args.action === 'urls') return send(res, 200, {});
+      if (args.action === 'send') {
+        const db = await pool.connect();
+        try {
+          await db.query('BEGIN'); await db.query('SET LOCAL ROLE service_role');
+          const r = await db.query('SELECT public.svc_amz_studio_send($1, $2, $3, NULL) AS r', [args.asset, args.slot, 'https://example.invalid/amazon-images/studio.jpg']);
+          await db.query('COMMIT'); return send(res, 200, r.rows[0].r);
+        } catch (e) { await db.query('ROLLBACK'); return send(res, 422, { detail: e.message }); } finally { db.release(); }
+      }
+      return send(res, 200, { id: null });
+    }
     return send(res, 404, { detail: 'no such function' });
   }
   // Test-only: run a service function as service_role (stands in for the Mac helper / Edge Functions).

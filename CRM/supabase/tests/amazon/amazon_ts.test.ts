@@ -383,3 +383,11 @@ test("niche prompt asks for groups with their own keywords", () => {
   expect(p).toContain('"group"');
   expect(p).toContain("Every product in exactly one group");
 });
+
+import { buildPatches as bp } from "../../functions/_shared/amazon.ts";
+test("Studio swatch: replaces the swatch photo; null removes it (Undo)", () => {
+  const a = bp({ swatch_image: { url: "https://x.supabase.co/s.jpg" } }, "A21TJRUUN4KGV", "en_IN").patches;
+  expect(a).toEqual([{ op: "replace", path: "/attributes/swatch_product_image_locator", value: [{ media_location: "https://x.supabase.co/s.jpg", marketplace_id: "A21TJRUUN4KGV" }] }]);
+  const b = bp({ swatch_image: null }, "A21TJRUUN4KGV", "en_IN").patches;
+  expect(b[0].op).toBe("delete");
+});

@@ -9,6 +9,7 @@ import { ProductGallery, ProductEditor } from './AmazonEditor';
 import { Decisions, ClaudeChat, MorningSummary, MacConnect, AlertEmails, MyStyle, Profit } from './AmazonDecisions';
 import { syncPush } from './AppAlerts';
 import { Keywords, Competitors, ReviewRequests } from './AmazonMarket';
+import { Studio } from './AmazonStudio';
 import { inr, pct, ageText, dispatchText } from '../utils/amazon';
 
 // CRM > Amazon (Nitaniya on Amazon.in). Admin, plus people Admin grants in Settings.
@@ -404,6 +405,7 @@ const TABS = [
 const MORE = [
   { id: 'keywords', label: 'Keywords', hint: 'Ideas from top competitors; add to all or chosen products', icon: 'search' },
   { id: 'competitors', label: 'Competitors', hint: 'Every morning: who ranks above you', icon: 'globe' },
+  { id: 'studio', label: 'Studio', hint: 'Product photos from your own photos (cut-out, main photo, swatch)', icon: 'image' },
   { id: 'health', label: 'Account health', hint: 'Late dispatch, cancels, complaints', icon: 'heart' },
   { id: 'strategy', label: 'To-do list', hint: 'Plans and reminders', icon: 'calendar' },
   { id: 'activity', label: 'History', hint: 'Who changed what, and when', icon: 'clock' },
@@ -483,6 +485,7 @@ export default function Amazon({ access }) {
       {tab === 'sales' && <Sales listings={listings} />}
       {view === 'keywords' && <Keywords goDecisions={() => go('decisions')} />}
       {view === 'competitors' && <Competitors myAsins={myAsins} />}
+      {view === 'studio' && <Studio access={access} goDecisions={() => go('decisions')} />}
       {view === 'health' && <Health />}
       {view === 'strategy' && <Strategy />}
       {view === 'activity' && <Activity />}

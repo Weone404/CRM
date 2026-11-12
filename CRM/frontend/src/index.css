@@ -634,3 +634,33 @@ input[type="datetime-local"].glass-input { color-scheme: light; }
   .kw-chip > button:hover { background: rgba(0,122,255,.16); }
 }
 @media (prefers-reduced-motion: reduce) { .cat-chip, .cat-caret { transition: none; } }
+
+/* ───────── Studio ───────── */
+.studio-grid { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) { .studio-grid { grid-template-columns: 260px minmax(0, 1fr); align-items: start; } }
+.studio-slots { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.studio-slots::-webkit-scrollbar { display: none; }
+@media (min-width: 900px) { .studio-slots { flex-direction: column; overflow: visible; position: sticky; top: 12px; } }
+.studio-slot { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px; border-radius: 14px; border: 1px solid transparent; min-width: 150px;
+  transition: background-color .15s var(--ease), border-color .15s var(--ease); }
+.studio-slot.is-on { background: rgba(0,122,255,.08); border-color: rgba(0,122,255,.3); }
+.studio-slot-img { width: 44px; height: 44px; border-radius: 10px; background: #fff; border: 1px solid rgba(0,0,0,.06); display: inline-flex; align-items: center; justify-content: center; overflow: hidden; flex: none; }
+.studio-slot-img img { width: 100%; height: 100%; object-fit: contain; }
+.studio-cards { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+.studio-card { border-radius: 16px; background: rgba(255,255,255,.8); border: 1px solid rgba(0,0,0,.06); overflow: hidden; }
+.studio-card.is-sent { border-color: rgba(52,199,89,.45); }
+.studio-thumb { position: relative; aspect-ratio: 1 / 1; display: flex; align-items: center; justify-content: center;
+  background-color: #fff; background-image: linear-gradient(45deg, #f2f2f4 25%, transparent 25%), linear-gradient(-45deg, #f2f2f4 25%, transparent 25%),
+  linear-gradient(45deg, transparent 75%, #f2f2f4 75%), linear-gradient(-45deg, transparent 75%, #f2f2f4 75%);
+  background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; }
+.studio-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.studio-kind { position: absolute; left: 6px; bottom: 6px; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 9999px; background: rgba(0,0,0,.6); color: #fff; }
+.studio-score { position: absolute; right: 6px; top: 6px; font-size: 12px; font-weight: 800; min-width: 30px; height: 24px; padding: 0 7px; border-radius: 9999px; display: inline-flex; align-items: center; justify-content: center; }
+.studio-mac { font-size: 12px; font-weight: 600; padding: 6px 10px; border-radius: 9999px; background: rgba(118,118,128,.12); color: #6E6E73; }
+.studio-mac.is-on { background: rgba(52,199,89,.14); color: #1E7B34; }
+.decision-thumb { position: relative; width: 64px; height: 64px; border-radius: 10px; overflow: hidden; background: #fff; border: 2px solid transparent; display: inline-block; }
+.decision-thumb img { width: 100%; height: 100%; object-fit: contain; }
+.decision-thumb.is-new { border-color: #34C759; }
+.decision-thumb > span { position: absolute; left: 3px; bottom: 3px; font-size: 9px; font-weight: 700; background: rgba(0,0,0,.6); color: #fff; padding: 0 5px; border-radius: 6px; }
+@media (hover: hover) and (pointer: fine) { .studio-slot:hover:not(.is-on) { background: rgba(118,118,128,.08); } }
+@media (prefers-reduced-motion: reduce) { .studio-slot { transition: none; } }

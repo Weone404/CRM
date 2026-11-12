@@ -170,7 +170,21 @@ function DecisionCard({ c, access, busy, onApprove, onChanged, openProduct }) {
       </div>
       {c.reason && <div className="mt-3 text-sm rounded-xl px-3 py-2" style={{ background: 'rgba(175,82,222,0.08)' }}><b>Why: </b>{c.reason}</div>}
       <div className="mt-3 space-y-2">
-        {rows.map((r) => (
+        {rows.filter((r) => ['images', 'swatch_image'].includes(r.key)).map((r) => {
+          const list = (v) => (r.key === 'swatch_image' ? (v?.url ? [v.url] : []) : (Array.isArray(v) ? v.map((x) => x?.url || x) : []));
+          const b = list(c.before?.[r.key]); const a = list(c.after?.[r.key]);
+          return (
+            <div key={r.key} className="text-xs">
+              <div className="text-glass-muted mb-1">{r.label}: changed ones are outlined</div>
+              <div className="flex flex-wrap gap-1.5">
+                {a.map((u, i) => (
+                  <a key={`${u}${i}`} href={u} target="_blank" rel="noopener noreferrer" className={`decision-thumb ${b[i] !== u ? 'is-new' : ''}`} title={b[i] !== u ? 'New' : 'Same as now'}>
+                    <img src={u} alt={`${r.label} ${i + 1}`} loading="lazy" /><span>{r.key === 'swatch_image' ? 'Swatch' : i === 0 ? 'Main' : i + 1}</span></a>))}
+              </div>
+            </div>
+          );
+        })}
+        {rows.filter((r) => !['images', 'swatch_image'].includes(r.key)).map((r) => (
           <div key={r.key} className="text-xs">
             <div className="text-glass-muted mb-1">{r.label}</div>
             <div className="grid sm:grid-cols-2 gap-1.5">

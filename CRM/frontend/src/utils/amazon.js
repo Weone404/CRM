@@ -13,6 +13,7 @@ export const FIELD_LABELS = {
   backend_terms: 'Hidden search words', price: 'Price', mrp: 'MRP', country_of_origin: 'Made in (country)',
   manufacturer: 'Maker name & address', net_quantity: 'Quantity in the box', main_image: 'Main photo', claims: 'Claims',
   daily_budget_total: 'Daily ad budget (all ads)', handling_days: 'Dispatch time', remove_swatch: 'Colour swatch photo',
+  images: 'Photos', swatch_image: 'Colour swatch', quantity: 'Stock',
 };
 
 // Dispatch (handling) time in plain words. 0 = same day, 1 = next day.
@@ -47,6 +48,8 @@ export const plain = (code, fallback) => {
 
 const show = (k, v) => {
   if (k === 'handling_days') return dispatchText(v);
+  if (k === 'images') return Array.isArray(v) ? v.map((x, i) => `${i + 1}. ${(x && x.url) || x}`).join('\n') : '—';
+  if (k === 'swatch_image') return v?.url || 'None';
   if (k === 'remove_swatch') return v === true ? 'Removed (Amazon uses your cover photo)' : 'Flagged photo with text/logo';
   if (v == null || v === '') return '—';
   if (k === 'price' || k === 'mrp' || k === 'daily_budget_total') return inr(v);
@@ -92,7 +95,7 @@ export function decisionCategory(c) {
   const attrs = a.attributes && typeof a.attributes === 'object' ? Object.keys(a.attributes) : [];
   if (c?.kind === 'price' || keys.some((k) => ['price', 'mrp', 'quantity'].includes(k))) return 'price';
   if (c?.kind === 'dispatch' || keys.includes('handling_days')) return 'dispatch';
-  if (keys.some((k) => ['images', 'main_image', 'remove_swatch'].includes(k))) return 'photos';
+  if (keys.some((k) => ['images', 'main_image', 'remove_swatch', 'swatch_image'].includes(k))) return 'photos';
   if (keys.some((k) => ['title', 'bullets', 'description', 'item_highlights'].includes(k)) || attrs.includes('title_differentiation')) return 'text';
   if (keys.includes('backend_terms')) return 'search';
   if (attrs.length) return 'details';

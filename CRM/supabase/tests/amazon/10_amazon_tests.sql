@@ -943,4 +943,94 @@ BEGIN
 END $$;
 RESET ROLE;
 
+
+-- S: Studio photos (086)
+DO $$
+DECLARE s1 text; r jsonb; up uuid; c1 uuid; m1 uuid; sw uuid; jid bigint; cid uuid; n int;
+BEGIN
+  RESET ROLE;
+  SELECT sku INTO s1 FROM public.amazon_listings WHERE NOT is_parent AND jsonb_array_length(coalesce(images, '[]')) >= 2 ORDER BY sku LIMIT 1;
+  IF s1 IS NULL THEN
+    SELECT sku INTO s1 FROM public.amazon_listings WHERE NOT is_parent ORDER BY sku LIMIT 1;
+    UPDATE public.amazon_listings SET images = '[{"url": "https://m.media-amazon.com/a.jpg"}, {"url": "https://m.media-amazon.com/b.jpg"}]' WHERE sku = s1;
+  END IF;
+  DELETE FROM public.amazon_studio_jobs;
+  SET ROLE service_role;
+  r := public.svc_amz_studio_upload(s1, s1 || '/up/x.jpg', 123456, NULL);
+  up := (r->>'id')::uuid;
+  r := public.svc_amz_studio_claim();
+  jid := (r->'job'->>'id')::bigint;
+  PERFORM pg_temp.ok(r->'job'->>'kind' = 'check' AND r->'inputs'->0->>'path' = s1 || '/up/x.jpg', 'ST01 an upload queues a photo check for the Mac');
+  PERFORM public.svc_amz_studio_finish(jid, true, jsonb_build_object('0', jsonb_build_object('score', 88, 'width', 2400, 'height', 3000,
+    'checks', '[{"code": "sharp", "ok": true, "level": "ok", "message": "Sharp"}]'::jsonb, 'metrics', '{"sharpness": 400}'::jsonb)), NULL, '[]');
+  RESET ROLE;
+  PERFORM pg_temp.ok((SELECT score = 88 AND width = 2400 AND checks->0->>'code' = 'sharp' FROM public.amazon_studio_assets WHERE id = up), 'ST02 the check result is saved on the photo');
+
+  SET ROLE authenticated; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  PERFORM pg_temp.fails(format($q$SELECT public.api_amz_studio_job(%L, 'main', ARRAY[%L]::uuid[])$q$, s1, up), '%cannot be used%', 'ST03 a main photo needs a cut-out first');
+  r := public.api_amz_studio_job(s1, 'cutout', ARRAY[up]);
+  RESET ROLE; SET ROLE service_role;
+  r := public.svc_amz_studio_claim(); jid := (r->'job'->>'id')::bigint;
+  r := public.svc_amz_studio_finish(jid, true, '{}', NULL, jsonb_build_array(
+    jsonb_build_object('kind', 'cutout', 'path', s1 || '/job1/a.png', 'width', 900, 'height', 1200, 'meta', '{"mode": "soft"}'::jsonb),
+    jsonb_build_object('kind', 'cutout', 'path', s1 || '/job1/b.png', 'width', 900, 'height', 1200, 'meta', '{"mode": "fine"}'::jsonb),
+    jsonb_build_object('kind', 'evil', 'path', 'x')));
+  RESET ROLE;
+  PERFORM pg_temp.ok(jsonb_array_length(r->'assets') = 2 AND (SELECT count(*) FROM public.amazon_studio_assets WHERE kind = 'cutout' AND parent = up) = 2,
+    'ST04 the cut-out job gives two options (unknown kinds ignored)');
+  c1 := (SELECT id FROM public.amazon_studio_assets WHERE kind = 'cutout' AND parent = up ORDER BY meta->>'mode' DESC LIMIT 1);
+
+  SET ROLE authenticated;
+  PERFORM public.api_amz_studio_job(s1, 'main', ARRAY[c1]);
+  RESET ROLE; SET ROLE service_role;
+  r := public.svc_amz_studio_claim(); jid := (r->'job'->>'id')::bigint;
+  r := public.svc_amz_studio_finish(jid, true, '{}', NULL, jsonb_build_array(jsonb_build_object('kind', 'main', 'path', s1 || '/job2/m.jpg', 'width', 2000, 'height', 2000,
+    'score', 100, 'meta', '{"white_bg": true, "fill_pct": 85}'::jsonb, 'checks', '[{"code": "white_bg", "ok": true, "level": "ok", "message": "Pure white"}]'::jsonb)));
+  m1 := (r->'assets'->>0)::uuid;
+  PERFORM pg_temp.fails(format($q$SELECT public.svc_amz_studio_send(%L, '1', 'https://x.supabase.co/a.jpg', NULL)$q$, up), '%main photo must be%', 'ST05 only a Studio main photo can become the main photo');
+  PERFORM pg_temp.fails(format($q$SELECT public.svc_amz_studio_send(%L, '3', 'https://x.supabase.co/a.jpg', NULL)$q$, c1), '%cut-out%', 'ST06 a raw cut-out cannot be sent');
+  r := public.svc_amz_studio_send(m1, '1', 'https://x.supabase.co/storage/v1/object/public/amazon-images/m.jpg', NULL);
+  cid := (r->>'change')::uuid;
+  RESET ROLE;
+  PERFORM pg_temp.ok((SELECT after->'images'->0->>'url' = 'https://x.supabase.co/storage/v1/object/public/amazon-images/m.jpg'
+      AND (after->'images'->0->>'white_bg')::boolean AND after->'images'->0->>'has_text' = 'false'
+      AND jsonb_array_length(after->'images') = jsonb_array_length(before->'images') AND status = 'pending' FROM public.amazon_change_queue WHERE id = cid)
+    AND (SELECT status = 'sent' AND sent_change = cid FROM public.amazon_studio_assets WHERE id = m1),
+    'ST07 send: a waiting Decision that swaps only the main photo (white background recorded)');
+  PERFORM pg_temp.ok((SELECT guard_result->>'ok' FROM public.amazon_change_queue WHERE id = cid) IS NOT NULL, 'ST08 the Decision is checked like any other');
+  -- a product with no photos yet: the new main photo still carries its white-background check
+  UPDATE public.amazon_listings SET images = '[]' WHERE sku = s1;
+  SET ROLE service_role;
+  r := public.svc_amz_studio_send(public.svc_amz_studio_asset(s1, 'main', s1 || '/j/m2.jpg', 2000, 2000, 1, '[]', 100, '{"white_bg": true}', up, NULL),
+         '1', 'https://x.supabase.co/storage/v1/object/public/amazon-images/m2.jpg', NULL);
+  RESET ROLE;
+  PERFORM pg_temp.ok((SELECT (after->'images'->0->>'white_bg')::boolean AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(guard_result->'blockers', '[]')) b
+      WHERE b->>'code' = 'main_image') FROM public.amazon_change_queue WHERE id = (r->>'change')::uuid), 'ST08b first main photo on a product without photos passes the cover check');
+
+  SET ROLE service_role;
+  sw := public.svc_amz_studio_asset(s1, 'swatch', s1 || '/job3/s.jpg', 500, 500, 9000, '[]', 100, '{}', up, NULL);
+  PERFORM pg_temp.fails(format($q$SELECT public.svc_amz_studio_send(%L, 'swatch', 'https://x.supabase.co/a.jpg', NULL)$q$, m1), '%Only a swatch%', 'ST09 only a swatch goes into the colour swatch');
+  r := public.svc_amz_studio_send(sw, 'swatch', 'https://x.supabase.co/storage/v1/object/public/amazon-images/s.jpg', NULL);
+  RESET ROLE;
+  PERFORM pg_temp.ok((SELECT after->'swatch_image'->>'url' LIKE '%/s.jpg' AND before ? 'swatch_image' FROM public.amazon_change_queue WHERE id = (r->>'change')::uuid),
+    'ST10 swatch: a waiting Decision with the old swatch kept for Undo');
+
+  -- stuck jobs
+  INSERT INTO public.amazon_studio_jobs (sku, kind, asset_ids, status, claimed_at, attempts) VALUES (s1, 'check', ARRAY[up], 'working', now() - interval '20 minutes', 3);
+  SET ROLE service_role; PERFORM public.svc_amz_studio_claim(); RESET ROLE;
+  PERFORM pg_temp.ok(EXISTS (SELECT 1 FROM public.amazon_studio_jobs WHERE status = 'failed' AND error LIKE '%3 tries%'), 'ST11 a job stuck 3 times is marked failed, not retried forever');
+
+  SET ROLE authenticated; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  r := public.api_amz_studio(s1);
+  PERFORM pg_temp.ok(r->'product'->>'sku' = s1 AND jsonb_array_length(r->'assets') >= 4 AND (r->>'can_send')::boolean, 'ST12 Studio page data');
+  PERFORM public.api_amz_studio_delete(up);
+  RESET ROLE;
+  PERFORM pg_temp.ok((SELECT status FROM public.amazon_studio_assets WHERE id = up) = 'deleted', 'ST13 delete hides a photo');
+  PERFORM pg_temp.ok(NOT has_function_privilege('authenticated', 'public.svc_amz_studio_send(uuid, text, text, uuid)', 'execute')
+    AND NOT has_function_privilege('authenticated', 'public.svc_amz_studio_claim()', 'execute')
+    AND NOT has_table_privilege('authenticated', 'public.amazon_studio_assets', 'select')
+    AND (public.api_amz_access() ? 'employee_id'), 'ST14 permissions: only the server stores files and makes Decisions');
+END $$;
+RESET ROLE;
+
 \echo ALL SQL TESTS PASSED

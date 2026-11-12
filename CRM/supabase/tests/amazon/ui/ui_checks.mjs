@@ -345,7 +345,33 @@ if (pendingNow) {
   await page.screenshot({ path: `${SHOTS}/amz_competitors.png`, fullPage: true });
 }
 
-for (const label of ['Keywords', 'Competitors', 'Account health', 'To-do list', 'History']) {
+// Studio (086): a main photo made on the Mac is sent to Decisions from the slot editor
+{
+  const prod = (await rpcAs('api_amz_studio', { p_sku: null })).products[0];
+  const up = await svc('svc_amz_studio_upload', { p_sku: prod.sku, p_path: `${prod.sku}/up/t.jpg`, p_bytes: 1000, p_by: null });
+  const c = await svc('svc_amz_studio_claim', {});
+  await svc('svc_amz_studio_finish', { p_job: c.job.id, p_ok: true, p_result: { 0: { score: 90, width: 2400, height: 3000, checks: [{ code: 'sharp', ok: true, level: 'ok', message: 'Sharp' }] } }, p_error: null, p_files: [] });
+  await svc('svc_amz_studio_asset', { p_sku: prod.sku, p_kind: 'main', p_path: `${prod.sku}/job/m.jpg`, p_width: 2000, p_height: 2000, p_bytes: 600000,
+    p_checks: [{ code: 'white_bg', ok: true, level: 'ok', message: 'Pure white background (255,255,255)' }], p_score: 100, p_meta: { white_bg: true }, p_parent: up.id, p_by: null });
+  await more('Studio');
+  await page.locator('.studio-slot').first().waitFor({ timeout: 6000 });
+  ok((await page.locator('.studio-slot').count()) === 10, 'UI68 Studio: 9 photo slots + colour swatch');
+  ok((await page.getByText('Pure white background (255,255,255)').count()) >= 1 && (await page.locator('.studio-card[data-asset="main"]').count()) === 1, 'UI69 Studio: the main photo option shows its checks and score');
+  await page.screenshot({ path: `${SHOTS}/amz_studio.png`, fullPage: true });
+  await page.locator('.studio-card[data-asset="main"]').getByRole('button', { name: 'Send to Decisions' }).click();
+  await page.getByRole('button', { name: 'Send to Decisions' }).last().click();
+  await page.waitForTimeout(900);
+  const sent = (await rpcAs('api_amz_decisions', { p_status: 'open' })).find((x) => x.sku === prod.sku && x.summary === 'New main photo (Studio)');
+  ok(sent && sent.after.images[0].url.includes('studio.jpg') && sent.status === 'pending', 'UI70 Send to Decisions: a waiting main-photo change, nothing live');
+  await nav('Decisions');
+  await page.locator('.cat-chip', { hasText: 'Photos' }).click().catch(() => {});
+  ok((await page.locator('.decision-thumb.is-new').count()) >= 1, 'UI71 Decisions show the new photo as a thumbnail (changed one outlined)');
+  ok(!(await page.locator('[data-change]', { hasText: 'New main photo (Studio)' }).first().innerText()).includes('not pure white'), 'UI72 the Studio main photo passes the white-background check');
+  await page.screenshot({ path: `${SHOTS}/amz_decision_photo.png`, fullPage: false });
+  await page.locator('.cat-chip', { hasText: 'All' }).click().catch(() => {});
+}
+
+for (const label of ['Keywords', 'Competitors', 'Studio', 'Account health', 'To-do list', 'History']) {
   await more(label);
 }
 await nav('Home');
