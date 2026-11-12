@@ -28,7 +28,8 @@ Reply with ONE JSON object and nothing else:
  "options": [ ... ]}
 Fields allowed in "after": listing -> title, bullets (array of strings), description, backend_terms;
 price -> price, mrp, quantity; dispatch -> handling_days (0 = same day, 1 = next day); listing may also use
-{"remove_swatch": true} to delete a flagged colour-swatch photo.
+{"remove_swatch": true} to delete a flagged colour-swatch photo, and {"attributes": {"title_differentiation": [{"value": "...",
+"language_tag": "en_IN"}]}} for Item Highlights (max 125 characters, shown under names shorter than 75 characters).
 Drafts may also carry "group", "rank", "rank_reason", "finding_id" (see fix requests).
 "drafts" only when the owner asks for a change or clearly needs one. "options" only for suggestion requests (see below).`;
 
@@ -58,6 +59,32 @@ export function buildPrompt(job: any, context: unknown) {
       `truly describe our products (personalised name diaries/planners). 1-4 words, lowercase English, no brand names, no sales words.\n` +
       `Return "options": [{"keyword": "...", "type": "search" | "spelling" | "related" | "gift" | "festival", "why": "<one short reason>"}], ` +
       `"answer": one short line, no drafts.`;
+  }
+  if (job.kind === "kwname") {
+    return `${SYSTEM}\n\nSTORE DATA:\n${JSON.stringify(context)}\n\nKEYWORD IN THE NAME REQUEST:\n` +
+      `Keyword: "${(context as any)?.keyword ?? ""}". Products: "target_skus"; their own text and facts are in "product_text" ` +
+      `(pending_title = a name already waiting for approval: improve on it, don't throw away its good parts).\n` +
+      `For EACH product in target_skus, write 2 alternative drafts (rank 1 = best, rank 2 = second) that put the keyword into the ` +
+      `product name naturally, near the start, and add Item Highlights. Rules:\n` +
+      `- "after" has ONLY "title" and "attributes": {"title_differentiation": [{"value": "<Item Highlights>", "language_tag": "en_IN"}]}.\n` +
+      `- title: at most 74 characters (Item Highlights only show when the name is under 75), every word of the keyword in it, ` +
+      `no word more than twice, no sales words, no symbols like ! * $ ?, keep the product's real size, colour and material.\n` +
+      `- Item Highlights: at most 125 characters, short benefit phrases separated by commas (not a sentence), must NOT repeat ` +
+      `words from the title, only facts from product_text (closure, pages, paper, gift use).\n` +
+      `- Only facts present in product_text / facts. Never claim name printing, a size or a material the product does not have.\n` +
+      `- "summary": 5-8 words, "reason": why this name ranks better, "rank_reason": 1-2 sentences on why it got this rank.\n` +
+      `"answer": one short line. No "options".`;
+  }
+  if (job.kind === "niche") {
+    return `${SYSTEM}\n\nSTORE DATA:\n${JSON.stringify(context)}\n\nNICHE PLAN REQUEST:\n` +
+      `Our products are similar and today they all chase the same searches, so they compete with each other. Using "product_text" ` +
+      `(facts per product), "market" and "keywords", group the products into 4 to 8 groups of truly similar products (same design / ` +
+      `type, e.g. aeroplane design diaries, photo diaries, packs of 2, executive planners, embossed name diaries, paper-cover office ` +
+      `diaries). Every product in exactly one group. For each group give 3 to 6 search phrases that THIS group can own: specific to ` +
+      `what makes it different, phrases a buyer in India really types, not used as the main phrase by another group, and true for ` +
+      `every product in the group (size, name printing, year, pack, material). 2-5 words, lowercase English, no brand names, no sales words.\n` +
+      `Return "options": [{"group": "<short name, max 40 letters>", "why": "<one line>", "skus": ["..."], ` +
+      `"keywords": [{"keyword": "...", "why": "<one short reason>"}]}], "answer": one short line, no drafts.`;
   }
   if (job.kind === "market") {
     return `${SYSTEM}\n\nSTORE DATA:\n${JSON.stringify(context)}\n\nMORNING MARKET REPORT:\n` +

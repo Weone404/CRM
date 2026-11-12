@@ -664,7 +664,8 @@ BEGIN
   SELECT sku INTO s3 FROM public.amazon_listings WHERE NOT is_parent AND sku NOT IN (s1, s2) ORDER BY sku LIMIT 1;
   UPDATE public.amazon_change_queue SET status = 'cancelled' WHERE sku IN (s1, s2, s3) AND status = 'pending';
   UPDATE public.amazon_listings SET title = 'Personalised Diary 2027 with Name', bullets = '["Hardcover A5 planner"]', description = 'Lined pages',
-    backend_terms = 'customised notebook' WHERE sku IN (s1, s2, s3);
+    backend_terms = 'customised notebook',
+    attributes = coalesce(attributes, '{}') || '{"cover": [{"material": [{"value": "Faux Leather"}]}]}' WHERE sku IN (s1, s2, s3);
   PERFORM pg_temp.ok(public.svc_amz_keyword_seed(ARRAY['personalised diary', 'diary with name']) = 2
     AND public.svc_amz_keyword_seed(ARRAY['x y']) = 0, 'O01 first run seeds keywords from our own names, only once');
   SELECT id INTO k1 FROM public.amazon_keywords WHERE keyword = 'personalised diary';
@@ -802,6 +803,143 @@ BEGIN
     AND NOT has_table_privilege('authenticated', 'public.amazon_keyword_products', 'select'), 'O27 market data is written by the server only');
   r := public.svc_amz_market_requests();
   PERFORM pg_temp.ok((r->>'report') IS NOT NULL AND (public.svc_amz_market_requests()->>'report') IS NULL, 'O28 one morning report per day');
+END $$;
+RESET ROLE;
+
+
+-- P: smart keywords (085)
+DO $$
+DECLARE s4 text; s5 text; s6 text; r jsonb; k bigint; k2 bigint; k3 bigint; rid bigint; cid uuid; n int; b text;
+BEGIN
+  RESET ROLE;
+  SELECT sku INTO s4 FROM public.amazon_listings WHERE NOT is_parent ORDER BY sku DESC LIMIT 1;
+  SELECT sku INTO s5 FROM public.amazon_listings WHERE NOT is_parent AND sku <> s4 ORDER BY sku DESC LIMIT 1;
+  SELECT sku INTO s6 FROM public.amazon_listings WHERE NOT is_parent AND sku NOT IN (s4, s5) ORDER BY sku DESC LIMIT 1;
+  UPDATE public.amazon_change_queue SET status = 'cancelled' WHERE sku IN (s4, s5, s6) AND status = 'pending';
+  DELETE FROM public.amazon_keyword_products WHERE sku IN (s4, s5, s6);
+  UPDATE public.amazon_listings SET title = 'Personalised Diary 2027 with Name, B5 Faux Leather', bullets = '["Magnetic clasp", "Dated pages for 2027"]',
+    description = 'Name embossed on the cover.', backend_terms = 'notebook', attributes = '{"size": [{"value": "B5"}], "cover": [{"material": [{"value": "Faux Leather"}]}]}'
+   WHERE sku = s4;
+  UPDATE public.amazon_listings SET title = 'Undated Notebook Diary A5, Paper Cover', bullets = '["160 lined pages"]', description = 'Plain notebook.',
+    backend_terms = 'journal', attributes = '{"size": [{"value": "A5"}], "cover": [{"material": [{"value": "Paper"}]}]}' WHERE sku = s5;
+  UPDATE public.amazon_listings SET title = 'Diary 2027 Set of 2, A5 Planner', bullets = '["Two diaries", "Monthly planner pages"]', description = 'Pack of 2.',
+    backend_terms = '', attributes = '{"number_of_items": [{"value": 2}], "size": [{"value": "A5"}]}' WHERE sku = s6;
+
+  PERFORM pg_temp.ok(crm_private.amz_kw_fit(s4, 'a5 diary') LIKE 'This is a B5 diary%' AND crm_private.amz_kw_fit(s4, 'b5 diary') IS NULL,
+    'P01 size must match the product');
+  PERFORM pg_temp.ok(crm_private.amz_kw_fit(s5, 'personalised diary with name') LIKE '%name%' AND crm_private.amz_kw_fit(s4, 'customised diary with name') IS NULL,
+    'P02 name keywords only on products that carry a name');
+  PERFORM pg_temp.ok(crm_private.amz_kw_fit(s5, 'diary 2027') LIKE 'Undated%' AND crm_private.amz_kw_fit(s4, 'diary 2026') LIKE '%not for 2026%',
+    'P03 year keywords: never on undated diaries, only the right year');
+  PERFORM pg_temp.ok(crm_private.amz_kw_fit(s4, 'diary set of 2') LIKE '%single%' AND crm_private.amz_kw_fit(s6, 'diary set of 2') IS NULL,
+    'P04 set / pack keywords only on sets');
+  PERFORM pg_temp.ok(crm_private.amz_kw_fit(s5, 'leather diary') IS NOT NULL AND crm_private.amz_kw_fit(s4, 'leather diary') IS NULL
+    AND crm_private.amz_kw_fit(s5, 'monthly planner') IS NOT NULL AND crm_private.amz_kw_fit(s6, 'monthly planner') IS NULL
+    AND crm_private.amz_kw_fit(s5, 'magnetic diary') IS NOT NULL AND crm_private.amz_kw_fit(s4, 'pilot gift diary') IS NOT NULL,
+    'P05 cover, monthly pages, closure and design are checked');
+
+  INSERT INTO public.amazon_keywords (keyword, source, status, track) VALUES ('office diary b5', 'user', 'pinned', false) RETURNING id INTO k;
+  SET ROLE authenticated; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  r := public.api_amz_keyword_apply(k, ARRAY[s4, s5, s6]);
+  RESET ROLE;
+  PERFORM pg_temp.ok((r->>'drafted')::int = 1 AND (r->>'not_fit')::int = 2
+    AND (SELECT detail FROM public.amazon_keyword_products WHERE keyword_id = k AND sku = s5) LIKE 'Doesn''t fit: This is a A5%', 'P06 apply skips products it does not fit, with the reason');
+  PERFORM pg_temp.ok((SELECT track AND watch_auto FROM public.amazon_keywords WHERE id = k), 'P07 an applied keyword is watched every morning automatically');
+
+  -- smart apply on a main keyword: hidden words now + Claude drafts names
+  INSERT INTO public.amazon_keywords (keyword, source, status, track, placement) VALUES ('corporate gift diary', 'user', 'pinned', false, 'name') RETURNING id INTO k2;
+  SET ROLE authenticated; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  r := public.api_amz_keyword_smart(k2, ARRAY[s4, s5]);
+  RESET ROLE;
+  rid := (r->>'request')::bigint;
+  UPDATE public.amazon_claude_requests SET status = 'cancelled' WHERE status IN ('waiting', 'working') AND id <> rid;
+  PERFORM pg_temp.ok(rid IS NOT NULL AND (SELECT kind = 'kwname' AND target_skus @> ARRAY[s4, s5] FROM public.amazon_claude_requests WHERE id = rid),
+    'P08 smart apply asks Claude for names that carry the keyword');
+  SET ROLE service_role;
+  r := public.svc_amz_bridge_claim('mac');
+  PERFORM pg_temp.ok((r->'job'->>'id')::bigint = rid AND r->'context'->>'keyword' = 'corporate gift diary' AND jsonb_array_length(r->'context'->'product_text') = 2,
+    'P09 Claude gets the keyword and the products'' own text');
+  r := public.svc_amz_bridge_answer(rid, 'ok', NULL, jsonb_build_array(
+    jsonb_build_object('kind', 'listing', 'sku', s4, 'after', jsonb_build_object('title', 'Corporate Gift Diary 2027 with Name, B5 Faux Leather'), 'summary', 's', 'reason', 'r', 'rank', 1),
+    jsonb_build_object('kind', 'listing', 'sku', s4, 'after', jsonb_build_object('title', 'Diary 2027 with Name, B5 Faux Leather'), 'summary', 's', 'reason', 'r', 'rank', 2),
+    jsonb_build_object('kind', 'listing', 'sku', s4, 'after', jsonb_build_object('title', repeat('Corporate gift diary ', 5)), 'summary', 's', 'reason', 'r'),
+    jsonb_build_object('kind', 'price', 'sku', s4, 'after', jsonb_build_object('price', 300), 'summary', 's', 'reason', 'r'),
+    jsonb_build_object('kind', 'listing', 'sku', s6, 'after', jsonb_build_object('title', 'Corporate Gift Diary Set'), 'summary', 's', 'reason', 'r')));
+  RESET ROLE;
+  PERFORM pg_temp.ok((r->>'drafts')::int = 1 AND EXISTS (SELECT 1 FROM public.amazon_change_queue WHERE sku = s4 AND status = 'pending'
+      AND after->>'title' = 'Corporate Gift Diary 2027 with Name, B5 Faux Leather' AND alt_group = 'kw' || k2 || ':' || s4),
+    'P10 only valid names are kept: the keyword is in it, under 75, only the asked products, nothing else changed');
+
+  -- one keyword out of a merged Decision
+  INSERT INTO public.amazon_keywords (keyword, source, status) VALUES ('executive planner', 'user', 'pinned') RETURNING id INTO k3;
+  SET ROLE authenticated; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  PERFORM public.api_amz_keyword_apply(k3, ARRAY[s4]);
+  RESET ROLE;
+  cid := (SELECT change_id FROM public.amazon_keyword_products WHERE keyword_id = k3 AND sku = s4);
+  SET ROLE authenticated;
+  r := public.api_amz_decisions('open');
+  PERFORM pg_temp.ok((SELECT jsonb_array_length(x->'keywords') FROM jsonb_array_elements(r) x WHERE x->>'id' = cid::text) >= 2,
+    'P11 Decisions list the keywords inside a hidden-words change');
+  r := public.api_amz_keyword_drop(cid, k3);
+  RESET ROLE;
+  b := (SELECT after->>'backend_terms' FROM public.amazon_change_queue WHERE id = cid);
+  PERFORM pg_temp.ok(NOT (r->>'cancelled')::boolean AND b NOT LIKE '%executive%' AND b LIKE '%office%'
+    AND (SELECT status FROM public.amazon_keyword_products WHERE keyword_id = k3 AND sku = s4) = 'rejected',
+    'P12 taking one keyword out keeps the others in the same Decision');
+
+  -- swap when there is no room
+  UPDATE public.amazon_change_queue SET status = 'cancelled' WHERE sku = s4 AND status = 'pending' AND reason LIKE 'Keywords:%';
+  UPDATE public.amazon_listings SET backend_terms = 'office ' || rtrim(repeat('notebook ', 20)) WHERE sku = s4;
+  UPDATE public.amazon_keyword_products SET status = 'live', applied_at = now() - interval '20 days', change_id = NULL WHERE keyword_id = k AND sku = s4;
+  SET ROLE authenticated; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  r := public.api_amz_keyword_apply(k3, ARRAY[s4]);
+  PERFORM pg_temp.ok((r->>'no_room')::int = 1 AND (SELECT (x->'swap'->>'id')::bigint FROM jsonb_array_elements(public.api_amz_keywords()->'keywords') kk,
+       jsonb_array_elements(kk->'products') x WHERE (kk->>'id')::bigint = k3 AND x->>'sku' = s4) = k, 'P13 no room: the weakest keyword is offered as a swap');
+  r := public.api_amz_keyword_swap(k3, s4, k);
+  RESET ROLE;
+  b := (SELECT after->>'backend_terms' FROM public.amazon_change_queue WHERE id = (r->>'change')::uuid);
+  PERFORM pg_temp.ok(b LIKE '%executive planner%' AND b NOT LIKE '%office%' AND octet_length(b) <= 199
+    AND (SELECT status FROM public.amazon_keyword_products WHERE keyword_id = k AND sku = s4) = 'removing',
+    'P14 swap takes the weak keyword out and puts the new one in, one Decision');
+
+  -- re-check after a name change
+  UPDATE public.amazon_change_queue SET status = 'cancelled' WHERE sku = s4 AND status = 'pending';
+  UPDATE public.amazon_listings SET backend_terms = 'notebook' WHERE sku = s4;
+  INSERT INTO public.amazon_keyword_products (keyword_id, sku, status, detail) VALUES (k2, s4, 'covered', 'x')
+    ON CONFLICT (keyword_id, sku) DO UPDATE SET status = 'covered', change_id = NULL;
+  UPDATE public.amazon_listings SET title = 'Corporate Gift Diary 2027 with Name, B5 Faux Leather' WHERE sku = s4;
+  UPDATE public.amazon_listings SET title = 'Diary 2027 with Name, B5 Faux Leather' WHERE sku = s4;
+  PERFORM pg_temp.ok((SELECT status FROM public.amazon_keyword_products WHERE keyword_id = k2 AND sku = s4) = 'pending'
+    AND (SELECT after->>'backend_terms' FROM public.amazon_change_queue WHERE id = (SELECT change_id FROM public.amazon_keyword_products WHERE keyword_id = k2 AND sku = s4))
+        LIKE '%corporate gift%', 'P15 a keyword lost by a name change is added back as a Decision');
+
+  -- seasons
+  INSERT INTO public.amazon_keywords (keyword, source, status, season_day) VALUES ('new year office diary', 'festival', 'candidate', current_date + 10) RETURNING id INTO k;
+  r := public.svc_amz_keyword_seasons();
+  PERFORM pg_temp.ok((r->>'added')::int >= 1 AND (SELECT season_applied_at IS NOT NULL AND status = 'pinned' FROM public.amazon_keywords WHERE id = k)
+    AND EXISTS (SELECT 1 FROM public.amazon_keyword_products WHERE keyword_id = k), 'P16 festival keywords are suggested 3 weeks before');
+  UPDATE public.amazon_keywords SET season_day = current_date - 5 WHERE id = k;
+  r := public.svc_amz_keyword_seasons();
+  PERFORM pg_temp.ok((r->>'removed')::int >= 1 AND (SELECT season_day FROM public.amazon_keywords WHERE id = k) = (current_date - 5 + interval '1 year')::date,
+    'P17 removed after the festival, ready for next year');
+
+  -- niche plan from Claude
+  INSERT INTO public.amazon_claude_requests (question, kind) VALUES ('niche', 'niche') RETURNING id INTO rid;
+  SET ROLE service_role;
+  r := public.svc_amz_bridge_answer(rid, '', jsonb_build_array(jsonb_build_object('group', 'Sets of 2', 'why', 'packs', 'skus', jsonb_build_array(s6, 'NOPE'),
+         'keywords', jsonb_build_array(jsonb_build_object('keyword', 'diary combo pack', 'why', 'sets'), jsonb_build_object('keyword', 'best seller diary')))), NULL);
+  RESET ROLE;
+  PERFORM pg_temp.ok((r->>'groups')::int = 1 AND (SELECT skus FROM public.amazon_product_groups WHERE name = 'Sets of 2') = ARRAY[s6]
+    AND (SELECT target_skus = ARRAY[s6] AND group_name = 'Sets of 2' FROM public.amazon_keywords WHERE keyword = 'diary combo pack')
+    AND NOT EXISTS (SELECT 1 FROM public.amazon_keywords WHERE keyword = 'best seller diary'), 'P18 niche plan: groups and their own keywords (bad words dropped)');
+
+  PERFORM pg_temp.ok(NOT has_function_privilege('authenticated', 'public.svc_amz_keyword_seasons()', 'execute')
+    AND NOT has_function_privilege('anon', 'public.api_amz_keyword_smart(bigint, text[])', 'execute')
+    AND NOT has_function_privilege('authenticated', 'crm_private.amz_kw_fit(text, text)', 'execute'), 'P19 permissions');
+  INSERT INTO public.amazon_keywords (keyword, source, status, placement) VALUES ('old place test', 'user', 'candidate', 'title') RETURNING id INTO k;
+  INSERT INTO public.amazon_keywords (keyword, source, status) VALUES ('no place test', 'user', 'candidate') RETURNING id INTO k2;
+  PERFORM pg_temp.ok((SELECT placement FROM public.amazon_keywords WHERE id = k) = 'name' AND (SELECT placement FROM public.amazon_keywords WHERE id = k2) = 'auto'
+    AND NOT EXISTS (SELECT 1 FROM public.amazon_keywords WHERE placement IS NULL), 'P20 old placement words are mapped; new keywords default to Auto');
 END $$;
 RESET ROLE;
 

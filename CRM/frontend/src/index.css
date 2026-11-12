@@ -608,3 +608,29 @@ input[type="datetime-local"].glass-input { color-scheme: light; }
   .comp-card:hover { box-shadow: 0 6px 18px rgba(0,0,0,.08); transform: translateY(-1px); }
 }
 @media (prefers-reduced-motion: reduce) { .comp-card, .kw-row, .picker-row { transition: none; } .comp-card:hover { transform: none; } }
+
+/* ───────── Decisions categories, keyword chips ───────── */
+.cat-chips { display: flex; gap: 6px; overflow-x: auto; padding: 2px 1px 4px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.cat-chips::-webkit-scrollbar { display: none; }
+.cat-chip { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 14px; border-radius: 9999px;
+  font-size: 13px; font-weight: 600; color: #3C3C43; background: var(--card); border: 1px solid var(--glass-edge);
+  transition: background-color .15s var(--ease), color .15s var(--ease), border-color .15s var(--ease); }
+.cat-chip > span { font-size: 11px; font-weight: 700; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 9999px;
+  display: inline-flex; align-items: center; justify-content: center; background: rgba(118,118,128,.14); }
+.cat-chip.is-on { background: #1d1d1f; color: #fff; border-color: #1d1d1f; }
+.cat-chip.is-on > span { background: rgba(255,255,255,.22); }
+.cat-section { display: flex; flex-direction: column; gap: 10px; }
+.cat-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 2px 0; }
+.cat-toggle { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; color: var(--text-primary, #1d1d1f); min-height: 36px; }
+.cat-caret { display: inline-block; font-size: 12px; color: #8E8E93; transition: transform .2s var(--ease); }
+.cat-caret.is-open { transform: rotate(90deg); }
+.cat-count { font-size: 12px; font-weight: 600; color: #8E8E93; }
+.kw-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 6px 4px 10px; border-radius: 9999px; font-size: 12px; font-weight: 600;
+  background: rgba(0,122,255,.10); color: #0062CC; }
+.kw-chip > button { width: 22px; height: 22px; border-radius: 9999px; display: inline-flex; align-items: center; justify-content: center; color: #0062CC; }
+.picker-row.is-off { opacity: .55; cursor: not-allowed; }
+@media (hover: hover) and (pointer: fine) {
+  .cat-chip:hover:not(.is-on) { background: #fff; border-color: rgba(0,0,0,.1); }
+  .kw-chip > button:hover { background: rgba(0,122,255,.16); }
+}
+@media (prefers-reduced-motion: reduce) { .cat-chip, .cat-caret { transition: none; } }

@@ -369,3 +369,17 @@ test("seedPhrases: most used 2-3 word phrases from our names, no near-duplicates
   expect(p.some((x) => x.startsWith("with") || x.endsWith("with"))).toBe(false);
   expect(p.some((x) => /^\d/.test(x))).toBe(false);          // never starts with a year or number
 });
+
+import { buildPrompt as buildPromptKw } from "../../functions/_shared/claude_prompt.ts";
+test("kwname prompt: keyword, 74-letter names, Item Highlights rules", () => {
+  const p = buildPromptKw({ kind: "kwname", target_skus: ["A"] }, { keyword: "corporate gift diary", target_skus: ["A"] });
+  expect(p).toContain('Keyword: "corporate gift diary"');
+  expect(p).toContain("at most 74 characters");
+  expect(p).toContain("title_differentiation");
+  expect(p).toContain("at most 125 characters");
+});
+test("niche prompt asks for groups with their own keywords", () => {
+  const p = buildPromptKw({ kind: "niche" }, {});
+  expect(p).toContain('"group"');
+  expect(p).toContain("Every product in exactly one group");
+});

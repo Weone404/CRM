@@ -46,10 +46,18 @@ const SOURCE = {
   competitor: ['From competitors', BLUE], claude: ['Claude', PURPLE], festival: ['Festival', AMBER], user: ['Added by you', GREEN],
   catalog: ['From your names', {}], ads: ['From ads', {}],
 };
-const KIND = { spelling: 'Spelling', related: 'Related', gift: 'Gift', search: 'Search', festival: 'Festival' };
+const KIND = { spelling: 'Spelling', related: 'Related', gift: 'Gift', search: 'Search', festival: 'Festival', niche: 'Own niche' };
+const PLACES = [
+  ['auto', 'Auto (recommended)', 'Claude decides: main keywords go into the name and Item Highlights, the rest into hidden search words.'],
+  ['name', 'Product name', 'Claude drafts names that carry it (strongest for ranking). No hidden-words change.'],
+  ['highlights', 'Name + Item Highlights', 'Hidden search words now, and Claude drafts a name / Item Highlights with it.'],
+  ['hidden', 'Hidden search words only', 'Only the missing words, never visible to shoppers.'],
+];
+const fmtDay = (d) => (d ? new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' }).format(new Date(d)) : '');
 const STATUS = {
   live: ['Live', GREEN], pending: ['Waiting in Decisions', AMBER], covered: ['Already findable', GREEN], no_room: ['No room', RED],
   removing: ['Removal waiting', AMBER], removed: ['Removed', {}], rejected: ['Not applied', {}],
+  not_fit: ["Doesn't fit", {}], lost: ['Lost after a name change', RED],
 };
 const EFFECT = { working: ['Working ↑', GREEN], no_effect: ['No effect yet', {}], too_early: ['Checking (14 days)', {}] };
 const rankText = (r) => (r == null ? 'Not in top 20' : `#${r}`);
@@ -65,12 +73,26 @@ function Trend({ now, before, had }) {
 const bytesOf = (s) => new TextEncoder().encode(s || '').length;
 
 // ---------------------------------------------------------------- product picker (apply / remove on selected products)
+const PICK = {
+  smart: ['Smart apply', 'Add to', 'Checks each product fits. Missing words go into hidden search words; for main keywords Claude also drafts names with it. All wait in Decisions.'],
+  hidden: ['Hidden words only', 'Add to', 'Only the missing words go into hidden search words, never over the byte limit. One Decision per product.'],
+  name: ['Suggest better name', 'Ask Claude for', 'Claude drafts 2 names (74 letters max) with Item Highlights for each product. They wait in Decisions next to the current choices.'],
+  remove: ['Remove', 'Remove from', 'Removes its words from hidden search words (words other keywords need are kept).'],
+};
 function ProductPicker({ data, kw, mode, onClose, onDone }) {
   const rows = kw.products || [];
   const statusOf = (sku) => rows.find((r) => r.sku === sku)?.status;
-  const can = (p) => (mode === 'remove' ? ['live', 'pending', 'covered', 'no_room', 'rejected'].includes(statusOf(p.sku)) : true);
+  const can = (p) => (mode === 'remove' ? ['live', 'pending', 'covered', 'no_room', 'rejected', 'not_fit', 'lost'].includes(statusOf(p.sku)) : true);
   const products = data.products.filter(can);
+  const [fit, setFit] = useState(mode === 'remove' ? {} : null);
+  useEffect(() => { if (mode !== 'remove') rpc('api_amz_keyword_fit', { p_id: kw.id }).then((f) => setFit(f || {})).catch(() => setFit({})); }, [kw.id, mode]);
+  const bad = (sku) => (fit ? fit[sku] : null);
   const [sel, setSel] = useState(() => new Set());
+  const [preset, setPreset] = useState(false);
+  useEffect(() => { // own niche: its group is chosen for you (only products it fits)
+    if (preset || !fit || mode === 'remove' || !kw.target_skus?.length) return;
+    setSel(new Set(kw.target_skus.filter((x) => !fit[x]))); setPreset(true);
+  }, [fit, preset, mode, kw.target_skus]);
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
   const shown = products.filter((p) => !q || `${p.title} ${p.color || ''} ${p.sku}`.toLowerCase().includes(q.toLowerCase()));
@@ -79,20 +101,25 @@ function ProductPicker({ data, kw, mode, onClose, onDone }) {
     for (const p of shown) { const k = p.parent_asin || p.sku; if (!m.has(k)) m.set(k, []); m.get(k).push(p); }
     return [...m.values()];
   }, [shown]);
-  const toggle = (skus, on) => setSel((s) => { const n = new Set(s); skus.forEach((x) => (on ? n.add(x) : n.delete(x))); return n; });
-  const allOn = shown.length > 0 && shown.every((p) => sel.has(p.sku));
+  const toggle = (skus, on) => setSel((s) => { const n = new Set(s); skus.filter((x) => !bad(x)).forEach((x) => (on ? n.add(x) : n.delete(x))); return n; });
+  const ok = shown.filter((p) => !bad(p.sku));
+  const allOn = ok.length > 0 && ok.every((p) => sel.has(p.sku));
+  const fitCount = fit ? data.products.filter((p) => !fit[p.sku]).length : null;
   const go = async () => {
     setBusy(true);
     try {
-      const r = mode === 'remove'
-        ? await rpc('api_amz_keyword_remove', { p_id: kw.id, p_skus: [...sel] })
-        : await rpc('api_amz_keyword_apply', { p_id: kw.id, p_skus: [...sel], p_future: false });
+      const skus = [...sel];
+      const r = mode === 'remove' ? await rpc('api_amz_keyword_remove', { p_id: kw.id, p_skus: skus })
+        : mode === 'name' ? await rpc('api_amz_keyword_name', { p_id: kw.id, p_skus: skus })
+        : mode === 'hidden' ? await rpc('api_amz_keyword_apply', { p_id: kw.id, p_skus: skus, p_future: false })
+        : await rpc('api_amz_keyword_smart', { p_id: kw.id, p_skus: skus });
       onDone(r); onClose();
     } catch (e) { showToast(e.message, 'error'); } finally { setBusy(false); }
   };
   return (
-    <Modal title={mode === 'remove' ? `Remove "${kw.keyword}" from…` : `Add "${kw.keyword}" to…`} onClose={onClose} wide>
+    <Modal title={`${PICK[mode][0]}: "${kw.keyword}"`} onClose={onClose} wide>
       <div className="space-y-3">
+        {mode !== 'remove' && fit && <div className="text-xs text-glass-secondary">Fits <b>{fitCount}</b> of {data.products.length} products. The others are greyed out with the reason, so the keyword never reaches the wrong shoppers.{kw.group_name ? ` Its own group "${kw.group_name}" is selected.` : ''}</div>}
         <div className="flex flex-wrap gap-2 items-center">
           <div className="relative flex-1 min-w-[180px]">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-glass-muted"><Icon name="search" size={15} /></span>
@@ -113,16 +140,17 @@ function ProductPicker({ data, kw, mode, onClose, onDone }) {
                   )}
                   <div className="grid sm:grid-cols-2 gap-1 p-1.5">
                     {g.map((p) => {
-                      const st = statusOf(p.sku); const used = p.bytes || 0;
+                      const st = statusOf(p.sku); const used = p.bytes || 0; const why = bad(p.sku);
                       return (
-                        <label key={p.sku} className={`picker-row ${sel.has(p.sku) ? 'is-on' : ''}`}>
-                          <input type="checkbox" className="shrink-0" checked={sel.has(p.sku)} onChange={() => toggle([p.sku], !sel.has(p.sku))} aria-label={p.title} />
+                        <label key={p.sku} className={`picker-row ${sel.has(p.sku) ? 'is-on' : ''} ${why ? 'is-off' : ''}`} title={why ? `Doesn't fit: ${why}` : undefined}>
+                          <input type="checkbox" className="shrink-0" checked={sel.has(p.sku)} disabled={!!why} onChange={() => toggle([p.sku], !sel.has(p.sku))} aria-label={p.title} />
                           {p.image ? <img src={p.image} alt="" className="w-11 h-11 rounded-lg object-cover shrink-0 bg-white" loading="lazy" />
                             : <span className="w-11 h-11 rounded-lg shrink-0 bg-black/5 inline-flex items-center justify-center text-glass-muted"><Icon name="image" size={16} /></span>}
                           <span className="min-w-0 flex-1">
                             <span className="block text-sm font-medium truncate">{p.title || p.sku}</span>
                             <span className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                              {p.color && <span className="text-[11px] text-glass-muted">{p.color}</span>}
+                              {why && <span className="text-[11px] font-medium" style={{ color: '#B25E00' }}>Doesn't fit: {why}</span>}
+                              {!why && p.color && <span className="text-[11px] text-glass-muted">{p.color}</span>}
                               {st && STATUS[st] && <Chip style={STATUS[st][1]}>{STATUS[st][0]}</Chip>}
                               <span className="byte-meter" title={`Hidden search words: ${used} of ${data.byte_limit} bytes`}>
                                 <span style={{ width: `${Math.min(100, (used / data.byte_limit) * 100)}%`, background: used > data.byte_limit * 0.9 ? '#FF9500' : '#34C759' }} />
@@ -139,10 +167,35 @@ function ProductPicker({ data, kw, mode, onClose, onDone }) {
           </div>
         )}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-          <span className="text-xs text-glass-muted">{mode === 'remove' ? 'Removes its words from hidden search words (words other keywords need are kept).' : `Goes into hidden search words, never over ${data.byte_limit} bytes. Each product gets one Decision to approve.`}</span>
-          <button type="button" className="glass-btn px-5 py-2.5 text-sm" disabled={busy || sel.size === 0} onClick={go}>
-            {busy ? 'Working…' : `${mode === 'remove' ? 'Remove from' : 'Add to'} ${sel.size} product${sel.size === 1 ? '' : 's'}`}
+          <span className="text-xs text-glass-muted max-w-md">{PICK[mode][2]}</span>
+          <button type="button" className="glass-btn px-5 py-2.5 text-sm" disabled={busy || sel.size === 0 || fit === null} onClick={go}>
+            {busy ? 'Working…' : `${PICK[mode][1]} ${sel.size} product${sel.size === 1 ? '' : 's'}`}
           </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function PlaceKeyword({ kw, onClose, onDone }) {
+  const [v, setV] = useState(kw.placement || 'auto');
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    try { await rpc('api_amz_keyword_placement', { p_id: kw.id, p_placement: v }); showToast('Saved. Smart apply uses it from now on.', 'success'); onDone(); onClose(); }
+    catch (e) { showToast(e.message, 'error'); } finally { setBusy(false); }
+  };
+  return (
+    <Modal title={`Where "${kw.keyword}" goes`} onClose={onClose}>
+      <div className="space-y-2" role="radiogroup" aria-label="Where it goes">
+        {PLACES.map(([id, label, help]) => (
+          <label key={id} className={`picker-row ${v === id ? 'is-on' : ''}`}>
+            <input type="radio" name="place" checked={v === id} onChange={() => setV(id)} />
+            <span><span className="block text-sm font-semibold">{label}</span><span className="block text-xs text-glass-muted">{help}</span></span>
+          </label>))}
+        <div className="flex justify-end gap-2 pt-1">
+          <button type="button" className="glass-btn-ghost px-4 py-2 text-sm" onClick={onClose}>Cancel</button>
+          <button type="button" className="glass-btn px-5 py-2 text-sm" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>
         </div>
       </div>
     </Modal>
@@ -176,7 +229,9 @@ function KeywordRow({ k, data, onChanged, goDecisions }) {
   const [open, setOpen] = useState(false);
   const [picker, setPicker] = useState(null);
   const [edit, setEdit] = useState(false);
+  const [place, setPlace] = useState(false);
   const [menu, setMenu] = useState(false);
+  const [swapping, setSwapping] = useState('');
   const total = data.products.length;
   const on = (k.products || []).filter((p) => ['live', 'pending', 'covered'].includes(p.status)).length;
   const waiting = (k.products || []).filter((p) => p.status === 'pending').length;
@@ -187,18 +242,28 @@ function KeywordRow({ k, data, onChanged, goDecisions }) {
     if (r?.drafted) parts.push(`${verb} ${r.drafted} product${r.drafted === 1 ? '' : 's'} (waiting in Decisions)`);
     if (r?.changed) parts.push(`Removal for ${r.changed} product${r.changed === 1 ? '' : 's'} waiting in Decisions`);
     if (r?.covered) parts.push(`${r.covered} already findable`);
+    if (r?.not_fit) parts.push(`${r.not_fit} skipped (doesn't fit)`);
     if (r?.no_room) parts.push(`${r.no_room} had no room left`);
+    if (r?.naming) parts.push(`Claude is drafting names for ${r.naming}${r.mac_online === false ? ' (your Mac is offline: the hourly backup will do it)' : ''}`);
     if (r?.still_in_name) parts.push(`${r.still_in_name} still have it in the name`);
     showToast(parts.join(' · ') || 'Nothing to change', r?.no_room ? 'warning' : 'success');
     onChanged();
   };
-  const applyAll = async () => {
-    const future = await confirmDialog(`Add "${k.keyword}" to all ${total} products?`, {
-      title: `Add "${k.keyword}" to every product?`,
-      message: `Its missing words go into each product's hidden search words (never over ${data.byte_limit} bytes). Each product gets one Decision to approve.`,
-      confirmText: 'Add to every product' });
-    if (!future) return;
-    try { report(await rpc('api_amz_keyword_apply', { p_id: k.id, p_skus: null, p_future: true })); } catch (e) { showToast(e.message, 'error'); }
+  const target = k.target_skus?.length ? k.target_skus.length : total;
+  const smart = async () => {
+    const where = k.target_skus?.length ? `its own group "${k.group_name}" (${target} products)` : `every product it fits (of ${total})`;
+    const ok = await confirmDialog(`Smart apply "${k.keyword}" to ${where}?`, {
+      title: `Smart apply "${k.keyword}"?`,
+      message: `1. Checks each product truly fits (size, name printing, year, set, cover…).\n2. ${k.placement === 'name' ? 'Hidden search words are left alone.' : `Missing words go into hidden search words (never over ${data.byte_limit} bytes).`}\n3. ${k.main ? 'This is a main keyword, so Claude also drafts names and Item Highlights that carry it.' : 'Not a main keyword, so names stay as they are. Use ⋯ > Suggest better name to ask Claude anyway.'}\nEverything waits in Decisions for you.`,
+      confirmText: 'Smart apply' });
+    if (!ok) return;
+    try { report(await rpc('api_amz_keyword_smart', { p_id: k.id, p_skus: null })); } catch (e) { showToast(e.message, 'error'); }
+  };
+  const swap = async (p) => {
+    if (!(await confirmDialog(`Swap "${p.swap.keyword}" out for "${k.keyword}"?`, { message: 'One Decision: the weaker keyword leaves this product\'s hidden search words and this one goes in.', confirmText: 'Prepare swap' }))) return;
+    setSwapping(p.sku);
+    try { await rpc('api_amz_keyword_swap', { p_id: k.id, p_sku: p.sku, p_out: p.swap.id }); showToast('Swap waiting in Decisions', 'success'); onChanged(); }
+    catch (e) { showToast(e.message, 'error'); } finally { setSwapping(''); }
   };
   const removeAll = async () => {
     if (!(await confirmDialog(`Remove "${k.keyword}" from every product that has it?`, { confirmText: 'Remove', danger: true }))) return;
@@ -215,7 +280,12 @@ function KeywordRow({ k, data, onChanged, goDecisions }) {
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-[15px] text-glass-primary">{k.keyword}</span>
             <Chip style={srcStyle}>{srcLabel}{k.kind && KIND[k.kind] && k.source === 'claude' ? ` · ${KIND[k.kind]}` : ''}</Chip>
-            {k.track && <Chip style={BLUE} title="Searched every morning: your rank and the competitors above you"><Icon name="search" size={11} />Watched</Chip>}
+            {k.track && <Chip style={BLUE} title={k.watch_auto ? 'Watched automatically because it is applied, so its 14-day result is measured' : 'Searched every morning: your rank and the competitors above you'}><Icon name="search" size={11} />{k.watch_auto ? 'Auto-watched' : 'Watched'}</Chip>}
+            {k.group_name && <Chip style={PURPLE} title="This group's own search: other groups don't compete for it">For: {k.group_name}</Chip>}
+            {k.main && k.status !== 'rejected' && <Chip style={GREEN} title="Smart apply also asks Claude for names that carry it">Main keyword</Chip>}
+            {k.placement && k.placement !== 'auto' && <Chip>{PLACES.find((x) => x[0] === k.placement)?.[1]}</Chip>}
+            {k.season_day && <Chip style={AMBER} title="Suggested 3 weeks before the festival, removed 3 days after">Season: {fmtDay(k.season_day)}</Chip>}
+            {k.naming && <Chip style={PURPLE}><Icon name="sparkles" size={11} />Claude is drafting names…</Chip>}
             {k.status === 'rejected' && <Chip>Hidden</Chip>}
           </div>
           <div className="flex items-center gap-3 flex-wrap mt-1.5 text-xs text-glass-secondary">
@@ -229,8 +299,8 @@ function KeywordRow({ k, data, onChanged, goDecisions }) {
         </button>
         {data.can_apply && k.status !== 'rejected' && (
           <div className="flex items-center gap-1.5 flex-wrap">
-            <button type="button" className="glass-btn px-3.5 py-2 text-sm" onClick={applyAll}>Every product</button>
-            <button type="button" className="glass-btn-ghost px-3.5 py-2 text-sm" onClick={() => setPicker('apply')}>Selected…</button>
+            <button type="button" className="glass-btn px-3.5 py-2 text-sm inline-flex items-center gap-1.5" onClick={smart}><Icon name="sparkles" size={14} />Smart apply</button>
+            <button type="button" className="glass-btn-ghost px-3.5 py-2 text-sm" onClick={() => setPicker('smart')}>Selected…</button>
             <div className="relative">
               <button type="button" className="nav-dots" aria-label={`More for ${k.keyword}`} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((v) => !v)}><Icon name="more" size={18} strokeWidth={2.4} /></button>
               {menu && (
@@ -238,6 +308,9 @@ function KeywordRow({ k, data, onChanged, goDecisions }) {
                   <div className="fixed inset-0 z-40" onClick={() => setMenu(false)} aria-hidden="true" />
                   <div role="menu" className="absolute right-0 top-full mt-1 z-50 min-w-[230px] more-menu p-1.5 animate-glass-in">
                     {[
+                      ['Suggest better name…', 'sparkles', () => setPicker('name')],
+                      ['Hidden words only…', 'tag', () => setPicker('hidden')],
+                      ['Where it goes…', 'pin', () => setPlace(true)],
                       ['Edit keyword', 'form', () => setEdit(true)],
                       on > 0 && ['Remove from selected…', 'trash', () => setPicker('remove')],
                       on > 0 && ['Remove from every product', 'trash', removeAll],
@@ -270,6 +343,8 @@ function KeywordRow({ k, data, onChanged, goDecisions }) {
                     <span className="flex flex-col items-end gap-1 shrink-0">
                       <Chip style={style}>{label}</Chip>
                       {p.effect && EFFECT[p.effect] && <Chip style={EFFECT[p.effect][1]}>{EFFECT[p.effect][0]}</Chip>}
+                      {p.swap && data.can_apply && <button type="button" className="text-[11px] font-semibold" style={{ color: 'var(--accent)' }} disabled={swapping === p.sku}
+                        onClick={() => swap(p)}>{swapping === p.sku ? 'Preparing…' : `Swap out "${p.swap.keyword}"`}</button>}
                     </span>
                   </div>
                 );
@@ -281,6 +356,7 @@ function KeywordRow({ k, data, onChanged, goDecisions }) {
         </div>
       )}
       {picker && <ProductPicker data={data} kw={k} mode={picker} onClose={() => setPicker(null)} onDone={(r) => report(r, 'Added to')} />}
+      {place && <PlaceKeyword kw={k} onClose={() => setPlace(false)} onDone={onChanged} />}
       {edit && <EditKeyword kw={k} onClose={() => setEdit(false)} onDone={(r) => { if (r?.drafted || r?.covered || r?.no_room) report(r); else { showToast('Keyword updated', 'success'); onChanged(); } }} />}
     </div>
   );
@@ -294,6 +370,7 @@ export function Keywords({ goDecisions }) {
   const [filter, setFilter] = useState('ideas');
   const [q, setQ] = useState('');
   const [asking, setAsking] = useState(false);
+  const [group, setGroup] = useState('');
   useEffect(() => { // ideas from Claude arrive in the background
     if (!data?.claude_running) return undefined;
     const t = setInterval(load, 8000);
@@ -306,6 +383,12 @@ export function Keywords({ goDecisions }) {
       showToast(watch && !r.tracked ? 'Added. Up to 15 keywords can be watched every morning; this one is not watched.' : 'Keyword added', 'success'); load(); }
     catch (er) { showToast(er.message, 'error'); }
   };
+  const niche = async () => {
+    if (!(await confirmDialog('Plan a niche for each product group?', { message: 'Claude groups similar products (e.g. aeroplane diaries, photo diaries, sets of 2) and gives each group its own keywords, so your products stop competing with each other. The keywords arrive here as ideas; nothing changes until you apply and approve them.', confirmText: 'Plan niches' }))) return;
+    setAsking(true);
+    try { await rpc('api_amz_keyword_niche'); showToast('Claude is planning the groups. They appear here in a few minutes.', 'success'); load(); }
+    catch (e) { showToast(e.message, 'error'); } finally { setAsking(false); }
+  };
   const ideas = async () => {
     setAsking(true);
     try { await rpc('api_amz_keyword_ideas'); showToast('Claude is looking for more keywords. They appear here in a minute or two.', 'success'); load(); }
@@ -316,6 +399,7 @@ export function Keywords({ goDecisions }) {
   const inUse = (k) => (k.products || []).some((p) => ['live', 'pending', 'covered'].includes(p.status));
   const list = data.keywords.filter((k) => {
     if (q && !k.keyword.includes(q.toLowerCase())) return false;
+    if (group && k.group_name !== group) return false;
     if (filter === 'hidden') return k.status === 'rejected';
     if (k.status === 'rejected') return false;
     if (filter === 'ideas') return !inUse(k);
@@ -329,13 +413,19 @@ export function Keywords({ goDecisions }) {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-sm text-glass-secondary max-w-2xl">
-              Ideas come from the competitors ranked above you, Claude (spellings, related and gift words) and festivals. Adding a keyword puts only its missing words into
-              hidden search words (Amazon.in limit {data.byte_limit} bytes), so names stay clean. Every change waits in Decisions; after 14 days each product shows if it helped.
+              Ideas come from the competitors ranked above you, Claude (spellings, related, gift words and each group's own niche) and festivals.
+              <b> Smart apply</b> checks each product fits, adds missing words to hidden search words (limit {data.byte_limit} bytes) and, for main keywords, asks Claude for names that carry them.
+              Every change waits in Decisions; applied keywords are watched every morning and after 14 days each product shows if it helped.
             </div>
           </div>
-          <button type="button" className="glass-btn-ghost px-4 py-2 text-sm inline-flex items-center gap-2 shrink-0" onClick={ideas} disabled={asking || data.claude_running}>
-            <Icon name="sparkles" size={15} />{data.claude_running ? 'Claude is thinking…' : 'More ideas from Claude'}
-          </button>
+          <div className="flex flex-wrap gap-2 shrink-0">
+            <button type="button" className="glass-btn-ghost px-4 py-2 text-sm inline-flex items-center gap-2" onClick={niche} disabled={asking || data.niche_running}>
+              <Icon name="list" size={15} />{data.niche_running ? 'Planning groups…' : data.groups?.length ? 'Re-plan groups' : 'Plan niches by group'}
+            </button>
+            <button type="button" className="glass-btn-ghost px-4 py-2 text-sm inline-flex items-center gap-2" onClick={ideas} disabled={asking || data.ideas_running}>
+              <Icon name="sparkles" size={15} />{data.ideas_running ? 'Claude is thinking…' : 'More ideas from Claude'}
+            </button>
+          </div>
         </div>
         <form className="flex flex-wrap gap-2 items-center" onSubmit={add}>
           <input className="glass-input flex-1 min-w-[200px] px-3 py-2.5 text-sm" placeholder="Add your own, e.g. diary with name for girls" value={kw} maxLength={60}
@@ -357,6 +447,13 @@ export function Keywords({ goDecisions }) {
           <input className="glass-input w-full pl-9 pr-3 py-2 text-sm" placeholder="Find a keyword" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Find a keyword" />
         </div>
       </div>
+      {data.groups?.length > 0 && (
+        <div className="cat-chips" role="group" aria-label="Product group">
+          {[['', 'All groups', null], ...data.groups.map((g) => [g.name, g.name, g.skus.length])].map(([id, label, n]) => (
+            <button key={id || 'all'} type="button" aria-pressed={group === id} className={`cat-chip ${group === id ? 'is-on' : ''}`} onClick={() => setGroup(id)} title={data.groups.find((g) => g.name === id)?.why || ''}>
+              {label}{n != null && <span>{n}</span>}</button>))}
+        </div>
+      )}
       {list.length === 0 ? (
         <Empty>{filter === 'ideas' ? 'No new ideas right now. They arrive after the morning market check, or ask Claude for more.' : 'Nothing here yet.'}</Empty>
       ) : (

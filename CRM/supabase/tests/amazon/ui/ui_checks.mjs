@@ -35,6 +35,7 @@ await as(ADMIN);
 await page.goto(APP);
 await page.getByText('What to do today').waitFor({ timeout: 15000 });
 await page.getByText(/Fast delivery is not on/).waitFor({ timeout: 5000 }).catch(() => {});
+await page.getByText(/Decisions waiting/).first().waitFor({ timeout: 8000 }).catch(() => {});
 const overview = await page.locator('body').innerText();
 ok(/Good (morning|afternoon|evening)/.test(overview) && /Decisions waiting/.test(overview) && /Orders to ship/.test(overview), 'UI01 Home opens with a short morning summary');
 ok(/Amazon is not connected yet/.test(overview), 'UI02 Home says Amazon is not connected yet');
@@ -280,22 +281,64 @@ if (pendingNow) {
     { asin: mineAsin, rank: 3, title: 'mine' }] })), p_prices: [] });
   await more('Keywords');
   await page.getByText('Leather journal', { exact: false }).first().waitFor({ timeout: 5000 }).catch(() => {});
-  ok((await page.getByRole('button', { name: 'Every product' }).count()) > 0, 'UI57 Keywords shows ideas from the competitors above you, with "Every product"');
+  ok((await page.getByRole('button', { name: 'Smart apply' }).count()) > 0, 'UI57 Keywords shows ideas from the competitors above you, with "Smart apply"');
   // apply one idea to two selected products through the picker
   const ideaName = (await rpcAs('api_amz_keywords')).keywords.find((k) => k.source === 'competitor' && k.keyword.includes('leather journal'))?.keyword;
   const row = page.locator('.kw-row', { hasText: ideaName }).first();
   await row.getByRole('button', { name: 'Selected…' }).click();
   const dlgK = page.getByRole('dialog');
   await dlgK.getByRole('checkbox').nth(0).check().catch(() => {});
-  const boxes = dlgK.locator('.picker-row input[type=checkbox]');
+  await dlgK.getByText(/^Fits /).waitFor({ timeout: 5000 });
+  const boxes = dlgK.locator('.picker-row input[type=checkbox]:not([disabled])');
   await boxes.nth(0).check(); await boxes.nth(1).check();
   await dlgK.getByRole('button', { name: /^Add to 2 products$/ }).click();
   await page.waitForTimeout(900);
   const after = await rpcAs('api_amz_keywords');
   const lj = after.keywords.find((k) => k.keyword === ideaName);
+  if (process.env.DEBUG_UI) console.log(JSON.stringify(lj?.products), ideaName);
   ok(lj && lj.products.filter((p) => p.status === 'pending' || p.status === 'covered').length === 2, 'UI58 apply to selected products: 2 products, waiting in Decisions');
   ok(!/249 bytes/.test(await page.locator('body').innerText()) && /199 bytes/.test(await page.locator('body').innerText()), 'UI59 Amazon.in 199-byte limit shown (not the old 249)');
   await page.screenshot({ path: `${SHOTS}/amz_keywords.png`, fullPage: true });
+
+  // fit check in the picker (085)
+  const b5 = await rpcAs('api_amz_keyword_add', { p_keyword: 'b5 office diary', p_track: false });
+  await page.reload(); await page.locator('.kw-row', { hasText: 'b5 office diary' }).first().waitFor({ timeout: 6000 });
+  await page.locator('.kw-row', { hasText: 'b5 office diary' }).first().getByRole('button', { name: 'Selected…' }).click();
+  const dlgF = page.getByRole('dialog');
+  await dlgF.getByText(/^Fits /).waitFor({ timeout: 5000 });
+  const fitMap = await rpcAs('api_amz_keyword_fit', { p_id: b5.id });
+  const offCount = Object.values(fitMap).filter(Boolean).length;
+  ok(offCount === 0 || (await dlgF.locator('.picker-row.is-off').count()) === offCount, `UI61 picker greys out products a keyword doesn't fit, with the reason (${offCount})`);
+  await page.screenshot({ path: `${SHOTS}/amz_picker_fit.png`, fullPage: false });
+  await page.keyboard.press('Escape');
+  // ⋯ menu has the new actions
+  await page.locator('.kw-row', { hasText: 'b5 office diary' }).first().getByRole('button', { name: /^More for/ }).click();
+  ok((await page.getByRole('menuitem', { name: 'Suggest better name…' }).count()) === 1 && (await page.getByRole('menuitem', { name: 'Hidden words only…' }).count()) === 1
+    && (await page.getByRole('menuitem', { name: 'Where it goes…' }).count()) === 1, 'UI62 ⋯ menu: Suggest better name, Hidden words only, Where it goes');
+  await page.keyboard.press('Escape'); await page.mouse.click(5, 5);
+
+  // a second keyword on the same product, then take one out of the merged Decision
+  const twoSku = lj.products.find((p) => p.status === 'pending')?.sku;
+  if (twoSku) {
+    const k2 = await rpcAs('api_amz_keyword_add', { p_keyword: 'gift for boss', p_track: false });
+    await rpcAs('api_amz_keyword_apply', { p_id: k2.id, p_skus: [twoSku], p_future: false });
+    await nav('Decisions');
+    await page.locator('.cat-chips').first().waitFor({ timeout: 6000 }).catch(() => {});
+    ok((await page.locator('.cat-chip', { hasText: 'Search words' }).count()) === 1 && (await page.locator('.cat-section').count()) >= 1, 'UI63 Decisions grouped: category chips with counts and sections');
+    await page.locator('.cat-chip', { hasText: 'Search words' }).click();
+    ok((await page.locator('.cat-section').count()) === 1 && (await page.locator('.cat-section').getAttribute('data-cat')) === 'search', 'UI64 tapping a chip shows only that category');
+    const card = page.locator('[data-change]', { has: page.locator('.kw-chip[data-kw="gift for boss"]') }).first();
+    ok((await card.locator('.kw-chip').count()) >= 2, 'UI65 a hidden-words Decision lists the keywords inside it');
+    await page.screenshot({ path: `${SHOTS}/amz_decisions_categories.png`, fullPage: true });
+    await card.getByRole('button', { name: 'Take gift for boss out' }).click();
+    await page.getByRole('button', { name: 'Take out' }).click();
+    await page.waitForTimeout(900);
+    const dd = (await rpcAs('api_amz_decisions', { p_status: 'open' })).find((c) => c.sku === twoSku && c.after?.backend_terms != null && c.status === 'pending');
+    ok(dd && !(dd.keywords || []).some((k) => k.keyword === 'gift for boss') && (dd.keywords || []).length >= 1, 'UI66 one keyword taken out, the others stay in the same Decision');
+    await page.locator('.cat-toggle').first().click();
+    ok((await page.locator('.cat-section [data-change]').count()) === 0, 'UI67 a category folds away');
+    await page.locator('.cat-chip', { hasText: 'All' }).click();
+  } else { ok(true, 'UI63 (skipped)'); }
   await more('Competitors');
   await page.getByText('Market this morning').waitFor({ timeout: 5000 });
   ok((await page.getByText('Above you').count()) >= 2 && (await page.locator('.you-rank').first().innerText()).trim() === '#3', 'UI60 Competitors: you are #3, the 2 above you are shown');

@@ -3,7 +3,7 @@ import { supabase, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from '../backend/sup
 import { showToast } from '../utils/toast';
 import { confirmDialog } from './ui/dialogs';
 import Icon from './icons';
-import { inr, diffRows, STATUS_STYLE, ageText, plain, FIELD_LABELS } from '../utils/amazon';
+import { inr, diffRows, STATUS_STYLE, ageText, plain, FIELD_LABELS, DECISION_CATS, decisionCategory } from '../utils/amazon';
 import { useRoute, setParams } from '../utils/route';
 
 // Decisions inbox, Live Claude chat, Morning summary and Mac connection for CRM > Amazon.
@@ -47,17 +47,23 @@ const REASONS = ['Wrong information', "Don't like the wording", 'Price not right
 const INLINE = ['title', 'bullets', 'description', 'backend_terms', 'price', 'mrp', 'quantity', 'handling_days'];
 
 function EditBox({ c, onDone, onCancel }) {
-  const [v, setV] = useState(() => Object.fromEntries(Object.entries(c.after).filter(([k]) => INLINE.includes(k))
-    .map(([k, x]) => [k, k === 'bullets' ? (x || []).join('\n') : x ?? ''])));
+  const hl = c.after?.attributes?.title_differentiation;
+  const [v, setV] = useState(() => ({ ...Object.fromEntries(Object.entries(c.after).filter(([k]) => INLINE.includes(k))
+    .map(([k, x]) => [k, k === 'bullets' ? (x || []).join('\n') : x ?? ''])),
+    ...(Array.isArray(hl) ? { highlights: hl[0]?.value ?? '' } : {}) }));
   const [busy, setBusy] = useState(false);
   const save = async (second = false) => {
     const after = {};
     Object.entries(v).forEach(([k, x]) => {
+      if (k === 'highlights') return;
       if (k === 'bullets') after[k] = String(x).split('\n').map((s) => s.trim()).filter(Boolean);
       else if (['price', 'mrp', 'quantity', 'handling_days'].includes(k)) after[k] = Number(x);
       else after[k] = String(x).trim();
     });
     Object.entries(c.after).forEach(([k, x]) => { if (!INLINE.includes(k)) after[k] = x; });
+    if ('highlights' in v) {
+      after.attributes = { ...(c.after.attributes || {}), title_differentiation: [{ ...(hl?.[0] || {}), value: String(v.highlights).trim(), language_tag: 'en_IN' }] };
+    }
     setBusy(true);
     try {
       const r = await rpc('api_amz_revise', { p_id: c.id, p_after: after, p_second_confirm: second });
@@ -75,14 +81,15 @@ function EditBox({ c, onDone, onCancel }) {
     <div className="mt-3 space-y-3 rounded-2xl p-3" style={{ background: 'rgba(0,122,255,0.06)' }}>
       {Object.keys(v).map((k) => (
         <label key={k} className="block text-sm">
-          <span className="font-semibold">{FIELD_LABELS[k] || k}</span>
+          <span className="font-semibold">{k === 'highlights' ? 'Item Highlights' : FIELD_LABELS[k] || k}</span>
+          {(k === 'title' || k === 'highlights') && <span className={`ml-2 text-[11px] ${String(v[k]).length > (k === 'title' ? 74 : 125) ? 'text-red-600 font-semibold' : 'text-glass-muted'}`}>{String(v[k]).length} / {k === 'title' ? '74 (Item Highlights show only under 75)' : 125}</span>}
           {k === 'handling_days' ? (
             <select aria-label={FIELD_LABELS[k]} className="glass-input w-full px-3 py-2 mt-1" value={v[k]} onChange={(e) => setV((s) => ({ ...s, [k]: e.target.value }))}>
               <option value="0">Same day</option><option value="1">Next day</option><option value="2">2 days</option></select>
           ) : ['price', 'mrp', 'quantity'].includes(k) ? (
             <input aria-label={FIELD_LABELS[k]} type="number" className="glass-input w-full px-3 py-2 mt-1" value={v[k]} onChange={(e) => setV((s) => ({ ...s, [k]: e.target.value }))} />
           ) : (
-            <textarea aria-label={FIELD_LABELS[k]} rows={k === 'title' ? 2 : 5} className="glass-input w-full px-3 py-2 mt-1 text-sm" value={v[k]} onChange={(e) => setV((s) => ({ ...s, [k]: e.target.value }))} />
+            <textarea aria-label={k === 'highlights' ? 'Item Highlights' : FIELD_LABELS[k]} rows={k === 'title' || k === 'highlights' ? 2 : 5} className="glass-input w-full px-3 py-2 mt-1 text-sm" value={v[k]} onChange={(e) => setV((s) => ({ ...s, [k]: e.target.value }))} />
           )}
           {k === 'bullets' && <span className="text-[11px] text-glass-muted">One key point per line.</span>}
         </label>
@@ -111,6 +118,31 @@ function RejectBox({ c, onDone, onCancel }) {
         <button type="button" className="glass-btn px-3 py-2 text-sm" disabled={txt.trim().length < 3} onClick={() => go(txt.trim())}>Reject</button>
       </div>
       <button type="button" className="text-xs font-semibold" style={{ color: 'var(--accent)' }} onClick={onCancel}>Cancel</button>
+    </div>
+  );
+}
+
+function KeywordChips({ c, can, onChanged }) {
+  const [busy, setBusy] = useState('');
+  const kws = c.keywords || [];
+  if (!kws.length) return null;
+  const drop = async (k) => {
+    if (!(await confirmDialog(`Take "${k.keyword}" out of this change?`, { message: 'The other keywords in it stay. You can add it again later from Keywords.', confirmText: 'Take out' }))) return;
+    setBusy(k.id);
+    try { const r = await rpc('api_amz_keyword_drop', { p_change: c.id, p_keyword_id: k.id }); showToast(r.cancelled ? 'Nothing left to change, so this Decision was closed.' : `"${k.keyword}" taken out`, 'success'); onChanged(); }
+    catch (e) { showToast(e.message, 'error'); } finally { setBusy(''); }
+  };
+  return (
+    <div className="mt-3">
+      <div className="text-xs text-glass-muted mb-1">Keywords in this change{can ? ' (tap × to take one out)' : ''}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {kws.map((k) => (
+          <span key={k.id} className="kw-chip" data-kw={k.keyword}>
+            {k.status === 'removing' ? '− ' : '+ '}{k.keyword}
+            {can && <button type="button" aria-label={`Take ${k.keyword} out`} disabled={busy === k.id} onClick={() => drop(k)}><Icon name="close" size={12} strokeWidth={2.6} /></button>}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -148,6 +180,7 @@ function DecisionCard({ c, access, busy, onApprove, onChanged, openProduct }) {
           </div>
         ))}
       </div>
+      {pending && <KeywordChips c={c} can={access.can_approve} onChanged={onChanged} />}
       {(c.guard_result?.blockers || []).length > 0 && pending && <div className="mt-2 text-xs" style={{ color: '#C4261D' }}>Can't approve: {c.guard_result.blockers.map((b) => b.message).join(' ')}</div>}
       {(c.guard_result?.warnings || []).length > 0 && pending && <div className="mt-2 text-xs" style={{ color: '#B25E00' }}>Heads up: {c.guard_result.warnings.map((b) => b.message).join(' ')}</div>}
       {c.error && <div className="mt-2 text-xs" style={{ color: c.status === 'needs_manual' ? '#7A2EA8' : '#C4261D' }}>{c.status === 'failed' ? 'Amazon said: ' : ''}{c.error}</div>}
@@ -309,6 +342,9 @@ export function Decisions({ access, onChange, openProduct }) {
   const [fix, setFix] = useState(null);
   const [busy, setBusy] = useState('');
   const [problem, setProblem] = useState(null);
+  const [alts, setAlts] = useState(null);
+  const [cat, setCat] = useState('all');
+  const [closed, setClosed] = useState(() => new Set());
   const load = useCallback(async () => {
     try {
       const [d, f, s] = await Promise.all([rpc('api_amz_decisions', { p_status: status }), rpc('api_amz_findings', { p_status: 'open' }), rpc('api_amz_fix_status')]);
@@ -339,11 +375,17 @@ export function Decisions({ access, onChange, openProduct }) {
   const bestOnly = all.filter((c) => !(c.status === 'pending' && c.alt_group && (c.alt_rank || 1) > 1
     && all.some((x) => x.alt_group === c.alt_group && x.status === 'pending' && (x.alt_rank || 1) < (c.alt_rank || 1))));
   const others = (c) => all.filter((x) => x.alt_group && x.alt_group === c.alt_group && x.id !== c.id && x.status === 'pending').length;
+  const byCat = Object.fromEntries(DECISION_CATS.map(([k]) => [k, bestOnly.filter((c) => decisionCategory(c) === k)]));
+  const cats = DECISION_CATS.filter(([k]) => byCat[k].length > 0);
+  const shownCats = cat === 'all' ? cats : cats.filter(([k]) => k === cat);
+  const toggleCat = (k) => setClosed((s0) => { const n = new Set(s0); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   const pend = all.filter((c) => c.status === 'pending');
   const safe = bestOnly.filter((c) => c.status === 'pending' && c.guard_result?.ok && !c.needs_second_confirm);
   const warned = safe.filter((c) => (c.guard_result?.warnings || []).length).length;
-  const approveAll = async () => {
-    if (!(await confirmDialog(`Approve ${safe.length} safe changes?`, { message: `Only the best choice of each problem, and only changes that pass every check.${warned ? ` ${warned} have a heads-up shown on the card.` : ''} Each one goes live on Amazon.`, confirmText: 'Approve all' }))) return;
+  const approveAll = async (list = safe, label = '') => {
+    const warnedIn = list.filter((c) => (c.guard_result?.warnings || []).length).length;
+    if (!(await confirmDialog(`Approve ${list.length} safe ${label ? `${label} ` : ''}changes?`, { message: `Only the best choice of each group, and only changes that pass every check.${warnedIn ? ` ${warnedIn} have a heads-up shown on the card.` : ''} Each one goes live on Amazon.`, confirmText: 'Approve all' }))) return;
+    const safe = list;
     setBusy('all');
     let ok = 0, bad = 0;
     for (let i = 0; i < safe.length; i++) {
@@ -382,14 +424,49 @@ export function Decisions({ access, onChange, openProduct }) {
             <button key={v} type="button" aria-pressed={status === v} onClick={() => setStatus(v)} className={`px-3 py-1.5 rounded-lg text-sm ${status === v ? 'bg-white font-semibold shadow-sm' : ''}`}>{l}</button>))}
         </div>
         {access.can_approve && status === 'open' && safe.length > 1 && (
-          <button type="button" className="px-4 py-2 rounded-xl text-sm font-semibold text-white" style={{ background: '#34C759' }} disabled={!!busy} onClick={approveAll}>{busy === 'all' ? 'Sending…' : `Approve all safe (${safe.length})`}</button>)}
+          <button type="button" className="px-4 py-2 rounded-xl text-sm font-semibold text-white" style={{ background: '#34C759' }} disabled={!!busy} onClick={() => approveAll(safe)}>{busy === 'all' ? 'Sending…' : `Approve all safe (${safe.length})`}</button>)}
       </div>
+      {rows && cats.length > 1 && (
+        <div className="cat-chips" role="group" aria-label="Show category">
+          {[['all', 'All', bestOnly.length], ...cats.map(([k, l]) => [k, l, byCat[k].length])].map(([k, l, n]) => (
+            <button key={k} type="button" aria-pressed={cat === k} className={`cat-chip ${cat === k ? 'is-on' : ''}`} onClick={() => setCat(k)}>{l} <span>{n}</span></button>))}
+        </div>
+      )}
       {!rows ? <Empty>Loading…</Empty> : bestOnly.length === 0 ? <Empty>{status === 'open' ? 'No decisions waiting.' : 'Nothing here yet.'}</Empty>
-        : bestOnly.map((c) => (
-          <div key={c.id}>
-            <DecisionCard c={c} access={access} busy={busy} onApprove={approve} onChanged={refresh} openProduct={openProduct} />
-            {others(c) > 0 && c.finding_id && <button type="button" className="ml-4 mt-1 text-xs font-semibold" style={{ color: 'var(--accent)' }} onClick={() => setProblem(c.finding_id)}>See {others(c)} other choice{others(c) > 1 ? 's' : ''} ranked →</button>}
-          </div>))}
+        : shownCats.map(([k, label]) => {
+          const list = byCat[k];
+          const open = !closed.has(k);
+          const safeHere = list.filter((c) => c.status === 'pending' && c.guard_result?.ok && !c.needs_second_confirm);
+          return (
+            <section key={k} className="cat-section" data-cat={k}>
+              <div className="cat-head">
+                <button type="button" className="cat-toggle" aria-expanded={open} onClick={() => toggleCat(k)}>
+                  <span className={`cat-caret ${open ? 'is-open' : ''}`} aria-hidden="true">▸</span>{label}<span className="cat-count">{list.length}</span>
+                </button>
+                {access.can_approve && status === 'open' && safeHere.length > 1 && (
+                  <button type="button" className="glass-btn-ghost px-3 py-1.5 text-xs font-semibold" style={{ color: '#1E7B34' }} disabled={!!busy} onClick={() => approveAll(safeHere, label.toLowerCase())}>Approve safe ({safeHere.length})</button>)}
+              </div>
+              {open && <div className="space-y-3">{list.map((c) => (
+                <div key={c.id}>
+                  <DecisionCard c={c} access={access} busy={busy} onApprove={approve} onChanged={refresh} openProduct={openProduct} />
+                  {others(c) > 0 && <button type="button" className="ml-4 mt-1 text-xs font-semibold" style={{ color: 'var(--accent)' }}
+                    onClick={() => (c.finding_id ? setProblem(c.finding_id) : setAlts(c.alt_group))}>See {others(c)} other choice{others(c) > 1 ? 's' : ''} ranked →</button>}
+                </div>))}</div>}
+            </section>
+          );
+        })}
+      {alts && (
+        <Modal title="All choices, best first" onClose={() => setAlts(null)} wide>
+          <div className="space-y-3">
+            <div className="text-xs text-glass-secondary">Approve the one you like; the others are closed automatically because they change the same thing.</div>
+            {all.filter((x) => x.alt_group === alts && x.status === 'pending').sort((a, b) => (a.alt_rank || 9) - (b.alt_rank || 9)).map((c) => (
+              <div key={c.id}>
+                <div className="text-xs font-semibold mb-1">{RANK[c.alt_rank] || 'Choice'}{c.rank_reason ? ` · ${c.rank_reason}` : ''}</div>
+                <DecisionCard c={c} access={access} busy={busy} onApprove={async (x) => { await approve(x); setAlts(null); }} onChanged={refresh} openProduct={openProduct} />
+              </div>))}
+          </div>
+        </Modal>
+      )}
       {status === 'open' && open.length > 0 && (
         <div className="space-y-2">
           <h3 className="font-bold px-1 pt-2">Problems ({open.length}) · tap one to see the fix</h3>

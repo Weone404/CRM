@@ -56,11 +56,47 @@ const show = (k, v) => {
 };
 
 // [{key, label, before, after, changed}] for the keys a change touches.
+// Amazon product details (attributes) in plain words.
+export const ATTR_LABELS = {
+  title_differentiation: 'Item Highlights', theme: 'Theme', special_feature: 'Special features', specific_uses_for_product: 'Uses',
+  style: 'Style', pattern: 'Pattern', material: 'Material', cover: 'Cover', color: 'Colour', size: 'Size',
+};
+const attrText = (v) => {
+  if (v == null) return '—';
+  if (!Array.isArray(v)) return String(v);
+  const vals = v.map((x) => (x && typeof x === 'object' ? (x.value ?? x.material?.map((m) => m.value).join(', ')) : x)).filter((x) => x != null && x !== '');
+  return vals.length ? vals.join(', ') : '—';
+};
 export function diffRows(before = {}, after = {}) {
-  return Object.keys(after).filter((k) => k in FIELD_LABELS).map((k) => {
+  const rows = Object.keys(after).filter((k) => k in FIELD_LABELS).map((k) => {
     const b = show(k, before?.[k]); const a = show(k, after[k]);
     return { key: k, label: FIELD_LABELS[k], before: b, after: a, changed: b !== a };
   });
+  if (after?.attributes && typeof after.attributes === 'object') {
+    for (const [name, v] of Object.entries(after.attributes)) {
+      const b = attrText(before?.attributes?.[name]); const a = v == null ? 'Removed' : attrText(v);
+      rows.push({ key: `attr:${name}`, label: ATTR_LABELS[name] || name.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()), before: b, after: a, changed: b !== a });
+    }
+  }
+  return rows;
+}
+
+// Which group a Decision belongs to in the Decisions tab.
+export const DECISION_CATS = [
+  ['text', 'Names & text'], ['search', 'Search words'], ['details', 'Product details'], ['photos', 'Photos'],
+  ['price', 'Price & stock'], ['dispatch', 'Dispatch'], ['other', 'Other'],
+];
+export function decisionCategory(c) {
+  const a = c?.after || {};
+  const keys = Object.keys(a);
+  const attrs = a.attributes && typeof a.attributes === 'object' ? Object.keys(a.attributes) : [];
+  if (c?.kind === 'price' || keys.some((k) => ['price', 'mrp', 'quantity'].includes(k))) return 'price';
+  if (c?.kind === 'dispatch' || keys.includes('handling_days')) return 'dispatch';
+  if (keys.some((k) => ['images', 'main_image', 'remove_swatch'].includes(k))) return 'photos';
+  if (keys.some((k) => ['title', 'bullets', 'description', 'item_highlights'].includes(k)) || attrs.includes('title_differentiation')) return 'text';
+  if (keys.includes('backend_terms')) return 'search';
+  if (attrs.length) return 'details';
+  return 'other';
 }
 
 // Reads an image file in the browser: size, whether the border is pure white (255,255,255).
