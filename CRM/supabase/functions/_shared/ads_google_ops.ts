@@ -178,10 +178,10 @@ export const SNAPSHOT_QUERIES: Record<string, string> = {
     "FROM campaign_criterion WHERE campaign_criterion.type = 'LOCATION' AND campaign.status != 'REMOVED'",
   ad_groups: "SELECT campaign.id, ad_group.id, ad_group.name, ad_group.status, ad_group.type, ad_group.cpc_bid_micros FROM ad_group " +
     "WHERE campaign.status != 'REMOVED' AND ad_group.status != 'REMOVED'",
+  // keywords of the running campaigns (performance comes from the search terms; keyword_view hides keywords with no traffic)
   keywords: "SELECT campaign.id, ad_group.id, ad_group_criterion.resource_name, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, " +
-    "ad_group_criterion.negative, ad_group_criterion.status, ad_group_criterion.quality_info.quality_score, metrics.clicks, metrics.impressions, " +
-    "metrics.cost_micros, metrics.conversions FROM keyword_view WHERE ad_group_criterion.status != 'REMOVED' AND campaign.status = 'ENABLED' " +
-    "AND segments.date DURING LAST_30_DAYS",
+    "ad_group_criterion.negative, ad_group_criterion.status, ad_group_criterion.quality_info.quality_score FROM ad_group_criterion " +
+    "WHERE ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.status != 'REMOVED' AND campaign.status = 'ENABLED'",
   ads: "SELECT campaign.id, ad_group.id, ad_group_ad.resource_name, ad_group_ad.status, ad_group_ad.ad_strength, ad_group_ad.policy_summary.approval_status, " +
     "ad_group_ad.ad.final_urls, ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions FROM ad_group_ad " +
     "WHERE ad_group_ad.status != 'REMOVED' AND campaign.status != 'REMOVED'",
@@ -226,5 +226,15 @@ export async function googleSnapshot(google: GoogleAds, cid: string, login?: str
     try { out[k] = (await g.search(cid, q)).map((r) => flatRow(r)); }
     catch (e) { out[k] = { error: (e as Error).message.slice(0, 300) }; }
   }
+  // Keyword Planner ideas for the agents (India, English), seeded with the running keywords. The agents never call Google.
+  try {
+    const kws = Array.isArray(out.keywords) ? out.keywords as any[] : [];
+    const seeds = [...new Set(kws.filter((k) => !k["adGroupCriterion.negative"]).map((k) => String(k["adGroupCriterion.keyword.text"] ?? "")).filter(Boolean))].slice(0, 10);
+    const rows = await g.keywordIdeas(cid, seeds.length ? seeds : ["pilot training", "dgca ground classes", "commercial pilot license"], ["2356"]);
+    out.keyword_ideas = rows.map((r: any) => ({ text: r.text, avg_monthly: Number(r.keywordIdeaMetrics?.avgMonthlySearches ?? 0) || null,
+      competition: r.keywordIdeaMetrics?.competition ?? null, low_bid: Number(r.keywordIdeaMetrics?.lowTopOfPageBidMicros ?? 0) / 1e6 || null,
+      high_bid: Number(r.keywordIdeaMetrics?.highTopOfPageBidMicros ?? 0) / 1e6 || null }))
+      .sort((a: any, b: any) => (b.avg_monthly ?? 0) - (a.avg_monthly ?? 0)).slice(0, 150);
+  } catch (e) { out.keyword_ideas = { error: (e as Error).message.slice(0, 300) }; }
   return out;
 }
