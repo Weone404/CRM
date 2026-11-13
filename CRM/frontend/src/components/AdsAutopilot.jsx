@@ -118,7 +118,9 @@ function Funds({ d, reload }) {
   const add = async () => {
     const v = await promptDialog('How much did you add to Google Ads?', { message: `Amount in ${cur}. Used only to estimate how long the balance lasts.`, placeholder: 'e.g. 10000', required: true });
     if (v === null) return;
-    const n = Number(String(v).replace(/[^\d.]/g, ''));
+    const clean = String(v).replace(/[₹,\s]|rs\.?|inr/gi, '');
+    if (!/^\d+(\.\d{1,2})?$/.test(clean) || Number(clean) <= 0) { showToast('Enter the amount you added as a number, like 10000.', 'error'); return; }
+    const n = Number(clean);
     if (await run(rpc('api_ads_funds_add', { p_amount: n }), 'Recorded.')) reload();
   };
   const show = f.low || f.estimate == null;

@@ -55,6 +55,7 @@ You are the BUILDER. You turn the research into exact Google Ads changes. You ha
   Respect CONTEXT.rules.banned_claims (whole words) even in paths.
 - Negatives: only from search terms that wasted money; never block CONTEXT.rules.protected_searches; prefer PHRASE.
 - Never change budgets or bidding; never target competitor names.
+- At most 25 ops per proposal, most important first; anything left over is done in the next run (say so in "answer").
 - Put choices the owner should make (cities, big structure changes, anything uncertain) in "suggestions" with options.
 Reply: {"answer": "2-5 lines for the owner: what you changed and why, in plain words",
  "ops": [op, ...],
@@ -65,7 +66,8 @@ ${OPS}`,
   reviewer: `${COMMON}
 You are the REVIEWER. You did not write this proposal and you have no stake in it. You have no tools. Check INPUT.proposal
 against CONTEXT and INPUT.task with fresh eyes:
-- Truth: every claim in ad text, callouts and sitelinks is supported by CONTEXT.brand_facts or the research facts; nothing that
+- Truth: every claim in ad text, callouts and sitelinks is supported by CONTEXT.brand_facts or INPUT.research_facts (facts
+  the Researcher read on the website, with the URL); anything else is unsupported. Nothing that
   needs proof (guarantees, rates, placements, rankings, partnerships).
 - Google Ads policy and editorial rules: no excessive capitals or punctuation, no "!" in headlines, no competitor trademarks,
   landing page matches the ad, character limits.

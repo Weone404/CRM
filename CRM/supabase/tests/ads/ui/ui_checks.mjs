@@ -191,7 +191,7 @@ ok(await page.getByLabel('Monthly limit').inputValue() === '15200', 'UI42 a quic
 await page.getByTestId('ap-limits').getByRole('button', { name: 'Save' }).click(); await page.waitForTimeout(800);
 let ap = await rpc('api_ads_autopilot');
 ok(Number(ap.caps.daily) === 500 && Number(ap.caps.monthly) === 15200, 'UI43 limits saved to the database');
-const sug = page.getByTestId('ap-suggestion').first();
+const sug = page.getByTestId('ap-suggestion').filter({ hasText: 'Target these cities' });
 ok(await sug.getByRole('checkbox').nth(0).isChecked() && !(await sug.getByRole('checkbox').nth(1).isChecked()), 'UI44 suggested options come pre-picked as the agents advised');
 await sug.getByRole('button', { name: /Accept \(1\)/ }).click(); await page.waitForTimeout(900);
 const gops = await rpc('api_ads_google_ops', { p_status: null, p_limit: 20 });
@@ -219,6 +219,70 @@ await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeo
 const apOver = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 ok(apOver <= 1, `UI52 Autopilot has no horizontal scroll at phone width (${apOver}px)`);
 await page.screenshot({ path: `${SHOTS}/ads_autopilot_phone.png`, fullPage: true });
+
+// ---- worst cases: a person with zero knowledge, two people at once, the server failing
+await page.setViewportSize({ width: 1280, height: 900 });
+const dialogs = [];
+page.on('dialog', async (d) => { dialogs.push(d.message()); await d.dismiss(); });
+const toastSeen = async (re) => { for (let i = 0; i < 20; i++) { if (re.test(await page.locator('body').innerText())) return true; await page.waitForTimeout(150); } return false; };
+await page.reload(); await page.getByTestId('autopilot').waitFor();
+await page.getByRole('button', { name: 'Stop everything' }).click();
+await dlg().getByRole('button', { name: 'Cancel' }).click(); await page.waitForTimeout(500);
+ok(!(await rpc('api_ads_autopilot')).stopped, 'UI60 pressing Stop and then Cancel changes nothing');
+const fundsBefore = (await rpc('api_ads_autopilot')).funds.added;
+for (const bad of ['-500', 'abc', '0', '1.2.3', '10000 rupees please']) {
+  await page.getByRole('button', { name: 'I added money' }).click();
+  await dlg().getByRole('textbox').fill(bad); await dlg().getByRole('button', { name: 'OK' }).click();
+  await page.waitForTimeout(300);
+}
+ok(Number((await rpc('api_ads_autopilot')).funds.added) === Number(fundsBefore) && await toastSeen(/Enter the amount you added as a number/),
+  'UI61 nonsense top-ups (-500, abc, 0, 1.2.3, words) are refused with a plain message and nothing is saved');
+await page.getByRole('button', { name: 'I added money' }).click();
+await dlg().getByRole('textbox').fill('₹ 10,000'); await dlg().getByRole('button', { name: 'OK' }).click(); await page.waitForTimeout(800);
+ok(Number((await rpc('api_ads_autopilot')).funds.added) === Number(fundsBefore) + 10000, 'UI62 "₹ 10,000" (with symbol and comma) is understood as 10000');
+await page.getByLabel('Daily limit').fill('');
+await page.getByLabel('Daily limit').pressSequentially('abc-5x');
+ok(await page.getByLabel('Daily limit').inputValue() === '5', 'UI63 letters and minus signs cannot be typed into a limit');
+await page.getByLabel('Daily limit').fill('');
+await page.getByTestId('ap-limits').getByRole('button', { name: 'Save' }).click();
+ok(await toastSeen(/daily limit of at least 1/) && Number((await rpc('api_ads_autopilot')).caps.daily) === 500, 'UI64 saving an empty limit explains why and keeps the old limit');
+await page.getByLabel('Monthly limit').fill('100'); await page.getByLabel('Daily limit').fill('500');
+await page.getByTestId('ap-limits').getByRole('button', { name: 'Save' }).dblclick(); await page.waitForTimeout(800);
+ok(await toastSeen(/cannot be below the daily limit/) && Number((await rpc('api_ads_autopilot')).caps.monthly) === 15200, 'UI65 monthly below daily (double-clicked Save) is refused, nothing changes');
+await page.reload(); await page.getByTestId('autopilot').waitFor();
+await page.getByLabel('Instruction for the agents').fill('     ');
+ok(await page.getByTestId('ap-tell').getByRole('button', { name: 'Send' }).isDisabled(), 'UI66 Send stays off for spaces only');
+await page.getByLabel('Instruction for the agents').fill('<img src=x onerror=alert(1)> <b>bold</b>');
+await page.getByTestId('ap-tell').getByRole('button', { name: 'Send' }).click(); await page.waitForTimeout(900);
+ok(dialogs.length === 0 && (await page.getByTestId('ap-tell').innerText()).includes('<img src=x onerror=alert(1)>'), 'UI67 HTML typed by a user is shown as text and never runs');
+await page.addInitScript(() => { delete window.webkitSpeechRecognition; delete window.SpeechRecognition; });   // e.g. Firefox
+await page.reload(); await page.getByTestId('autopilot').waitFor();
+await page.getByRole('button', { name: 'Speak' }).click();
+ok(await toastSeen(/cannot take voice input/), 'UI68 Speak on a browser without voice input explains what to do');
+// two people accept the same suggestion: the second gets a clear message
+const page2 = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+await page2.goto(`${APP}#/ads/autopilot`); await page2.getByTestId('autopilot').waitFor();
+await page.reload(); await page.getByTestId('autopilot').waitFor();
+await page.getByTestId('ap-suggestion').filter({ hasText: 'Add a callout' }).getByRole('button', { name: /^Accept/ }).click(); await page.waitForTimeout(800);
+await page2.getByTestId('ap-suggestion').filter({ hasText: 'Add a callout' }).getByRole('button', { name: /^Accept/ }).click(); await page2.waitForTimeout(800);
+ok(/already accepted/.test(await page2.locator('body').innerText()) && (await rpc('api_ads_google_ops', { p_status: null, p_limit: 50 })).filter((o) => o.summary === 'Callout Online Classes').length === 1,
+  'UI70 two people accepting the same suggestion at once: one change only, the second person is told');
+await page2.close();
+// the server fails: the tab says so instead of going blank
+await page.route('**/rpc/api_ads_autopilot', (r) => r.fulfill({ status: 500, contentType: 'application/json', body: '{"message":"Database is down (test)"}' }));
+await page.reload(); await page.waitForTimeout(1500);
+ok(/Database is down \(test\)/.test(await page.locator('body').innerText()), 'UI71 when the server fails, the tab shows the reason, not a blank page');
+await page.unroute('**/rpc/api_ads_autopilot');
+// a viewer who cannot approve
+await as('10000000-0000-0000-0000-00000000000c');
+await page.reload(); await page.getByTestId('autopilot').waitFor();
+ok(await page.getByLabel('Daily limit').isDisabled() && /Only people who can approve ADS changes can edit these/.test(await page.getByTestId('ap-limits').innerText()),
+  'UI72 a viewer sees the limits but cannot change them');
+await page.getByRole('button', { name: 'Stop everything' }).click();
+await dlg().getByRole('button', { name: 'Stop everything' }).click(); await page.waitForTimeout(800);
+ok((await rpc('api_ads_autopilot')).stopped && await page.getByRole('button', { name: 'Resume' }).isDisabled(), 'UI73 a viewer can stop everything in an emergency, but cannot resume');
+await as(ADMIN);
+await rpc('api_ads_autopilot_stop', { p_stop: false });
 
 // phone width: no horizontal page scroll on Home
 await page.setViewportSize({ width: 390, height: 844 });

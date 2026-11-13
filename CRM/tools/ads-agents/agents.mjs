@@ -10,7 +10,10 @@
 //  - The token (~/.ads-agents/token, mode 600) is the only secret here. Emergency stop in CRM > ADS > Autopilot pauses everything.
 // No npm packages needed (Node 18+).
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, writeFileSync, renameSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { PROMPTS } from "./prompts.mjs";
@@ -49,7 +52,7 @@ export function claudeArgs(role) {
     : [...base, "--tools", "", "--disallowedTools", "*", "--max-turns", "2"];
 }
 
-function runClaude(role, text) {
+export function runClaude(role, text) {
   return new Promise((resolve) => {
     const p = spawn(CLAUDE, claudeArgs(role), { cwd: WORKDIR, env: { ...process.env, CLAUDE_CODE_SKIP_PROMPT_HISTORY: "1" } });
     let out = "", err = "";
@@ -125,7 +128,33 @@ async function step() {
   return true;
 }
 
+// Self-update: on start and every 6 hours, fetch the latest helper and role instructions from the repo. If they changed
+// and both pass a syntax check, replace the files and exit; launchd starts the new version within 30 seconds.
+const RAW = process.env.ADS_AGENTS_RAW || "https://raw.githubusercontent.com/Weone404/CRM/main/CRM/tools/ads-agents";
+const HERE = dirname(fileURLToPath(import.meta.url));
+export async function selfUpdate() {
+  try {
+    const files = ["agents.mjs", "prompts.mjs"];
+    const fresh = {};
+    for (const f of files) {
+      const res = await fetch(`${RAW}/${f}`, { signal: AbortSignal.timeout(20000) });
+      if (!res.ok) return false;
+      fresh[f] = await res.text();
+    }
+    if (files.every((f) => existsSync(join(HERE, f)) && readFileSync(join(HERE, f), "utf8") === fresh[f])) return false;
+    for (const f of files) {
+      writeFileSync(join(HERE, `${f}.new`), fresh[f]);
+      if (spawnSync(process.execPath, ["--check", join(HERE, `${f}.new`)]).status !== 0) return false;
+    }
+    for (const f of files) renameSync(join(HERE, `${f}.new`), join(HERE, f));
+    log("Updated the helper from the repo; restarting");
+    return true;
+  } catch { return false; }
+}
+
 async function main() {
+  if (await selfUpdate()) process.exit(0);
+  setInterval(async () => { if (await selfUpdate()) process.exit(0); }, 6 * 3600e3);
   log(`ADS agents helper started (${URL_}); models ${JSON.stringify(MODELS)}`);
   let backoff = 0;
   for (;;) {

@@ -35,3 +35,11 @@ INSERT INTO public.ads_google_ops (account_id, kind, payload, summary, created_b
 UPDATE public.ads_google_ops SET status = 'verified' WHERE summary LIKE 'Add callout "Weekend Batches"%';
 UPDATE public.ads_config SET value = '5000' WHERE key = 'google_cap_daily';
 UPDATE public.ads_config SET value = '152000' WHERE key = 'google_cap_monthly';
+
+-- worst-case UI tests: an ADS viewer who cannot approve, and a second open suggestion
+INSERT INTO public.employee (id, name, department, auth_user_id) VALUES
+  ('00000000-0000-0000-0000-00000000000c','Test Viewer','Sales','10000000-0000-0000-0000-00000000000c');
+INSERT INTO public.ads_access (employee_id, can_approve) VALUES ('00000000-0000-0000-0000-00000000000c', false);
+INSERT INTO public.ads_autopilot_suggestions (account_id, kind, title, reason, proposal) VALUES
+  ('31000000-0000-0000-0000-000000000001', 'assets', 'Add a callout', 'Test: two people accept at once.',
+   '{"ops": [{"kind": "callout_add", "payload": {"text": "Online Classes"}, "summary": "Callout Online Classes"}]}');
