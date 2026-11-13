@@ -9,30 +9,9 @@
 // The agents never get Google credentials; approved operations are sent by ads-sync with Google's own pre-check first.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { admin, rpc } from "../_shared/ads_deno.ts";
+import { trimContext } from "../_shared/ads_agents_ctx.ts";
 
 const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-
-// Keeps the agents' input small: big lists are cut to the rows that matter most (highest cost first).
-const LIMITS: Record<string, number> = { search_terms_30d: 250, search_terms_365d: 300, shared_negatives: 400, keywords: 300, keyword_ideas: 150 };
-export function trimContext(ctx: any) {
-  const snap = ctx?.snapshot ?? {};
-  for (const [k, rows] of Object.entries(snap)) {
-    if (!Array.isArray(rows)) continue;
-    const lim = LIMITS[k] ?? 200;
-    const sorted = rows.some((r: any) => r && "metrics.costMicros" in r)
-      ? [...rows].sort((a: any, b: any) => Number(b["metrics.costMicros"] ?? 0) - Number(a["metrics.costMicros"] ?? 0)) : rows;
-    snap[k] = sorted.slice(0, lim).map((r: any) => {
-      const o: Record<string, unknown> = {};
-      for (const [f, v] of Object.entries(r ?? {})) {
-        if (f === "metrics.costMicros") o["cost"] = Math.round(Number(v ?? 0) / 1e4) / 100;   // micros -> currency
-        else o[f] = v;
-      }
-      return o;
-    });
-    if (rows.length > lim) snap[`${k}_note`] = `${rows.length - lim} more rows not shown`;
-  }
-  return ctx;
-}
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return reply(405, { detail: "POST only" });

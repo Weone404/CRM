@@ -104,3 +104,17 @@ Deno.test("search term history covers the past 365 days and only clicked terms",
   const q = historyQuery("2026-11-13");
   if (!q.includes("BETWEEN '2025-11-13' AND '2026-11-13'") || !q.includes("metrics.clicks > 0")) throw new Error(q);
 });
+
+Deno.test("agents context: compact tables, enabled-only links, costliest first, redundant resource names dropped", async () => {
+  const { trimContext } = await import("../../functions/_shared/ads_agents_ctx.ts");
+  const ctx = trimContext({ campaigns: [{ id: "1", status: "ENABLED" }, { id: "2", status: "PAUSED" }], snapshot: {
+    locations: [{ "campaign.id": "1", "campaign.resourceName": "customers/9/campaigns/1", "campaignCriterion.criterionId": "20456" },
+                { "campaign.id": "2", "campaignCriterion.criterionId": "20466" }],
+    search_terms_365d: [{ "searchTermView.searchTerm": "a", "metrics.costMicros": "1000000" }, { "searchTermView.searchTerm": "b", "metrics.costMicros": "5000000" }],
+    keywords: [{ "adGroupCriterion.resourceName": "customers/9/adGroupCriteria/5~6", "adGroupCriterion.keyword.text": "cpl" }],
+    campaigns: { error: "x" } } });
+  eq(ctx.snapshot.locations, { columns: ["campaign.id", "campaignCriterion.criterionId"], rows: [["1", "20456"]] }, "enabled only, no campaign rn");
+  eq(ctx.snapshot.search_terms_365d.rows, [["b", 5], ["a", 1]], "costliest first in INR");
+  eq(ctx.snapshot.keywords.columns[0], "adGroupCriterion.resourceName", "kept: needed for changes");
+  eq(ctx.snapshot.campaigns, { error: "x" }, "errors untouched");
+});
