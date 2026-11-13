@@ -166,6 +166,17 @@ export class GoogleAds {
     if (!r.ok) throw new AdsError(googleErrorStatus(r.status, b), googleMessage(b), r.status, false);
     return b;
   }
+  // One atomic googleAds:mutate. validateOnly = Google checks everything (incl. ad policy) and changes nothing.
+  async mutate(customerId: string, mutateOperations: unknown[], validateOnly = false): Promise<any> {
+    return this.call(`customers/${customerId}/googleAds:mutate`, { mutateOperations, partialFailure: false, validateOnly }, !validateOnly);
+  }
+  // Keyword Planner ideas (needs Basic access).
+  async keywordIdeas(customerId: string, seeds: string[], geoIds: string[], languageId = "1000"): Promise<any[]> {
+    const b = await this.call(`customers/${customerId}:generateKeywordIdeas`, {
+      language: `languageConstants/${languageId}`, geoTargetConstants: geoIds.map((g) => `geoTargetConstants/${g}`),
+      keywordPlanNetwork: "GOOGLE_SEARCH", includeAdultKeywords: false, keywordSeed: { keywords: seeds.slice(0, 20) }, pageSize: 300 });
+    return b.results ?? [];
+  }
   async search(customerId: string, query: string): Promise<any[]> {
     const out: any[] = [];
     let pageToken: string | undefined;

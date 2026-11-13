@@ -4,12 +4,15 @@
 //   test     Admin. Checks each platform's credentials and every added account; records the result.
 //   sync     Viewer. Account details, campaigns and daily metrics for the last `sync_days`, then recommendations.
 //   discover Admin. Lists every Google Ads / Meta ad account the saved keys can reach (for "Import existing accounts").
+//   gcheck   Admin / agents. {ops: [{kind, payload}]} -> Google validate-only for each (nothing changes).
+//   ideas    Admin / agents. {seeds: [...], geos: ["2356"]} -> Keyword Planner ideas (Basic access).
 //   execute  Approver. Sends approved changes, reads each campaign back, records verified / failed / outcome_unknown.
 // Every job takes its own lock (svc_ads_run_begin), so overlapping runs skip instead of doubling up.
 // Keys come from Vault through the service role and never leave this function (responses and logs are scrubbed).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { asUser, cors, cronOk, json, HttpError, rpc } from "../_shared/ads_deno.ts";
 import { AdsError, GoogleAds, MetaAds, dateRange, discover, executeOne, scrubSecrets, todayIn, verify, type Platforms, type WorkItem } from "../_shared/ads_core.ts";
+import { buildOps, executeGoogleOp, googleSnapshot, type GoogleOp } from "../_shared/ads_google_ops.ts";
 
 const DEADLINE_MS = 120_000;
 
@@ -96,6 +99,10 @@ async function sync(s: Record<string, string>, t0: number) {
         campaigns += await rpc("svc_ads_upsert_campaigns", { p_account: a.id, p_items: camps });
         const mets = a.platform === "google" ? await g!.metrics(a.external_id, since, until) : await p.meta!.metrics(a.external_id, since, until);
         metrics += await rpc("svc_ads_upsert_metrics", { p_account: a.id, p_items: mets });
+        if (a.platform === "google") {                    // account structure for the ADS agents (Google only)
+          const snap = await googleSnapshot(p.google!, a.external_id, a.login_customer_id);
+          for (const [kind, data] of Object.entries(snap)) await rpc("svc_ads_google_snapshot_save", { p_account: a.id, p_kind: kind, p_data: data });
+        }
         await rpc("svc_ads_account_status", { p_account: a.id, p_status: "connected", p_error: null, p_name: info.name, p_currency: info.currency, p_timezone: info.timezone });
       } catch (e) {
         const st = e instanceof AdsError ? e.status : "sync_failed";
@@ -135,6 +142,20 @@ async function execute(s: Record<string, string>, t0: number) {
       await rpc("svc_ads_finish", { p_id: w.id, p_status: r.status, p_error: r.error ? scrubSecrets(r.error, s) : null, p_verify: r.verify ?? null });
       n++;
     }
+    // 3. Google operations (keywords, negatives, ads, locations, assets, goals). Interrupted ones are never re-sent.
+    for (const o of (await rpc("svc_ads_google_op_work")) as GoogleOp[]) {
+      if (Date.now() - t0 > DEADLINE_MS) break;
+      if (o.status === "executing") {
+        await rpc("svc_ads_google_op_finish", { p_id: o.id, p_status: "outcome_unknown", p_error: "Interrupted while sending; check it in Google Ads.", p_result: null, p_verify: null });
+        continue;
+      }
+      if (!p.google) break;
+      if (!(await rpc("svc_ads_google_op_claim", { p_id: o.id }))) continue;
+      const r = await executeGoogleOp(p.google, o);
+      await rpc("svc_ads_google_op_finish", { p_id: o.id, p_status: r.status, p_error: r.error ? scrubSecrets(r.error, s) : null,
+        p_result: r.result ?? null, p_verify: r.verify ?? null });
+      n++;
+    }
     return { items: n, detail: `${n} change(s) processed` };
   });
 }
@@ -144,14 +165,14 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json(req, 405, { detail: "POST only" });
   const t0 = Date.now();
   try {
-    let body: { jobs?: string[] } = {};
+    let body: { jobs?: string[]; ops?: { kind: string; payload: unknown }[]; seeds?: string[]; geos?: string[] } = {};
     try { body = await req.json(); } catch { /* empty body */ }
-    const jobs = (body.jobs ?? ["sync"]).filter((j) => ["test", "discover", "sync", "execute"].includes(j));
+    const jobs = (body.jobs ?? ["sync"]).filter((j) => ["test", "discover", "sync", "execute", "gcheck", "ideas"].includes(j));
     if (!jobs.length) return json(req, 422, { detail: "jobs must include test, discover, sync or execute" });
     if (!(await cronOk(req))) {
       const access = await asUser(req, "api_ads_access") as { can_view: boolean; can_approve: boolean; is_admin: boolean };
       if (!access?.can_view) throw new HttpError(403, "You do not have access to the ADS section");
-      if ((jobs.includes("test") || jobs.includes("discover")) && !access.is_admin) throw new HttpError(403, "Only Admin can test connections or find accounts");
+      if ((jobs.includes("test") || jobs.includes("discover") || jobs.includes("gcheck") || jobs.includes("ideas")) && !access.is_admin) throw new HttpError(403, "Only Admin can test connections or find accounts");
       if (jobs.includes("execute") && !access.can_approve) throw new HttpError(403, "Only approvers can run changes");
     }
     const secrets = (await rpc("svc_ads_secrets")) as Record<string, string>;
@@ -161,6 +182,28 @@ Deno.serve(async (req) => {
       const found = await discover(platforms(secrets).p);
       for (const k of ["google", "meta"] as const) if (found[k].error) found[k].error = scrubSecrets(found[k].error!, secrets);
       results.discover = { ...found, known: await rpc("svc_ads_known_accounts") };
+    }
+    if (jobs.includes("gcheck") || jobs.includes("ideas")) {
+      const { p } = platforms(secrets);
+      const acct = ((await rpc("svc_ads_accounts")) as Acct[]).find((a) => a.platform === "google");
+      if (!p.google || !acct) throw new HttpError(409, "Google Ads is not connected");
+      const g = p.google.withLogin(acct.login_customer_id);
+      if (jobs.includes("gcheck")) {
+        const out = [];
+        for (const o of (body.ops ?? []).slice(0, 20)) {
+          try { await g.mutate(acct.external_id, buildOps(acct.external_id, o.kind, o.payload).ops, true); out.push({ kind: o.kind, ok: true }); }
+          catch (e) { out.push({ kind: o.kind, ok: false, error: scrubSecrets((e as Error).message, secrets).slice(0, 600) }); }
+        }
+        results.gcheck = out;
+      }
+      if (jobs.includes("ideas")) {
+        try {
+          const rows = await g.keywordIdeas(acct.external_id, (body.seeds ?? []).map(String), (body.geos ?? ["2356"]).map(String));
+          results.ideas = rows.map((r: any) => ({ text: r.text, avg_monthly: Number(r.keywordIdeaMetrics?.avgMonthlySearches ?? 0) || null,
+            competition: r.keywordIdeaMetrics?.competition ?? null, low_bid: Number(r.keywordIdeaMetrics?.lowTopOfPageBidMicros ?? 0) / 1e6 || null,
+            high_bid: Number(r.keywordIdeaMetrics?.highTopOfPageBidMicros ?? 0) / 1e6 || null }));
+        } catch (e) { results.ideas = { error: scrubSecrets((e as Error).message, secrets).slice(0, 600) }; }
+      }
     }
     if (jobs.includes("sync")) results.sync = await sync(secrets, t0);
     if (jobs.includes("execute")) results.execute = await execute(secrets, t0);
