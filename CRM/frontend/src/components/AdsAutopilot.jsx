@@ -2,27 +2,14 @@
 // (migration 093). The agents run on their own bridge; this screen sets their limits, shows what they suggest and did,
 // and takes instructions (typed or spoken). Spend limits are enforced in the database, not here.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { supabase } from '../backend/supabaseClient';
 import { showToast } from '../utils/toast';
 import { confirmDialog, promptDialog } from './ui/dialogs';
 import Icon from './icons';
 import { money } from '../utils/ads';
+import { rpc, run, Btn } from './adsKit';
 
-const rpc = async (fn, args) => {
-  const { data, error } = await supabase.rpc(fn, args);
-  if (error) throw new Error(error.message);
-  return data;
-};
-const run = async (p, okMsg) => {
-  try { const r = await p; if (okMsg) showToast(okMsg, 'success'); return r ?? true; }
-  catch (e) { showToast(e.message, 'error'); return undefined; }
-};
 const Chip = ({ children, fg = '#3C3C43', bg = 'rgba(118,118,128,0.14)' }) => (
   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap" style={{ background: bg, color: fg }}>{children}</span>
-);
-const Btn = ({ tone = '#007AFF', ghost, className = '', ...p }) => (
-  <button type="button" {...p} className={`px-3 py-2 rounded-xl text-sm font-semibold min-h-[38px] inline-flex items-center justify-center gap-1.5 disabled:opacity-40 ${className}`}
-    style={ghost ? { background: 'rgba(118,118,128,0.12)', color: '#1C1C1E' } : { background: tone, color: '#fff' }} />
 );
 const ago = (t) => {
   if (!t) return '';
@@ -43,7 +30,7 @@ const OP_LABEL = { pending: 'Waiting', blocked: 'Blocked by checks', approved: '
 const KIND = { geo: 'Locations', keywords: 'Keywords', negatives: 'Negatives', ads: 'Ads', assets: 'Callouts & links', budget: 'Budget', tracking: 'Tracking', other: 'Other' };
 const PRESETS = [200, 300, 500, 1000];
 
-function Bar({ value, max, label, cur }) {
+export function Bar({ value, max, label, cur }) {
   const p = max > 0 ? Math.min(100, (Number(value || 0) / max) * 100) : 0;
   const tone = p >= 100 ? '#FF3B30' : p >= 80 ? '#FF9500' : '#34C759';
   return (
@@ -57,7 +44,7 @@ function Bar({ value, max, label, cur }) {
   );
 }
 
-function Limits({ d, reload }) {
+export function Limits({ d, reload }) {
   const cur = d.account?.currency || 'INR';
   const [daily, setDaily] = useState(String(d.caps.daily ?? ''));
   const [monthly, setMonthly] = useState(String(d.caps.monthly ?? ''));
@@ -112,7 +99,7 @@ function Limits({ d, reload }) {
   );
 }
 
-function Funds({ d, reload }) {
+export function Funds({ d, reload }) {
   const cur = d.account?.currency || 'INR';
   const f = d.funds;
   const add = async () => {
@@ -148,7 +135,7 @@ function Funds({ d, reload }) {
 }
 
 const WORK = { researcher: 'researching', builder: 'writing changes', reviewer: 'reviewing', learner: 'learning from last month' };
-function AgentsBadge({ s }) {
+export function AgentsBadge({ s }) {
   if (!s?.agents) return null;
   const a = s.agents;
   const tone = a.online ? GREEN : GREY;
@@ -163,7 +150,7 @@ function AgentsBadge({ s }) {
   );
 }
 
-function Report({ r }) {
+export function Report({ r }) {
   return (
     <section className="glass-card p-4" data-testid="ap-report">
       <div className="flex items-center gap-2"><span className="font-bold text-glass-primary">Daily report</span>
@@ -173,7 +160,7 @@ function Report({ r }) {
   );
 }
 
-function Playbook({ items }) {
+export function Playbook({ items }) {
   const [open, setOpen] = useState(false);
   return (
     <section className="glass-card p-4" data-testid="ap-playbook">
@@ -195,7 +182,7 @@ function optionList(s) {
   return ids.map((id) => ({ id, label: meta[id]?.label || ops.find((o) => String(o.option) === id)?.summary || id, reason: meta[id]?.reason }));
 }
 
-function Suggestion({ s, reload }) {
+export function Suggestion({ s, reload }) {
   const opts = useMemo(() => optionList(s), [s]);
   const [pick, setPick] = useState(() => new Set(opts.filter((o) => (s.proposal?.options || []).find((x) => String(x.id) === o.id)?.selected !== false).map((o) => o.id)));
   const [busy, setBusy] = useState(false);
@@ -229,15 +216,15 @@ function Suggestion({ s, reload }) {
         </div>)}
       {shared.length > 0 && <ul className="text-xs text-glass-secondary list-disc pl-5">{shared.slice(0, 8).map((o, i) => <li key={i}>{o.summary || o.kind}</li>)}{shared.length > 8 && <li>and {shared.length - 8} more</li>}</ul>}
       <div className="flex flex-wrap gap-2 pt-1">
-        <Btn tone="#248A3D" disabled={busy || (opts.length > 0 && pick.size === 0)} onClick={() => decide('accept')}><Icon name="check" size={16} />Accept{opts.length > 0 ? ` (${pick.size})` : ''}</Btn>
-        <Btn ghost disabled={busy} onClick={change}>Change</Btn>
-        <Btn ghost disabled={busy} onClick={() => decide('dismiss')}>Dismiss</Btn>
+        <Btn tone="#248A3D" scope={`sugg-${s.id}`} busyText="Accepting…" disabled={opts.length > 0 && pick.size === 0} onClick={() => decide('accept')}><Icon name="check" size={16} />Accept{opts.length > 0 ? ` (${pick.size})` : ''}</Btn>
+        <Btn ghost scope={`sugg-${s.id}`} onClick={change}>Change</Btn>
+        <Btn ghost scope={`sugg-${s.id}`} onClick={() => decide('dismiss')}>Dismiss</Btn>
       </div>
     </div>
   );
 }
 
-function Suggestions({ d, reload }) {
+export function Suggestions({ d, reload }) {
   const open = d.suggestions.filter((s) => s.status === 'open');
   const done = d.suggestions.filter((s) => s.status !== 'open');
   const [showDone, setShowDone] = useState(false);
@@ -257,7 +244,7 @@ function Suggestions({ d, reload }) {
   );
 }
 
-function Tell({ d, reload }) {
+export function Tell({ d, reload }) {
   const [text, setText] = useState('');
   const [via, setVia] = useState('typed');
   const [listening, setListening] = useState(false);
@@ -305,7 +292,7 @@ function Tell({ d, reload }) {
   );
 }
 
-function Activity({ d }) {
+export function Activity({ d, limit = 60, title = 'What the agents did' }) {
   const [f, setF] = useState('all');
   const items = useMemo(() => {
     const runs = d.runs.map((r) => ({ key: `r${r.id}`, at: r.created_at, who: ROLE[r.role] || r.role, text: r.summary || r.job || r.error || 'Working',
@@ -319,14 +306,14 @@ function Activity({ d }) {
   }, [d, f]);
   return (
     <section className="space-y-2" data-testid="ap-activity">
-      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold text-glass-primary">What the agents did</h3>
+      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold text-glass-primary">{title}</h3>
         <div className="flex gap-1 p-1 rounded-xl" style={{ background: 'rgba(118,118,128,0.12)' }}>
           {[['all', 'All'], ['live', 'Went live'], ['rejected', 'Stopped']].map(([v, l]) => (
             <button key={v} type="button" aria-pressed={f === v} onClick={() => setF(v)} className={`px-3 py-1.5 rounded-lg text-sm ${f === v ? 'bg-white font-semibold shadow-sm' : ''}`}>{l}</button>))}
         </div></div>
       {items.length === 0 ? <div className="glass-card p-4 text-sm text-glass-secondary">{f === 'all' ? 'Nothing yet. Each step the agents take, every change the Reviewer stops, and everything that goes live is listed here.' : 'Nothing here yet.'}</div>
         : <div className="glass-card divide-y" style={{ borderColor: 'rgba(118,118,128,0.15)' }}>
-          {items.slice(0, 60).map((x) => (
+          {items.slice(0, limit).map((x) => (
             <div key={x.key} className="p-3 flex items-start gap-3">
               <div className="flex-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-2"><span className="text-xs font-semibold text-glass-secondary">{x.who}{x.attempt > 1 ? ` · try ${x.attempt}` : ''}</span><Chip fg={x.tone[0]} bg={x.tone[1]}>{x.label}</Chip></div>
@@ -369,7 +356,7 @@ export default function AdsAutopilot() {
           <AgentsBadge s={s} />
           <div className="text-xs text-glass-secondary">{d.account ? `Google Ads ${d.account.name || d.account.external_id}${d.account.status !== 'connected' ? ` · ${d.account.status.replace(/_/g, ' ')}` : ''} · synced ${ago(d.account.last_ok_at) || 'never'}` : 'Connect a Google Ads account in More › Ad accounts.'}</div>
         </div>
-        <Btn tone={d.stopped ? '#248A3D' : '#FF3B30'} onClick={stop} disabled={d.stopped && !d.can_approve}><Icon name={d.stopped ? 'play' : 'pause'} size={16} />{d.stopped ? 'Resume' : 'Stop everything'}</Btn>
+        <Btn tone={d.stopped ? '#248A3D' : '#FF3B30'} scope="stop" onClick={stop} disabled={d.stopped && !d.can_approve}><Icon name={d.stopped ? 'play' : 'pause'} size={16} />{d.stopped ? 'Resume' : 'Stop everything'}</Btn>
       </section>
       {s?.report && <Report r={s.report} />}
       <Funds d={d} reload={load} />

@@ -23,9 +23,10 @@ page.on('pageerror', (e) => errors.push(String(e)));
 const body = async () => { await page.waitForTimeout(600); return page.locator('body').innerText(); };
 const tab = async (name) => { await page.getByRole('tab', { name: new RegExp(`^${name}`) }).first().click(); await page.waitForTimeout(500); };
 const dlg = () => page.getByRole('alertdialog');
+const sub = async (name) => { await tab('More'); await page.getByRole('button', { name: new RegExp(`^${name}`) }).first().click(); await page.waitForTimeout(500); };
 
 await as(ADMIN);
-await page.goto(`${APP}#/ads/home?client=${CLIENT}&period=14d`);
+await page.goto(`${APP}#/ads/report?client=${CLIENT}&period=14d`);
 await page.getByText('What needs attention').waitFor({ timeout: 20000 });
 let t = await body();
 ok(/Ad spend/.test(t) && /₹9,000/.test(t), 'UI01 Home shows platform spend for the last 14 days (10 days × ₹900)');
@@ -65,7 +66,7 @@ await dlg().getByRole('button', { name: 'OK' }).click();
 t = await body();
 ok(/max daily budget|more than the 100%/.test(t), 'UI11 a blocked budget is refused with the reason');
 
-await tab('Approvals');
+await sub('Approvals');
 await page.getByText(/daily budget ₹1,000 → ₹1,500/i).first().waitFor();
 t = await body();
 ok(/Double-check/.test(t), 'UI12 approval card shows the guard result');
@@ -179,9 +180,9 @@ await page.screenshot({ path: `${SHOTS}/ads_wizard_finish.png`, fullPage: true }
 
 // Autopilot (093)
 await page.setViewportSize({ width: 1280, height: 900 });
-await page.goto(`${APP}#/ads/home?client=${CLIENT}`);
+await page.goto(`${APP}#/ads/report?client=${CLIENT}`);
 await page.getByText('What needs attention').waitFor();
-await tab('Autopilot');
+await sub('Autopilot');
 await page.getByTestId('autopilot').waitFor();
 t = await body();
 ok(/Emergency stop is ON|Autopilot is flying/.test(t) && /Spend limits/.test(t) && /Tell the agents/.test(t), 'UI40 Autopilot tab shows state, limits and the instruction box');
@@ -292,10 +293,49 @@ ok((await rpc('api_ads_autopilot')).stopped && await page.getByRole('button', { 
 await as(ADMIN);
 await rpc('api_ads_autopilot_stop', { p_stop: false });
 
-// phone width: no horizontal page scroll on Home
+// ---- Today page (everything in one place) and production-grade behaviour
+await page.setViewportSize({ width: 1280, height: 900 });
+await page.goto(`${APP}#/ads/home?client=${CLIENT}`);
+await page.getByTestId('today').waitFor({ timeout: 20000 });
+t = await page.getByTestId('today').innerText();
+ok(/Autopilot is flying|asks before acting|Emergency stop/.test(t) && /Spent this month/.test(t) && /Needs you/.test(t) && /Results/.test(t)
+  && /Campaign health/.test(t) && /What changed/.test(t) && /Tell the agents/.test(t), 'UI90 Today shows status, needs, results, health, changes and the ask box on one page');
+await page.screenshot({ path: `${SHOTS}/ads_today.png`, fullPage: true });
+ok(await page.getByRole('tab').count() === 4, 'UI91 four tabs: Today, Campaigns, Ads Leads, More');
+ok(/Brought results/.test(t) && /Cost money, brought nothing/.test(t), 'UI92 best and wasted searches are shown in plain words');
+ok(/Test Search/.test(await page.getByTestId('health').innerText()), 'UI93 each running campaign shows its health');
+const needsTxt = await page.getByTestId('needs').innerText();
+ok(/not connected/.test(needsTxt) && /Accept/.test(needsTxt), 'UI94 "Needs you" lists the disconnected account and open suggestions, each with a button');
+// a slow server: the button shows it is working, cannot be pressed twice, and the action happens once
+let slowCalls = 0;
+await page.route('**/rpc/api_ads_suggestion_decide', async (r) => { slowCalls++; await new Promise((res) => setTimeout(res, 2500)); await r.continue(); });
+const sugBox = page.getByTestId('needs').getByTestId('ap-suggestion').filter({ hasText: 'Slow server test' });
+const accBtn = sugBox.getByRole('button', { name: /^Accept/ });
+await accBtn.click();
+await page.waitForTimeout(300);
+ok(await sugBox.getByRole('button', { name: 'Dismiss' }).isDisabled() && await page.getByTestId('working-bar').count() === 1,
+  'UI95 while saving: the other buttons of the same item are locked and a "working" bar shows');
+await accBtn.click({ force: true }).catch(() => {}); await accBtn.click({ force: true }).catch(() => {});
+await page.waitForTimeout(3500);
+ok(slowCalls === 1, `UI96 tapping again while it works does nothing (server called ${slowCalls} time)`);
+await page.unroute('**/rpc/api_ads_suggestion_decide');
+// the server never answers: the person gets a clear message instead of an endless spinner
+await page.route('**/rpc/api_ads_agent_instruct', () => {});   // hang
+await page.getByLabel('Instruction for the agents').fill('Pause nothing, just testing');
+const sendBtn = page.getByTestId('ap-tell').getByRole('button', { name: 'Send' });
+await page.evaluate(() => { window.__adsTimeoutTest = true; });
+await sendBtn.click();
+ok(await sendBtn.isDisabled(), 'UI97 Send is locked while it waits for the server');
+await page.unroute('**/rpc/api_ads_agent_instruct');
+await page.context().setOffline(true); await page.waitForTimeout(400);
+ok(/You are offline/.test(await page.locator('body').innerText()), 'UI98 losing the internet shows a clear offline notice');
+await page.context().setOffline(false); await page.waitForTimeout(800);
+ok(!/You are offline/.test(await page.locator('body').innerText()), 'UI99 the notice goes away when the internet is back');
+
+// phone width: no horizontal page scroll on Today
 await page.setViewportSize({ width: 390, height: 844 });
 await page.goto(`${APP}#/ads/home?client=${CLIENT}`);
-await page.getByText('What needs attention').waitFor();
+await page.getByTestId('today').waitFor();
 const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 ok(overflow <= 1, `UI35 phone width has no horizontal page scroll (${overflow}px)`);
 await page.screenshot({ path: `${SHOTS}/ads_phone.png`, fullPage: true });

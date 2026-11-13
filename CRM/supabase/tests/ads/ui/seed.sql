@@ -52,3 +52,9 @@ INSERT INTO public.ads_playbook (lesson, evidence) VALUES
   ('Put the website source next to every fact in research', 'Reviewer rejected a true fact it could not see (13 Nov)'),
   ('Keep proposals under 25 changes', 'Builder failed 3 times on a big audit');
 INSERT INTO public.ads_config (key, value) VALUES ('agents_last_seen', now()::text) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+INSERT INTO public.ads_autopilot_suggestions (account_id, kind, title, reason, proposal) VALUES
+  ('31000000-0000-0000-0000-000000000001', 'assets', 'Slow server test', 'Test: the server answers slowly.',
+   '{"ops": [{"kind": "callout_add", "payload": {"text": "Small Batches"}, "summary": "Callout Small Batches"}]}');
+INSERT INTO public.ads_google_snapshot (account_id, kind, data) VALUES ('31000000-0000-0000-0000-000000000001', 'search_terms_365d', '[
+  {"searchTermView.searchTerm": "ground classes for cpl", "metrics.costMicros": "400000000", "metrics.conversions": 8, "metrics.clicks": "20"},
+  {"searchTermView.searchTerm": "cabin crew course", "metrics.costMicros": "900000000", "metrics.conversions": 0, "metrics.clicks": "30"}]');

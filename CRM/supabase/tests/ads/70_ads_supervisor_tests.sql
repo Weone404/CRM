@@ -117,4 +117,25 @@ SELECT pg_temp.fails('SELECT public.api_ads_autopilot_status()', '%access to the
 SELECT pg_temp.fails('SELECT public.svc_ads_supervise()', '%permission denied%', 'S26 nobody can run the Supervisor or allocator from the browser');
 RESET ROLE;
 
+-- ---------------------------------------------------------------- Today page: best and wasted searches (097)
+INSERT INTO public.ads_google_snapshot (account_id, kind, data) VALUES ((SELECT v::uuid FROM ids WHERE k = 'ag'), 'search_terms_30d', '[]')
+  ON CONFLICT (account_id, kind) DO UPDATE SET data = '[]';
+INSERT INTO public.ads_google_snapshot (account_id, kind, data) VALUES ((SELECT v::uuid FROM ids WHERE k = 'ag'), 'search_terms_365d', '[
+  {"searchTermView.searchTerm": "Cabin Crew Course", "metrics.costMicros": "900000000", "metrics.conversions": 0, "metrics.clicks": "30"},
+  {"searchTermView.searchTerm": "ground classes for cpl", "metrics.costMicros": "400000000", "metrics.conversions": 8, "metrics.clicks": "20"},
+  {"searchTermView.searchTerm": "cpl ground school delhi", "metrics.costMicros": "300000000", "metrics.conversions": 2, "metrics.clicks": "9"},
+  {"searchTermView.searchTerm": "cabin crew course", "metrics.costMicros": "100000000", "metrics.conversions": 0, "metrics.clicks": "4"},
+  {"bad row": true}]') ON CONFLICT (account_id, kind) DO UPDATE SET data = EXCLUDED.data;
+SET ROLE authenticated; SELECT pg_temp.as_('c');
+SELECT pg_temp.ok(public.api_ads_search_insights()->>'source' = 'past year', 'T01 no searches in 30 days (no ads yet): the past year is used, and labelled so');
+SELECT pg_temp.ok(public.api_ads_search_insights()->'best'->0->>'term' = 'ground classes for cpl'
+  AND (public.api_ads_search_insights()->'best'->0->>'cost_per_conversion')::numeric = 50, 'T02 best search = lowest cost per result');
+SELECT pg_temp.ok(public.api_ads_search_insights()->'wasted'->0->>'term' = 'cabin crew course'
+  AND (public.api_ads_search_insights()->'wasted'->0->>'cost')::numeric = 1000, 'T03 wasted searches are merged regardless of capitals, costliest first');
+SELECT pg_temp.ok(jsonb_array_length(public.api_ads_search_insights(1)->'best') = 1 AND jsonb_array_length(public.api_ads_search_insights(-5)->'best') = 1,
+  'T04 a silly limit is kept between 1 and 25');
+SELECT pg_temp.as_('b');
+SELECT pg_temp.fails('SELECT public.api_ads_search_insights()', '%access to the ADS section%', 'T05 outsiders see no search data');
+RESET ROLE;
+
 \echo ALL ADS SUPERVISOR TESTS PASSED

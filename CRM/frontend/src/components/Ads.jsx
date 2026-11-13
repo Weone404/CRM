@@ -7,6 +7,8 @@ import { useRoute, navigate, setParams } from '../utils/route';
 import { ClientWizard, ImportAccounts } from './AdsClientWizard';
 import AdsLeads from './AdsLeads';
 import AdsAutopilot from './AdsAutopilot';
+import AdsToday from './AdsToday';
+import { rpc, run, useLoad, Btn, friendly, WorkingBar, OfflineBar } from './adsKit';
 import { PERIODS, periodRange, todayIn, money, int, pct, ratio, delta, isNum, LOWER_IS_BETTER, toCsv, STATUS_LABEL } from '../utils/ads';
 
 // CRM > ADS: paid advertising for one or more clients (Google Ads, Meta).
@@ -16,35 +18,20 @@ import { PERIODS, periodRange, todayIn, money, int, pct, ratio, delta, isNum, LO
 // Platform-reported numbers (spend, platform conversions/ROAS) and CRM-confirmed numbers (leads, customers,
 // revenue) are labelled and never added together.
 
-const rpc = async (fn, args) => {
-  const { data, error } = await supabase.rpc(fn, args);
-  if (error) throw new Error(error.message);
-  return data;
-};
 async function edge(body) {
   const { data } = await supabase.auth.getSession();
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/ads-sync`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', apikey: SUPABASE_PUBLISHABLE_KEY, Authorization: `Bearer ${data.session?.access_token || ''}` },
-    body: JSON.stringify(body),
-  });
-  const out = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(out.detail || `Request failed (${res.status})`);
-  return out;
-}
-const run = async (p, okMsg) => {
-  try { const r = await p; if (okMsg) showToast(okMsg, 'success'); return r ?? true; }
-  catch (e) { showToast(e.message, 'error'); return undefined; }
-};
-function useLoad(fn, deps = []) {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState('');
-  const load = useCallback(async () => {
-    try { setData(await fn()); setError(''); } catch (e) { setError(e.message); }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
-  useEffect(() => { load(); }, [load]);
-  return [data, load, error];
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 170000);   // a full sync can take two minutes
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/ads-sync`, {
+      method: 'POST', signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_PUBLISHABLE_KEY, Authorization: `Bearer ${data.session?.access_token || ''}` },
+      body: JSON.stringify(body),
+    });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(out.detail || `Request failed (${res.status})`);
+    return out;
+  } catch (e) { throw new Error(friendly(e)); } finally { clearTimeout(timer); }
 }
 
 const Chip = ({ children, bg = 'rgba(118,118,128,0.14)', fg = '#3C3C43', title }) => (
@@ -60,10 +47,6 @@ const Field = ({ label, children, hint }) => (
     {hint && <span className="block text-[11px] text-glass-muted mt-0.5">{hint}</span>}</label>
 );
 const Input = (p) => <input {...p} className={`glass-input w-full px-3 py-2 text-sm ${p.className || ''}`} />;
-const Btn = ({ tone = '#007AFF', ghost, className = '', ...p }) => (
-  <button type="button" {...p} className={`px-3 py-2 rounded-xl text-sm font-semibold min-h-[38px] inline-flex items-center gap-1.5 disabled:opacity-40 ${className}`}
-    style={ghost ? { background: 'rgba(118,118,128,0.12)', color: '#1C1C1E' } : { background: tone, color: '#fff' }} />
-);
 const ago = (t) => {
   if (!t) return 'never';
   const m = Math.round((Date.now() - Date.parse(t)) / 60000);
@@ -795,14 +778,15 @@ function Settings() {
 
 // ---------------------------------------------------------------- shell
 const TABS = [
-  { id: 'home', label: 'Home', icon: 'chart' },
+  { id: 'home', label: 'Today', icon: 'chart' },
   { id: 'campaigns', label: 'Campaigns', icon: 'rocket' },
   { id: 'adsleads', label: 'Ads Leads', short: 'Leads', icon: 'leads' },
-  { id: 'approvals', label: 'Approvals', icon: 'check' },
-  { id: 'autopilot', label: 'Autopilot', short: 'Auto', icon: 'plane' },
   { id: 'more', label: 'More', icon: 'more' },
 ];
 const MORE = [
+  { id: 'autopilot', label: 'Autopilot', icon: 'plane', hint: 'Spend limits, suggestions, instructions and everything the agents did' },
+  { id: 'approvals', label: 'Approvals', icon: 'check', hint: 'Budget and status changes waiting for approval, and their history' },
+  { id: 'report', label: 'Full report', icon: 'chart', hint: 'Every number for the period: leads, customers, revenue, ROAS, platforms' },
   { id: 'leads', label: 'Leads & Revenue', icon: 'funnel', hint: 'CRM leads matched to campaigns by UTM, and recorded revenue' },
   { id: 'recommendations', label: 'Recommendations', icon: 'sparkles', hint: 'Rule-based suggestions with the data behind them' },
   { id: 'clients', label: 'Clients', icon: 'team', hint: 'Business profile, economics and targets' },
@@ -828,9 +812,11 @@ export default function Ads({ access }) {
   const more = MORE.filter((m) => !m.admin || access.is_admin);
   const sub = more.find((m) => m.id === view);
   const tab = sub ? 'more' : (TABS.find((t) => t.id === view) ? view : 'home');
-  const count = { approvals: pending?.length || 0 };
+  const count = { more: pending?.length || 0 };
   return (
     <div className="space-y-4">
+      <WorkingBar />
+      <OfflineBar />
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div><h2 className="text-xl font-bold text-glass-primary">ADS</h2><div className="text-xs text-glass-muted">Google Ads · Meta · CRM outcomes</div></div>
         <div className="flex flex-wrap gap-2 items-center">
@@ -847,7 +833,7 @@ export default function Ads({ access }) {
         </div>
       </div>
       <div className="text-[11px] text-glass-muted -mt-2">{from} to {to} · time zone {tz}{client ? ` · ${client.name}` : ' · every client'}</div>
-      <div role="tablist" aria-label="ADS" className="glass-card p-1 grid grid-cols-6 gap-1">
+      <div role="tablist" aria-label="ADS" className="glass-card p-1 grid grid-cols-4 gap-1">
         {TABS.map((t) => {
           const active = tab === t.id;
           return (
@@ -874,12 +860,13 @@ export default function Ads({ access }) {
             </button>))}
         </div>
       )}
-      {tab === 'home' && <Home ctx={ctx} access={access} go={go} />}
+      {tab === 'home' && <AdsToday ctx={ctx} access={access} go={go} parts={{ Kpi, Bars, fillDays, Delivery }} />}
+      {view === 'report' && <Home ctx={ctx} access={access} go={go} />}
       {tab === 'campaigns' && <Campaigns ctx={ctx} access={access} />}
       {tab === 'adsleads' && <AdsLeads access={access} />}
       {view === 'leads' && <LeadsRevenue ctx={ctx} access={access} clients={clients} />}
-      {tab === 'approvals' && <Approvals access={access} onChange={reloadPending} />}
-      {tab === 'autopilot' && <AdsAutopilot />}
+      {view === 'approvals' && <Approvals access={access} onChange={reloadPending} />}
+      {view === 'autopilot' && <AdsAutopilot />}
       {view === 'recommendations' && <Recommendations ctx={ctx} onChange={reloadPending} />}
       {view === 'clients' && <Clients access={access} clients={clients} reload={reloadClients} clientsErr={clientsErr} />}
       {view === 'accounts' && <Accounts access={access} clients={clients} ctx={ctx} />}

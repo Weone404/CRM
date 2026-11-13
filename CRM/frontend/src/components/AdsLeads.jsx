@@ -2,22 +2,12 @@
 // Reads/writes only through api_ads_* functions (migrations 089, 090): every stage move, assignment and call is
 // recorded with who and when, and history can't be edited. Pilot Training and Charter are separate lists.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase } from '../backend/supabaseClient';
+import { rpc, run, Btn } from './adsKit';
 import { showToast } from '../utils/toast';
 import { promptDialog } from './ui/dialogs';
 import Icon from './icons';
 import QuickActions, { CloseButton } from './ui/QuickActions';
 import { displayPhone, formatPhone } from '../utils/formatters';
-
-const rpc = async (fn, args) => {
-  const { data, error } = await supabase.rpc(fn, args);
-  if (error) throw new Error(error.message);
-  return data;
-};
-const run = async (p, okMsg) => {
-  try { const r = await p; if (okMsg) showToast(okMsg, 'success'); return r ?? true; }
-  catch (e) { showToast(e.message, 'error'); return undefined; }
-};
 
 const PIPES = [['pilot_training', 'Pilot Training'], ['charter', 'Charter']];
 const STAGE_TONE = {
@@ -36,10 +26,6 @@ const CONTACT = [['connected', 'Connected'], ['no_answer', 'No answer'], ['busy'
 
 const Chip = ({ children, fg = '#3C3C43', bg = 'rgba(118,118,128,0.14)' }) => (
   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap" style={{ background: bg, color: fg }}>{children}</span>
-);
-const Btn = ({ tone = '#007AFF', ghost, className = '', ...p }) => (
-  <button type="button" {...p} className={`px-3 py-2 rounded-xl text-sm font-semibold min-h-[38px] inline-flex items-center justify-center gap-1.5 disabled:opacity-40 ${className}`}
-    style={ghost ? { background: 'rgba(118,118,128,0.12)', color: '#1C1C1E' } : { background: tone, color: '#fff' }} />
 );
 const mins = (t) => (t ? Math.max(0, Math.round((Date.now() - Date.parse(t)) / 60000)) : null);
 const span = (m) => (m === null ? '' : m < 60 ? `${m} min` : m < 1440 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} d`);
