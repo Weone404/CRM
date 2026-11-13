@@ -241,3 +241,13 @@ test("imported account behind a manager: changes go through that manager", async
   assert.equal(r.status, "verified");
   assert.ok(f.calls.filter((c) => /googleads/.test(c.url)).every((c) => (c.init!.headers as Record<string, string>)["login-customer-id"] === "9998887777"));
 });
+
+Deno.test("google campaign keeps primary status and reasons (v26)", () => {
+  const r = parseGoogleCampaign({ campaign: { id: "7", name: "S", status: "ENABLED", advertisingChannelType: "SEARCH", primaryStatus: "LIMITED",
+    primaryStatusReasons: ["BUDGET_CONSTRAINED", "SEARCH_VOLUME_LIMITED"], servingStatus: "SERVING" },
+    campaignBudget: { resourceName: "customers/1/campaignBudgets/2", amountMicros: "200000000", period: "DAILY" } });
+  if (r.raw.primary_status !== "LIMITED" || (r.raw.primary_status_reasons as string[]).join() !== "BUDGET_CONSTRAINED,SEARCH_VOLUME_LIMITED"
+      || r.raw.serving_status !== "SERVING" || r.daily_budget !== 200) throw new Error(JSON.stringify(r));
+  const e = parseGoogleCampaign({ campaign: { id: "8", status: "PAUSED" }, campaignBudget: {} });
+  if (e.raw.primary_status !== null || (e.raw.primary_status_reasons as string[]).length !== 0) throw new Error(JSON.stringify(e));
+});

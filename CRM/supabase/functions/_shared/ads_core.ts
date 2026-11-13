@@ -185,7 +185,8 @@ export class GoogleAds {
   async campaigns(customerId: string): Promise<CampaignRow[]> {
     const rows = await this.search(customerId,
       "SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, campaign_budget.resource_name, " +
-      "campaign_budget.amount_micros, campaign_budget.explicitly_shared, campaign_budget.period FROM campaign WHERE campaign.status != 'REMOVED'");
+      "campaign_budget.amount_micros, campaign_budget.explicitly_shared, campaign_budget.period, " +
+      "campaign.primary_status, campaign.primary_status_reasons, campaign.serving_status FROM campaign WHERE campaign.status != 'REMOVED'");
     return rows.map(parseGoogleCampaign);
   }
   async metrics(customerId: string, since: string, until: string): Promise<MetricRow[]> {
@@ -223,7 +224,10 @@ export function parseGoogleCampaign(r: any): CampaignRow {
     objective: null, channel: c.advertisingChannelType ?? null,
     daily_budget: daily ? microsToUnits(b.amountMicros) : null,
     budget_ref: editable ? b.resourceName : null,
-    raw: { budget_shared: b.explicitlyShared ?? null, budget_period: b.period ?? null },
+    // Why Google is (not) serving it: CampaignPrimaryStatus + reasons (v26 campaign fields).
+    raw: { budget_shared: b.explicitlyShared ?? null, budget_period: b.period ?? null,
+      primary_status: c.primaryStatus ?? null, primary_status_reasons: Array.isArray(c.primaryStatusReasons) ? c.primaryStatusReasons : [],
+      serving_status: c.servingStatus ?? null },
   };
 }
 export function parseGoogleMetric(r: any): MetricRow {

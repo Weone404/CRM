@@ -265,6 +265,43 @@ async function draftChange(c, kind, after, summary, recommendation) {
   return !!(await run(rpc('api_ads_change_create', { p_campaign: c.id, p_kind: kind, p_after: after, p_summary: summary, p_recommendation: recommendation || null }), 'Sent for approval.'));
 }
 
+// Google's delivery verdict (campaign.primary_status + reasons) in plain words.
+const DELIVERY = {
+  ELIGIBLE: ['Showing', 'rgba(52,199,89,0.14)', '#1E7B34'], LEARNING: ['Learning', 'rgba(0,122,255,0.12)', '#0A58CA'],
+  LIMITED: ['Limited', 'rgba(255,149,0,0.16)', '#9A5B00'], PENDING: ['Not started yet', undefined, undefined],
+  MISCONFIGURED: ['Not showing: setup problem', 'rgba(255,59,48,0.12)', '#B42318'], NOT_ELIGIBLE: ['Not showing', 'rgba(255,59,48,0.12)', '#B42318'],
+  ENDED: ['Ended', undefined, undefined],
+};
+const REASON = {
+  BUDGET_CONSTRAINED: 'Budget limits delivery', BUDGET_MISCONFIGURED: 'Budget is set up wrongly',
+  BIDDING_STRATEGY_LEARNING: 'Bid strategy is learning', BIDDING_STRATEGY_LIMITED: 'Bid strategy is limited', BIDDING_STRATEGY_CONSTRAINED: 'Bid strategy is constrained',
+  BIDDING_STRATEGY_MISCONFIGURED: 'Bid strategy is set up wrongly', SEARCH_VOLUME_LIMITED: 'Keywords have low search volume',
+  HAS_ADS_DISAPPROVED: 'Some ads are disapproved', HAS_ADS_LIMITED_BY_POLICY: 'Some ads are limited by policy',
+  MOST_ADS_UNDER_REVIEW: 'Ads are under review', MOST_ASSET_GROUPS_UNDER_REVIEW: 'Asset groups are under review',
+  HAS_ASSET_GROUPS_DISAPPROVED: 'Some asset groups are disapproved', HAS_ASSET_GROUPS_LIMITED_BY_POLICY: 'Some asset groups are limited by policy',
+  NO_KEYWORDS: 'No keywords', KEYWORDS_PAUSED: 'All keywords are paused', NO_AD_GROUPS: 'No ad groups', AD_GROUPS_PAUSED: 'All ad groups are paused',
+  NO_AD_GROUP_ADS: 'No ads', AD_GROUP_ADS_PAUSED: 'All ads are paused', NO_ASSET_GROUPS: 'No asset groups', ASSET_GROUPS_PAUSED: 'All asset groups are paused',
+  MISSING_LOCATION_TARGETING: 'No location targeting', MISSING_CALL_EXTENSION: 'Call asset missing', MISSING_LEAD_FORM_EXTENSION: 'Lead form missing',
+  CALL_EXTENSION_DISAPPROVED: 'Call asset disapproved', CALL_EXTENSION_UNDER_REVIEW: 'Call asset under review',
+  LEAD_FORM_EXTENSION_DISAPPROVED: 'Lead form disapproved', LEAD_FORM_EXTENSION_UNDER_REVIEW: 'Lead form under review',
+  CAMPAIGN_PENDING: 'Start date is in the future', CAMPAIGN_ENDED: 'End date has passed', CAMPAIGN_DRAFT: 'Still a draft',
+  CAMPAIGN_GROUP_PAUSED: 'Campaign group is paused', CAMPAIGN_GROUP_ALL_GROUP_BUDGETS_ENDED: 'Campaign group budgets have ended',
+};
+const SKIP_REASON = new Set(['CAMPAIGN_PAUSED', 'CAMPAIGN_REMOVED', 'UNKNOWN', 'UNSPECIFIED']);
+function Delivery({ c }) {
+  const d = c.delivery;
+  if (!d || c.status !== 'ENABLED') return null;                  // paused/removed already say it all
+  const look = DELIVERY[d.primary_status];
+  const reasons = (d.reasons || []).filter((r) => !SKIP_REASON.has(r)).map((r) => REASON[r] || r.toLowerCase().replace(/_/g, ' '));
+  if (!look && !reasons.length) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 mt-2 text-xs" data-testid="delivery">
+      {look && <Chip bg={look[1]} fg={look[2]}>{look[0]}</Chip>}
+      {reasons.map((r) => <span key={r} className="px-2 py-0.5 rounded-full bg-black/5 text-glass-secondary">{r}</span>)}
+    </div>
+  );
+}
+
 function Campaigns({ ctx, access }) {
   const [rows, load, err] = useLoad(() => rpc('api_ads_campaigns', { p_client: ctx.client || null, p_from: ctx.from, p_to: ctx.to }), [ctx.client, ctx.from, ctx.to]);
   const [q, setQ] = useState('');
@@ -317,6 +354,7 @@ function Campaigns({ ctx, access }) {
                 {!ctx.client && <span className="text-xs text-glass-muted">{c.client}</span>}
                 {c.account_status !== 'connected' && <StatusChip s={c.account_status} />}
               </div>
+              <Delivery c={c} />
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mt-2 text-xs">
                 <div><div className="text-glass-muted">Spend</div><div className="font-semibold">{money(c.spend, c.currency)}</div></div>
                 <div><div className="text-glass-muted">Clicks · CTR</div><div className="font-semibold">{int(c.clicks)} · {pct(c.ctr)}</div></div>

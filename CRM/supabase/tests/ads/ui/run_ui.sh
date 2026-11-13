@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")"; ROOT=../../../..
 fuser -k 54399/tcp 5199/tcp >/dev/null 2>&1 || true
 psql -q -c "DROP DATABASE IF EXISTS ads_ui" -c "CREATE DATABASE ads_ui" >/dev/null 2>&1
-for f in ../../amazon/00_supabase_stub.sql ../01_ads_stub.sql $ROOT/backend/migrations/076_ads_module.sql $ROOT/backend/migrations/078_ads_client_wizard.sql seed.sql; do
+for f in ../../amazon/00_supabase_stub.sql ../01_ads_stub.sql $ROOT/backend/migrations/076_ads_module.sql $ROOT/backend/migrations/078_ads_client_wizard.sql $ROOT/backend/migrations/091_ads_campaign_delivery.sql seed.sql; do
   psql -q -X -v ON_ERROR_STOP=1 -d ads_ui -f "$f" >/dev/null
 done
 PGDATABASE=ads_ui node fake_api.mjs > /tmp/ads_fake_api.log 2>&1 < /dev/null &

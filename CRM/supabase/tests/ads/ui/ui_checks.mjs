@@ -45,6 +45,9 @@ await page.getByText('Test Search').waitFor();
 t = await body();
 ok(/Test Search/.test(t) && /6 · 3/.test(t), 'UI08 campaign row shows CRM leads · qualified (6 · 3)');
 ok(/not linked/.test(t), 'UI09 campaign without UTM mapping says CRM is not linked');
+{ const d = await page.getByTestId('delivery').allInnerTexts();
+  ok(d.length === 1 && /Limited/.test(d[0]) && /Budget limits delivery/.test(d[0]) && /Keywords have low search volume/.test(d[0]),
+    'UI09b enabled campaign shows Google delivery status and reasons in plain words'); }
 await page.screenshot({ path: `${SHOTS}/ads_campaigns.png`, fullPage: true });
 
 // budget +50% -> needs second confirm
@@ -74,7 +77,8 @@ const q = await rpc('api_ads_queue', {});
 ok(q[0]?.status === 'approved' && q[0]?.second_confirmed === true, 'UI14 queue row approved with second confirm recorded');
 await page.screenshot({ path: `${SHOTS}/ads_approvals.png`, fullPage: true });
 
-await tab('Leads');
+await tab('More');                                    // Leads & Revenue lives under More since the Ads Leads tab
+await page.getByRole('button', { name: /^Leads & Revenue/ }).click();
 await page.getByText('Leads from ads').waitFor();
 t = await body();
 ok((t.match(/Test Lead \d/g) || []).length >= 6, 'UI15 ad leads listed');

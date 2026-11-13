@@ -15,3 +15,7 @@ INSERT INTO public.ads_metrics_daily (campaign_id, day, impressions, clicks, spe
 SELECT '32000000-0000-0000-0000-000000000001', (now() AT TIME ZONE 'Asia/Kolkata')::date - g, 1000, 40, 900, 2, 0 FROM generate_series(1, 10) g;
 INSERT INTO public.lead (name, utm_source, utm_campaign, segment, created_at, is_eligible)
 SELECT 'Test Lead ' || g, 'google', 'test_search', 'aviation', now() - make_interval(days => g), g % 2 = 0 FROM generate_series(1, 6) g;
+
+-- 091: Google's delivery verdict on the enabled campaign
+UPDATE public.ads_campaigns SET raw = jsonb_build_object('primary_status','LIMITED','primary_status_reasons',jsonb_build_array('BUDGET_CONSTRAINED','SEARCH_VOLUME_LIMITED'),'serving_status','SERVING')
+ WHERE id = '32000000-0000-0000-0000-000000000001';
