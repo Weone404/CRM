@@ -18,6 +18,9 @@ BEGIN
 END $$;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pg_temp TO authenticated, anon, service_role;
 SET client_min_messages = notice;
+-- 093 seeds Autopilot spend limits and turns Autopilot on; they are tested in 40_, so start without them here.
+UPDATE public.ads_config SET value = '' WHERE key IN ('google_cap_daily', 'google_cap_monthly');
+UPDATE public.ads_config SET value = 'off' WHERE key = 'autopilot_google';
 
 INSERT INTO public.employee (id, name, department, auth_user_id) VALUES
   ('00000000-0000-0000-0000-00000000000a', 'Admin', 'Admin', '10000000-0000-0000-0000-00000000000a'),

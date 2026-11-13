@@ -6,6 +6,7 @@ import Icon from './icons';
 import { useRoute, navigate, setParams } from '../utils/route';
 import { ClientWizard, ImportAccounts } from './AdsClientWizard';
 import AdsLeads from './AdsLeads';
+import AdsAutopilot from './AdsAutopilot';
 import { PERIODS, periodRange, todayIn, money, int, pct, ratio, delta, isNum, LOWER_IS_BETTER, toCsv, STATUS_LABEL } from '../utils/ads';
 
 // CRM > ADS: paid advertising for one or more clients (Google Ads, Meta).
@@ -798,6 +799,7 @@ const TABS = [
   { id: 'campaigns', label: 'Campaigns', icon: 'rocket' },
   { id: 'adsleads', label: 'Ads Leads', short: 'Leads', icon: 'leads' },
   { id: 'approvals', label: 'Approvals', icon: 'check' },
+  { id: 'autopilot', label: 'Autopilot', short: 'Auto', icon: 'plane' },
   { id: 'more', label: 'More', icon: 'more' },
 ];
 const MORE = [
@@ -845,7 +847,7 @@ export default function Ads({ access }) {
         </div>
       </div>
       <div className="text-[11px] text-glass-muted -mt-2">{from} to {to} · time zone {tz}{client ? ` · ${client.name}` : ' · every client'}</div>
-      <div role="tablist" aria-label="ADS" className="glass-card p-1 grid grid-cols-5 gap-1">
+      <div role="tablist" aria-label="ADS" className="glass-card p-1 grid grid-cols-6 gap-1">
         {TABS.map((t) => {
           const active = tab === t.id;
           return (
@@ -877,6 +879,7 @@ export default function Ads({ access }) {
       {tab === 'adsleads' && <AdsLeads access={access} />}
       {view === 'leads' && <LeadsRevenue ctx={ctx} access={access} clients={clients} />}
       {tab === 'approvals' && <Approvals access={access} onChange={reloadPending} />}
+      {tab === 'autopilot' && <AdsAutopilot />}
       {view === 'recommendations' && <Recommendations ctx={ctx} onChange={reloadPending} />}
       {view === 'clients' && <Clients access={access} clients={clients} reload={reloadClients} clientsErr={clientsErr} />}
       {view === 'accounts' && <Accounts access={access} clients={clients} ctx={ctx} />}

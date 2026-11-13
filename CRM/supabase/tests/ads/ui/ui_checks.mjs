@@ -177,6 +177,49 @@ ok(acc.some((a) => a.external_id === '7778889999' && a.login_customer_id === '99
   'UI34 imported accounts stored with their manager account');
 await page.screenshot({ path: `${SHOTS}/ads_wizard_finish.png`, fullPage: true });
 
+// Autopilot (093)
+await page.setViewportSize({ width: 1280, height: 900 });
+await page.goto(`${APP}#/ads/home?client=${CLIENT}`);
+await page.getByText('What needs attention').waitFor();
+await tab('Autopilot');
+await page.getByTestId('autopilot').waitFor();
+t = await body();
+ok(/Emergency stop is ON|Autopilot is flying/.test(t) && /Spend limits/.test(t) && /Tell the agents/.test(t), 'UI40 Autopilot tab shows state, limits and the instruction box');
+ok(await page.getByLabel('Daily limit').inputValue() === '5000', 'UI41 the saved daily limit is shown');
+await page.getByRole('button', { name: /500\/day/ }).click();
+ok(await page.getByLabel('Monthly limit').inputValue() === '15200', 'UI42 a quick pick fills the monthly limit (x30.4)');
+await page.getByTestId('ap-limits').getByRole('button', { name: 'Save' }).click(); await page.waitForTimeout(800);
+let ap = await rpc('api_ads_autopilot');
+ok(Number(ap.caps.daily) === 500 && Number(ap.caps.monthly) === 15200, 'UI43 limits saved to the database');
+const sug = page.getByTestId('ap-suggestion').first();
+ok(await sug.getByRole('checkbox').nth(0).isChecked() && !(await sug.getByRole('checkbox').nth(1).isChecked()), 'UI44 suggested options come pre-picked as the agents advised');
+await sug.getByRole('button', { name: /Accept \(1\)/ }).click(); await page.waitForTimeout(900);
+const gops = await rpc('api_ads_google_ops', { p_status: null, p_limit: 20 });
+ok(gops.filter((o) => o.kind === 'campaign_geo').length === 2 && !gops.some((o) => o.payload?.add?.[0] === '1007826'), 'UI45 accepting creates only the picked city plus the shared change');
+await page.getByLabel('Instruction for the agents').fill('Focus on DGCA ground classes this month');
+await page.getByTestId('ap-tell').getByRole('button', { name: 'Send' }).click(); await page.waitForTimeout(800);
+ok(/Focus on DGCA ground classes this month/.test(await body()), 'UI46 a typed instruction is sent and listed');
+await page.getByRole('button', { name: 'Stopped' }).click(); await page.waitForTimeout(400);
+t = await body();
+ok(/Rejected by Reviewer/.test(t) && !/Went live \(checked\)/.test(t), 'UI47 "Stopped" shows the Reviewer\'s rejections');
+await page.getByRole('button', { name: 'Went live' }).click(); await page.waitForTimeout(400);
+ok(/Weekend Batches/.test(await body()), 'UI48 "Went live" shows verified changes');
+await page.getByRole('button', { name: 'I added money' }).click();
+await dlg().getByRole('textbox').fill('20000'); await dlg().getByRole('button', { name: 'OK' }).click(); await page.waitForTimeout(800);
+ok(/left/.test(await page.getByTestId('ap-funds').innerText()), 'UI49 recording a top-up shows the balance estimate');
+ok(/Emergency stop is ON/.test(await body()), 'UI50 the stop pressed in Settings shows on Autopilot too');
+await page.getByRole('button', { name: 'Resume' }).click(); await page.waitForTimeout(800);
+ok(!(await rpc('api_ads_autopilot')).stopped && /Autopilot is flying/.test(await body()), 'UI51 resume');
+await page.getByRole('button', { name: 'Stop everything' }).click();
+await dlg().getByRole('button', { name: 'Stop everything' }).click(); await page.waitForTimeout(800);
+ok((await rpc('api_ads_autopilot')).stopped, 'UI51b emergency stop from the Autopilot tab');
+await page.getByRole('button', { name: 'Resume' }).click(); await page.waitForTimeout(800);
+await page.screenshot({ path: `${SHOTS}/ads_autopilot.png`, fullPage: true });
+await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(500);
+const apOver = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+ok(apOver <= 1, `UI52 Autopilot has no horizontal scroll at phone width (${apOver}px)`);
+await page.screenshot({ path: `${SHOTS}/ads_autopilot_phone.png`, fullPage: true });
+
 // phone width: no horizontal page scroll on Home
 await page.setViewportSize({ width: 390, height: 844 });
 await page.goto(`${APP}#/ads/home?client=${CLIENT}`);

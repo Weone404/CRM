@@ -19,3 +19,19 @@ SELECT 'Test Lead ' || g, 'google', 'test_search', 'aviation', now() - make_inte
 -- 091: Google's delivery verdict on the enabled campaign
 UPDATE public.ads_campaigns SET raw = jsonb_build_object('primary_status','LIMITED','primary_status_reasons',jsonb_build_array('BUDGET_CONSTRAINED','SEARCH_VOLUME_LIMITED'),'serving_status','SERVING')
  WHERE id = '32000000-0000-0000-0000-000000000001';
+
+-- 093: Autopilot test data (a geo suggestion with options, a reviewer rejection, an agent change that went live)
+INSERT INTO public.ads_autopilot_suggestions (account_id, kind, title, reason, proposal) VALUES
+  ('31000000-0000-0000-0000-000000000001', 'geo', 'Target these cities', 'Past enquiries came mostly from these cities (test data).',
+   '{"ops": [{"kind": "campaign_geo", "payload": {"campaign_id": "111", "add": ["1007765"]}, "option": "1007765", "summary": "Gurugram"},
+             {"kind": "campaign_geo", "payload": {"campaign_id": "111", "add": ["1007826"]}, "option": "1007826", "summary": "Noida"},
+             {"kind": "campaign_geo", "payload": {"campaign_id": "111", "target_type": "PRESENCE"}, "summary": "Only people located there"}],
+     "options": [{"id": "1007765", "label": "Gurugram", "reason": "12 enquiries"}, {"id": "1007826", "label": "Noida", "reason": "3 enquiries", "selected": false}]}');
+INSERT INTO public.ads_agent_runs (account_id, role, job, status, attempt, summary) VALUES
+  ('31000000-0000-0000-0000-000000000001', 'reviewer', 'review_ad', 'rejected', 1, 'Headline "Guaranteed DGCA Success" is an unprovable claim (test)'),
+  ('31000000-0000-0000-0000-000000000001', 'researcher', 'research', 'done', 1, 'Found 40 keyword ideas (test)');
+INSERT INTO public.ads_google_ops (account_id, kind, payload, summary, created_by_type, status) VALUES
+  ('31000000-0000-0000-0000-000000000001', 'callout_add', '{"text": "Weekend Batches"}', 'Add callout "Weekend Batches" (test)', 'agent', 'approved');
+UPDATE public.ads_google_ops SET status = 'verified' WHERE summary LIKE 'Add callout "Weekend Batches"%';
+UPDATE public.ads_config SET value = '5000' WHERE key = 'google_cap_daily';
+UPDATE public.ads_config SET value = '152000' WHERE key = 'google_cap_monthly';
