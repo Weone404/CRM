@@ -147,6 +147,47 @@ function Funds({ d, reload }) {
   );
 }
 
+const WORK = { researcher: 'researching', builder: 'writing changes', reviewer: 'reviewing', learner: 'learning from last month' };
+function AgentsBadge({ s }) {
+  if (!s?.agents) return null;
+  const a = s.agents;
+  const tone = a.online ? GREEN : GREY;
+  const text = a.online
+    ? (a.working_on ? `Agents online · ${WORK[a.working_on.role] || a.working_on.role}${a.queued ? ` · ${a.queued} more waiting` : ''}` : 'Agents online · idle')
+    : (a.last_seen ? `Agents offline · last seen ${ago(a.last_seen)}` : 'Agents not set up on the Mac yet');
+  return (
+    <div className="inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2 py-0.5 my-0.5" data-testid="ap-agents"
+      style={{ background: tone[1], color: tone[0] }} title={a.online ? '' : 'Start the Mac Mini and the ADS agents helper (tools/ads-agents/install.sh).'}>
+      <span className="h-1.5 w-1.5 rounded-full" style={{ background: a.online ? '#34C759' : '#8E8E93' }} />{text}
+    </div>
+  );
+}
+
+function Report({ r }) {
+  return (
+    <section className="glass-card p-4" data-testid="ap-report">
+      <div className="flex items-center gap-2"><span className="font-bold text-glass-primary">Daily report</span>
+        <span className="text-[11px] text-glass-muted">{ago(r.at)}</span></div>
+      <p className="text-sm text-glass-secondary mt-1">{r.text}</p>
+    </section>
+  );
+}
+
+function Playbook({ items }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="glass-card p-4" data-testid="ap-playbook">
+      <button type="button" className="w-full flex items-center justify-between text-left" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <span className="font-bold text-glass-primary">What the agents have learned ({items.length})</span>
+        <Icon name={open ? 'chevronDown' : 'chevronRight'} size={16} />
+      </button>
+      {open && <ol className="mt-2 space-y-1.5 list-decimal pl-5 text-sm">
+        {items.map((p, i) => <li key={i}><span className="text-glass-primary">{p.lesson}</span>{p.evidence && <span className="block text-[11px] text-glass-muted">{p.evidence}</span>}</li>)}
+      </ol>}
+    </section>
+  );
+}
+
 function optionList(s) {
   const ops = s.proposal?.ops || [];
   const ids = [...new Set(ops.filter((o) => o.option != null).map((o) => String(o.option)))];
@@ -302,7 +343,11 @@ function Activity({ d }) {
 export default function AdsAutopilot() {
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
-  const load = useCallback(async () => { try { setD(await rpc('api_ads_autopilot')); setErr(''); } catch (e) { setErr(e.message); } }, []);
+  const [s, setS] = useState(null);
+  const load = useCallback(async () => {
+    try { setD(await rpc('api_ads_autopilot')); setErr(''); } catch (e) { setErr(e.message); }
+    try { setS(await rpc('api_ads_autopilot_status')); } catch { setS(null); }   // extra panel; the tab works without it
+  }, []);
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
   if (err) return <div className="glass-card p-3 text-sm" style={{ color: '#C4261D' }}>{err}</div>;
   if (!d) return <div className="text-center text-glass-muted py-10 text-sm">Loading…</div>;
@@ -321,10 +366,12 @@ export default function AdsAutopilot() {
           <Icon name={d.stopped ? 'pause' : 'plane'} size={22} /></span>
         <div className="flex-1 min-w-[12rem]">
           <div className="font-bold text-glass-primary" data-testid="ap-state">{d.stopped ? 'Emergency stop is ON' : on ? 'Autopilot is flying' : 'Autopilot asks before acting'}</div>
+          <AgentsBadge s={s} />
           <div className="text-xs text-glass-secondary">{d.account ? `Google Ads ${d.account.name || d.account.external_id}${d.account.status !== 'connected' ? ` · ${d.account.status.replace(/_/g, ' ')}` : ''} · synced ${ago(d.account.last_ok_at) || 'never'}` : 'Connect a Google Ads account in More › Ad accounts.'}</div>
         </div>
         <Btn tone={d.stopped ? '#248A3D' : '#FF3B30'} onClick={stop} disabled={d.stopped && !d.can_approve}><Icon name={d.stopped ? 'play' : 'pause'} size={16} />{d.stopped ? 'Resume' : 'Stop everything'}</Btn>
       </section>
+      {s?.report && <Report r={s.report} />}
       <Funds d={d} reload={load} />
       <div className="grid lg:grid-cols-2 gap-4 items-start">
         <Limits d={d} reload={load} />
@@ -332,6 +379,7 @@ export default function AdsAutopilot() {
       </div>
       <Suggestions d={d} reload={load} />
       <Activity d={d} />
+      {s?.playbook?.length > 0 && <Playbook items={s.playbook} />}
     </div>
   );
 }

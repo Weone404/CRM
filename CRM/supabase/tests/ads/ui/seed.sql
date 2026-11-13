@@ -43,3 +43,12 @@ INSERT INTO public.ads_access (employee_id, can_approve) VALUES ('00000000-0000-
 INSERT INTO public.ads_autopilot_suggestions (account_id, kind, title, reason, proposal) VALUES
   ('31000000-0000-0000-0000-000000000001', 'assets', 'Add a callout', 'Test: two people accept at once.',
    '{"ops": [{"kind": "callout_add", "payload": {"text": "Online Classes"}, "summary": "Callout Online Classes"}]}');
+
+-- 096: a daily report, two lessons, and the agents helper checked in just now
+INSERT INTO public.ads_agent_runs (account_id, role, job, status, summary, output, finished_at) VALUES
+  ('31000000-0000-0000-0000-000000000001', 'supervisor', 'daily_report', 'done',
+   '12 Nov: spent 900, 40 clicks, 2 CRM leads (450 per lead). This month 9000 of 15200.', '{"day": "2026-11-12"}', now());
+INSERT INTO public.ads_playbook (lesson, evidence) VALUES
+  ('Put the website source next to every fact in research', 'Reviewer rejected a true fact it could not see (13 Nov)'),
+  ('Keep proposals under 25 changes', 'Builder failed 3 times on a big audit');
+INSERT INTO public.ads_config (key, value) VALUES ('agents_last_seen', now()::text) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

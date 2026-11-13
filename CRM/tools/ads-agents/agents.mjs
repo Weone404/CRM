@@ -23,8 +23,8 @@ let TOKEN = null;   // read on first use
 const CFG = existsSync(join(CONF, "config.json")) ? JSON.parse(readFileSync(join(CONF, "config.json"), "utf8")) : {};
 const URL_ = process.env.ADS_AGENTS_URL || CFG.url || "https://syytqcadmtgowckdnbqh.supabase.co/functions/v1/ads-agents";
 const CLAUDE = process.env.CLAUDE_BIN || (existsSync(join(CONF, "claude-path")) ? readFileSync(join(CONF, "claude-path"), "utf8").trim() : "claude");
-const MODELS = { researcher: "sonnet", builder: "opus", reviewer: "opus", ...(CFG.models || {}) };
-const TIMEOUT = { researcher: 15 * 60e3, builder: 8 * 60e3, reviewer: 6 * 60e3 };
+const MODELS = { researcher: "sonnet", builder: "opus", reviewer: "opus", learner: "opus", ...(CFG.models || {}) };
+const TIMEOUT = { researcher: 15 * 60e3, builder: 8 * 60e3, reviewer: 6 * 60e3, learner: 8 * 60e3 };
 const IDLE_MS = 60e3;              // ask for work once a minute when idle
 const LIMIT_PAUSE_MS = 15 * 60e3;  // after a Claude usage limit
 const WORKDIR = mkdtempSync(join(tmpdir(), "ads-agents-"));
@@ -98,6 +98,7 @@ export function parseJson(text) {
 const SUMMARY = {
   researcher: (o) => String(o.summary || "").split("\n")[0].slice(0, 300),
   builder: (o) => `Proposed ${(o.ops || []).length} change(s), ${(o.suggestions || []).length} suggestion(s)${o.answer ? `: ${String(o.answer).slice(0, 200)}` : ""}`,
+  learner: (o) => `Learned ${(o.playbook || []).length} lesson(s)${o.answer ? `: ${String(o.answer).slice(0, 200)}` : ""}`,
   reviewer: (o) => (String(o.verdict).toLowerCase() === "approve" ? `Approved${o.notes ? `: ${String(o.notes).slice(0, 200)}` : ""}`
     : `Rejected: ${(o.problems || []).slice(0, 2).join("; ").slice(0, 300)}`),
 };

@@ -220,6 +220,14 @@ const apOver = await page.evaluate(() => document.documentElement.scrollWidth - 
 ok(apOver <= 1, `UI52 Autopilot has no horizontal scroll at phone width (${apOver}px)`);
 await page.screenshot({ path: `${SHOTS}/ads_autopilot_phone.png`, fullPage: true });
 
+// stage 4: agents badge, daily report, playbook
+await page.setViewportSize({ width: 1280, height: 900 });
+await page.goto(`${APP}#/ads/autopilot`); await page.getByTestId('autopilot').waitFor(); await page.waitForTimeout(800);
+ok(/Agents online/.test(await page.getByTestId('ap-agents').innerText()), 'UI80 the agents badge says online when the Mac helper checked in');
+ok(/450 per lead/.test(await page.getByTestId('ap-report').innerText()), 'UI81 the daily report is shown at the top');
+await page.getByTestId('ap-playbook').getByRole('button').click();
+ok(/website source next to every fact/.test(await page.getByTestId('ap-playbook').innerText()), 'UI82 what the agents learned opens with the evidence');
+
 // ---- worst cases: a person with zero knowledge, two people at once, the server failing
 await page.setViewportSize({ width: 1280, height: 900 });
 const dialogs = [];
