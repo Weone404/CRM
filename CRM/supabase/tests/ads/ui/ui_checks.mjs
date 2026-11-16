@@ -228,6 +228,28 @@ ok(/Agents online/.test(await page.getByTestId('ap-agents').innerText()), 'UI80 
 ok(/450 per lead/.test(await page.getByTestId('ap-report').innerText()), 'UI81 the daily report is shown at the top');
 await page.getByTestId('ap-playbook').getByRole('button').click();
 ok(/website source next to every fact/.test(await page.getByTestId('ap-playbook').innerText()), 'UI82 what the agents learned opens with the evidence');
+// ---- the team and the 24-hour rule (099)
+{
+  const ap = await rpc('api_ads_autopilot');
+  const auto = ap.suggestions.find((x) => x.title === 'Block air hostess searches');
+  const card = page.getByTestId('ap-suggestion').filter({ hasText: 'Block air hostess searches' });
+  const txt = await card.innerText();
+  ok(ap.mode !== 'auto' || !!auto.auto_at, 'UI100 in Automatic mode the server gives a Reviewer-approved suggestion a time to be applied by itself');
+  ok(auto.auto_at ? /recommended option is applied by itself in 2[0-4] hours/.test(txt) && (await card.getByTestId('ap-sugg-auto').count()) === 1
+                  : /waits for you/.test(txt), 'UI101 the suggestion card says in plain words when it will be applied if nobody answers');
+  const manual = page.getByTestId('ap-suggestion').filter({ hasText: 'Slow server test' });
+  ok(/This one waits for you\. It is never applied by itself/.test(await manual.innerText()), 'UI102 a suggestion the Reviewer did not approve says it waits for the owner');
+  await page.getByTestId('ap-team').getByRole('button').click();
+  const team = await page.getByTestId('ap-team').innerText();
+  ok(await page.getByTestId('ap-team-member').count() === 14 && /Your ads team \(14\)/.test(team), 'UI103 the team list opens with all 14 members');
+  ok(/Search Terms/.test(team) && /Bids & Budget/.test(team) && /Compliance Reviewer/.test(team) && /AI specialist/.test(team) && /Always on/.test(team)
+    && /Nothing goes live without its approval/.test(team), 'UI104 each member shows its name, whether it is an AI specialist or always on, and what it does');
+  ok(/Last worked .*Approved 0 change\(s\) and 1 suggestion/.test(team) && /Has not worked yet/.test(team), 'UI105 ... and when it last worked, or that it has not worked yet');
+  await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(300);
+  ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'UI106 the team list and the 24-hour note fit a phone without sideways scrolling');
+  await page.screenshot({ path: `${SHOTS}/ads_team_phone.png`, fullPage: true });
+  await page.setViewportSize({ width: 1280, height: 900 });
+}
 
 // ---- worst cases: a person with zero knowledge, two people at once, the server failing
 await page.setViewportSize({ width: 1280, height: 900 });

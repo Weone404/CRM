@@ -14,6 +14,7 @@ const RES: Record<string, string> = {
   adGroupCriteria: "ad_group_criterion", campaignCriteria: "campaign_criterion", sharedCriteria: "shared_criterion",
   adGroupAds: "ad_group_ad", adGroups: "ad_group", campaignSharedSets: "campaign_shared_set", assets: "asset",
   customerAssets: "customer_asset", campaignAssets: "campaign_asset", conversionActions: "conversion_action", campaigns: "campaign",
+  campaignBudgets: "campaign_budget",
 };
 const STATUS_FIELD: Record<string, string> = {
   ad_group_criterion: "status", ad_group_ad: "status", customer_asset: "status", campaign_asset: "status",
@@ -23,6 +24,12 @@ const digits = (v: unknown, what: string) => {
   const s = String(v ?? "");
   if (!/^\d+$/.test(s)) throw new AdsError("sync_failed", `${what} must be numeric`);
   return s;
+};
+// Rupees (2 decimals) -> micros as Google wants them (a string, exact).
+export const micros = (v: unknown, what: string) => {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) throw new AdsError("sync_failed", `${what} must be a number above 0`);
+  return String(Math.round(n * 100) * 10_000);
 };
 const camel = (s: string) => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 export const getPath = (row: any, path: string) => path.split(".").reduce((o, k) => (o == null ? undefined : o[camel(k)]), row);
@@ -107,6 +114,21 @@ export function buildOps(cid: string, kind: string, p: any): Built {
       add({ conversionActionOperation: { update: { resourceName: `${C}/conversionActions/${digits(p.conversion_action_id, "conversion_action_id")}`,
         primaryForGoal: p.primary === true }, updateMask: "primaryForGoal" } }, { mode: "field", field: "primary_for_goal", value: p.primary === true });
       break;
+    case "cpc_cap": {      // Maximize Clicks: the most one click may cost
+      const m = micros(p.max_cpc, "max_cpc");
+      add({ campaignOperation: { update: { resourceName: `${C}/campaigns/${digits(p.campaign_id, "campaign_id")}`, targetSpend: { cpcBidCeilingMicros: m } },
+        updateMask: "targetSpend.cpcBidCeilingMicros" } }, { mode: "field", field: "target_spend.cpc_bid_ceiling_micros", value: m });
+      break;
+    }
+    case "budget": {       // daily budget; budget_resource is filled in by the CRM from the campaign it synced
+      const rn = String(p.budget_resource ?? "");
+      if (!/^customers\/\d+\/campaignBudgets\/\d+$/.test(rn)) throw new AdsError("sync_failed", "the campaign's budget is not known yet; sync first");
+      if (!rn.startsWith(`${C}/`)) throw new AdsError("sync_failed", "resource belongs to another account");
+      const m = micros(p.daily_budget, "daily_budget");
+      add({ campaignBudgetOperation: { update: { resourceName: rn, amountMicros: m }, updateMask: "amountMicros" } },
+        { mode: "field", field: "amount_micros", value: m });
+      break;
+    }
     default:
       throw new AdsError("sync_failed", `unknown operation ${kind}`);
   }
@@ -169,18 +191,40 @@ export async function executeGoogleOp(google: GoogleAds, op: GoogleOp):
   }
 }
 
+// ---- CRM enquiries reported to Google as click conversions ----
+export interface ConvItem { id: number; event: string; at: string; order_id: string; gclid?: string | null; gbraid?: string | null; wbraid?: string | null }
+// One conversion row. Exactly one click id is sent (Google rejects more than one); null when there is nothing to send.
+export function conversionRow(cid: string, actionId: string | undefined, it: ConvItem): Record<string, unknown> | null {
+  if (!actionId || !/^\d+$/.test(actionId)) return null;
+  const click = it.gclid ? { gclid: it.gclid } : it.gbraid ? { gbraid: it.gbraid } : it.wbraid ? { wbraid: it.wbraid } : null;
+  if (!click || !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/.test(it.at)) return null;
+  return { conversionAction: `customers/${cid}/conversionActions/${actionId}`, conversionDateTime: it.at, orderId: it.order_id,
+    consent: { adUserData: "GRANTED" }, ...click };
+}
+// Google's answer -> what the CRM does next. Already-there counts as sent; "too recent" is tried again later; the rest is final.
+export function convertOutcome(err: string | null): { status: "sent" | "retry" | "failed"; error?: string } {
+  if (!err) return { status: "sent" };
+  const code = err.split(":")[0];
+  if (["CLICK_CONVERSION_ALREADY_EXISTS", "ORDER_ID_ALREADY_IN_USE"].includes(code)) return { status: "sent" };
+  if (["TOO_RECENT_CONVERSION_ACTION", "TOO_RECENT_EVENT", "EVENT_NOT_FOUND", "CLICK_NOT_FOUND", "TOO_RECENT_CALL"].includes(code)) return { status: "retry", error: err };
+  return { status: "failed", error: err };
+}
+
 // Read-only picture of the account for the agents (compact GAQL; ~13 operations per sync).
 export const SNAPSHOT_QUERIES: Record<string, string> = {
   campaigns: "SELECT campaign.id, campaign.name, campaign.status, campaign.primary_status, campaign.primary_status_reasons, campaign.bidding_strategy_type, " +
     "campaign.advertising_channel_type, campaign.network_settings.target_search_network, campaign.network_settings.target_content_network, " +
-    "campaign.geo_target_type_setting.positive_geo_target_type, campaign_budget.amount_micros FROM campaign WHERE campaign.status != 'REMOVED'",
+    "campaign.geo_target_type_setting.positive_geo_target_type, campaign.target_spend.cpc_bid_ceiling_micros, campaign_budget.amount_micros " +
+    "FROM campaign WHERE campaign.status != 'REMOVED'",
   locations: "SELECT campaign.id, campaign_criterion.criterion_id, campaign_criterion.location.geo_target_constant, campaign_criterion.negative " +
     "FROM campaign_criterion WHERE campaign_criterion.type = 'LOCATION' AND campaign.status != 'REMOVED'",
   ad_groups: "SELECT campaign.id, ad_group.id, ad_group.name, ad_group.status, ad_group.type, ad_group.cpc_bid_micros FROM ad_group " +
     "WHERE campaign.status != 'REMOVED' AND ad_group.status != 'REMOVED'",
   // keywords of the running campaigns (performance comes from the search terms; keyword_view hides keywords with no traffic)
   keywords: "SELECT campaign.id, ad_group.id, ad_group_criterion.resource_name, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, " +
-    "ad_group_criterion.negative, ad_group_criterion.status, ad_group_criterion.quality_info.quality_score FROM ad_group_criterion " +
+    "ad_group_criterion.negative, ad_group_criterion.status, ad_group_criterion.quality_info.quality_score, " +
+    "ad_group_criterion.quality_info.creative_quality_score, ad_group_criterion.quality_info.post_click_quality_score, " +
+    "ad_group_criterion.quality_info.search_predicted_ctr FROM ad_group_criterion " +
     "WHERE ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.status != 'REMOVED' AND campaign.status = 'ENABLED'",
   ads: "SELECT campaign.id, ad_group.id, ad_group_ad.resource_name, ad_group_ad.status, ad_group_ad.ad_strength, ad_group_ad.policy_summary.approval_status, " +
     "ad_group_ad.ad.final_urls, ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions FROM ad_group_ad " +
@@ -198,6 +242,15 @@ export const SNAPSHOT_QUERIES: Record<string, string> = {
     "WHERE shared_set.type = 'NEGATIVE_KEYWORDS'",
   search_terms_30d: "SELECT search_term_view.search_term, search_term_view.status, campaign.id, ad_group.id, metrics.clicks, metrics.impressions, " +
     "metrics.cost_micros, metrics.conversions FROM search_term_view WHERE segments.date DURING LAST_30_DAYS ORDER BY metrics.cost_micros DESC LIMIT 500",
+  // when, on what and where the money went (for the Bids & Budget and the Locations & Timing desks)
+  by_hour_30d: "SELECT campaign.id, segments.hour, metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions FROM campaign " +
+    "WHERE segments.date DURING LAST_30_DAYS AND campaign.status = 'ENABLED'",
+  by_weekday_30d: "SELECT campaign.id, segments.day_of_week, metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions FROM campaign " +
+    "WHERE segments.date DURING LAST_30_DAYS AND campaign.status = 'ENABLED'",
+  by_device_30d: "SELECT campaign.id, segments.device, metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions FROM campaign " +
+    "WHERE segments.date DURING LAST_30_DAYS AND campaign.status = 'ENABLED'",
+  by_city_30d: "SELECT campaign.id, segments.geo_target_city, metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions " +
+    "FROM user_location_view WHERE segments.date DURING LAST_30_DAYS ORDER BY metrics.cost_micros DESC LIMIT 60",
 };
 
 // Flattens a GAQL row into {resource_field: value} with short names (keeps the snapshot small and readable for the agents).
@@ -226,6 +279,24 @@ export async function googleSnapshot(google: GoogleAds, cid: string, login?: str
     try { out[k] = (await g.search(cid, q)).map((r) => flatRow(r)); }
     catch (e) { out[k] = { error: (e as Error).message.slice(0, 300) }; }
   }
+  // Names for the places (Google returns only ids): targeted locations and the cities people were in.
+  try {
+    const ids = new Set<string>();
+    const idOf = (v: unknown) => String(v ?? "").match(/^geoTargetConstants\/(\d+)$/)?.[1];
+    for (const r of [...(Array.isArray(out.locations) ? out.locations : []), ...(Array.isArray(out.by_city_30d) ? out.by_city_30d : [])] as any[]) {
+      const id = idOf(r["campaignCriterion.location.geoTargetConstant"]) ?? idOf(r["segments.geoTargetCity"]);
+      if (id) ids.add(id);
+    }
+    if (ids.size) {
+      const rows = await g.search(cid, "SELECT geo_target_constant.id, geo_target_constant.canonical_name FROM geo_target_constant " +
+        `WHERE geo_target_constant.id IN (${[...ids].slice(0, 150).join(", ")})`);
+      const names = new Map(rows.map((r: any) => [String(r.geoTargetConstant?.id), String(r.geoTargetConstant?.canonicalName ?? "")]));
+      for (const k of ["locations", "by_city_30d"]) for (const r of (Array.isArray(out[k]) ? out[k] : []) as any[]) {
+        const id = idOf(r["campaignCriterion.location.geoTargetConstant"]) ?? idOf(r["segments.geoTargetCity"]);
+        if (id && names.get(id)) r.place = names.get(id);
+      }
+    }
+  } catch { /* names are a convenience; the ids are still there */ }
   // Keyword Planner ideas for the agents (India, English), seeded with the running keywords. The agents never call Google.
   try {
     const kws = Array.isArray(out.keywords) ? out.keywords as any[] : [];

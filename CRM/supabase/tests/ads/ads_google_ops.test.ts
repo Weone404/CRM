@@ -118,3 +118,93 @@ Deno.test("agents context: compact tables, enabled-only links, costliest first, 
   eq(ctx.snapshot.keywords.columns[0], "adGroupCriterion.resourceName", "kept: needed for changes");
   eq(ctx.snapshot.campaigns, { error: "x" }, "errors untouched");
 });
+
+// ---- bids, budget and conversion reporting (099) ----
+import { conversionRow, convertOutcome, googleSnapshot, micros } from "../../functions/_shared/ads_google_ops.ts";
+
+Deno.test("cpc_cap updates only the Maximize Clicks ceiling, in exact micros", () => {
+  const b = buildOps(CID, "cpc_cap", { campaign_id: "24283129095", max_cpc: 18.5 });
+  eq(b.ops, [{ campaignOperation: { update: { resourceName: `customers/${CID}/campaigns/24283129095`, targetSpend: { cpcBidCeilingMicros: "18500000" } },
+    updateMask: "targetSpend.cpcBidCeilingMicros" } }], "op");
+  eq(b.checks, [{ mode: "field", field: "target_spend.cpc_bid_ceiling_micros", value: "18500000" }], "check");
+});
+
+Deno.test("cpc_cap and budget refuse zero, negative, text and missing amounts", () => {
+  for (const v of [0, -5, "abc", null, undefined, NaN, Infinity]) {
+    let threw = false;
+    try { buildOps(CID, "cpc_cap", { campaign_id: "1", max_cpc: v }); } catch { threw = true }
+    if (!threw) throw new Error(`cpc_cap accepted ${v}`);
+    threw = false;
+    try { buildOps(CID, "budget", { budget_resource: `customers/${CID}/campaignBudgets/9`, daily_budget: v }); } catch { threw = true }
+    if (!threw) throw new Error(`budget accepted ${v}`);
+  }
+});
+
+Deno.test("micros are exact for rupee amounts with paise (no floating point drift)", () => {
+  eq([micros(200, "x"), micros(0.1 + 0.2, "x"), micros(19.99, "x"), micros("150", "x")], ["200000000", "300000", "19990000", "150000000"], "micros");
+});
+
+Deno.test("budget needs this account's own budget resource", () => {
+  const b = buildOps(CID, "budget", { budget_resource: `customers/${CID}/campaignBudgets/15901873674`, daily_budget: 180 });
+  eq(b.ops, [{ campaignBudgetOperation: { update: { resourceName: `customers/${CID}/campaignBudgets/15901873674`, amountMicros: "180000000" }, updateMask: "amountMicros" } }], "op");
+  for (const rn of [undefined, "", "customers/999/campaignBudgets/1", `customers/${CID}/campaigns/1`, `customers/${CID}/campaignBudgets/1; DROP`]) {
+    let threw = false;
+    try { buildOps(CID, "budget", { budget_resource: rn, daily_budget: 100 }); } catch { threw = true }
+    if (!threw) throw new Error(`budget accepted resource ${rn}`);
+  }
+});
+
+Deno.test("a budget change is verified by reading the budget back", async () => {
+  const rn = `customers/${CID}/campaignBudgets/15901873674`;
+  const ok = fake({ names: [rn], rows: () => [{ campaignBudget: { resourceName: rn, amountMicros: "180000000" } }] });
+  eq((await executeGoogleOp(ok.g, { id: "1", kind: "budget", payload: { budget_resource: rn, daily_budget: 180 }, account_external_id: CID })).status, "verified", "verified");
+  const stale = fake({ names: [rn], rows: () => [{ campaignBudget: { resourceName: rn, amountMicros: "200000000" } }] });
+  eq((await executeGoogleOp(stale.g, { id: "1", kind: "budget", payload: { budget_resource: rn, daily_budget: 180 }, account_external_id: CID })).status, "failed", "old value read back");
+});
+
+Deno.test("a conversion row carries exactly one click id, the consent flag and a dedupe id", () => {
+  const it = { id: 1, event: "enquiry", at: "2026-11-13 14:49:49+00:00", order_id: "L1:enquiry", gclid: "Cj0abc", gbraid: "0AAA" };
+  eq(conversionRow(CID, "777", it), { conversionAction: `customers/${CID}/conversionActions/777`, conversionDateTime: "2026-11-13 14:49:49+00:00",
+    orderId: "L1:enquiry", consent: { adUserData: "GRANTED" }, gclid: "Cj0abc" }, "gclid wins");
+  eq(conversionRow(CID, "777", { ...it, gclid: null })?.gbraid, "0AAA", "gbraid when there is no gclid");
+  eq(conversionRow(CID, "777", { ...it, gclid: null, gbraid: null, wbraid: "W1" })?.wbraid, "W1", "wbraid last");
+});
+
+Deno.test("no conversion row without a click id, a conversion action or a well-formed time", () => {
+  const it = { id: 1, event: "enquiry", at: "2026-11-13 14:49:49+00:00", order_id: "x", gclid: "G" };
+  eq([conversionRow(CID, "777", { ...it, gclid: "" }), conversionRow(CID, undefined, it), conversionRow(CID, "abc", it),
+    conversionRow(CID, "777", { ...it, at: "13 Nov 2026" }), conversionRow(CID, "777", { ...it, at: "" })], [null, null, null, null, null], "refused");
+});
+
+Deno.test("Google's answer decides: sent, try again later, or final failure", () => {
+  eq(convertOutcome(null), { status: "sent" }, "accepted");
+  eq(convertOutcome("CLICK_CONVERSION_ALREADY_EXISTS: dup").status, "sent", "a repeat is not an error");
+  eq(convertOutcome("ORDER_ID_ALREADY_IN_USE: dup").status, "sent", "same order id");
+  eq(convertOutcome("TOO_RECENT_CONVERSION_ACTION: wait 6 hours").status, "retry", "new conversion action");
+  eq(convertOutcome("TOO_RECENT_EVENT: click too recent").status, "retry", "fresh click");
+  eq(convertOutcome("EXPIRED_EVENT: older than the lookback window").status, "failed", "too old");
+  eq(convertOutcome("UNPARSEABLE_GCLID: bad").status, "failed", "junk click id");
+  eq(convertOutcome("ERROR: something new").status, "failed", "unknown errors are not retried forever");
+});
+
+Deno.test("uploadClickConversion: accepted, rejected with Google's code, and a network failure is thrown", async () => {
+  const mk = (resp: () => Response) => new GoogleAds({ clientId: "c", clientSecret: "s", refreshToken: "r", version: "v26" },
+    (async (url: string) => url.includes("oauth2") ? new Response(JSON.stringify({ access_token: "t" })) : resp()) as any);
+  eq(await mk(() => new Response(JSON.stringify({ results: [{ gclid: "G" }] }))).uploadClickConversion(CID, {}), null, "accepted");
+  const err = await mk(() => new Response(JSON.stringify({ partialFailureError: { message: "x", details: [{ errors: [{ errorCode: { conversionUploadError: "EXPIRED_EVENT" },
+    message: "The click is too old." }] }] }, results: [{}] }))).uploadClickConversion(CID, {});
+  eq(err, "EXPIRED_EVENT: The click is too old.", "code and message");
+  let threw = false;
+  try { await mk(() => { throw new TypeError("reset"); }).uploadClickConversion(CID, {}); } catch { threw = true }
+  eq(threw, true, "network error");
+});
+
+Deno.test("snapshot: places get names, and one failing query does not lose the others", async () => {
+  const { g } = fake({ rows: (q) => q.includes("FROM geo_target_constant") ? [{ geoTargetConstant: { id: "1007751", canonicalName: "New Delhi,Delhi,India" } }]
+    : q.includes("FROM user_location_view") ? [{ campaign: { id: "1" }, segments: { geoTargetCity: "geoTargetConstants/1007751" }, metrics: { clicks: "5", costMicros: "9000000" } }]
+    : q.includes("campaign_criterion.type = 'LOCATION'") ? [{ campaign: { id: "1" }, campaignCriterion: { criterionId: "1007751", location: { geoTargetConstant: "geoTargetConstants/1007751" } } }]
+    : [] });
+  const s = await googleSnapshot(g, CID) as any;
+  eq([s.by_city_30d[0].place, s.locations[0].place], ["New Delhi,Delhi,India", "New Delhi,Delhi,India"], "names");
+  eq(["by_hour_30d", "by_weekday_30d", "by_device_30d", "by_city_30d"].every((k) => Array.isArray(s[k])), true, "new views are present");
+});

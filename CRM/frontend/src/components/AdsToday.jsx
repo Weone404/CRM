@@ -10,7 +10,7 @@ import { money, int, todayIn, periodRange } from '../utils/ads';
 import { setParams } from '../utils/route';
 import { showToast } from '../utils/toast';
 import { rpc, run, useLoad, Btn } from './adsKit';
-import { AgentsBadge, Report, Funds, Suggestion, Tell, Activity, Bar, Playbook } from './AdsAutopilot';
+import { AgentsBadge, Report, Funds, Suggestion, Tell, Activity, Bar, Playbook, Team } from './AdsAutopilot';
 
 const ago = (t) => {
   if (!t) return 'never';
@@ -82,8 +82,9 @@ export default function AdsToday({ ctx, access, go, parts }) {
     `${a.platform === 'google' ? 'Google Ads' : 'Meta'} is not connected (${String(a.status).replace(/_/g, ' ')}).`,
     a.last_error || 'Sign in again: ADS › More › Settings.', access.is_admin && <Btn ghost onClick={() => go('settings')}>Reconnect</Btn>)));
   if (ap.funds?.low) needs.push(<Funds key="funds" d={ap} reload={loadAp} />);
-  if (st?.agents && !st.agents.online) needs.push(row('agents', '#FF9500', 'The AI agents are offline.',
-    st.agents.last_seen ? `Last seen ${ago(st.agents.last_seen)}. Wake the Mac Mini; the helper starts by itself.` : 'Set up the helper on the Mac Mini (tools/ads-agents/install.sh).', null));
+  if (st?.agents && !st.agents.online && !st.agents.healthy) needs.push(row('agents', '#FF9500', 'The AI agents have not checked in for over 90 minutes.',
+    st.agents.last_seen ? `Last seen ${ago(st.agents.last_seen)}. They work from the cloud once an hour (GitHub > Actions) and from the Mac whenever it is on.`
+      : 'Add the two secrets for the cloud runner in GitHub, or set up the helper on the Mac (tools/ads-agents/install.sh).', null));
   (ap.suggestions || []).filter((s) => s.status === 'open').forEach((s) => needs.push(<Suggestion key={`s${s.id}`} s={s} reload={reloadAll} />));
   pendingOps.forEach((op) => needs.push(row(`op${op.id}`, '#FF9500', op.summary || op.kind, 'An agent change waiting for approval (Autopilot is on "Ask me").',
     ap.can_approve && <div className="flex gap-2">
@@ -182,6 +183,7 @@ export default function AdsToday({ ctx, access, go, parts }) {
         <Activity d={ap} limit={10} title="What changed" />
         <Tell d={ap} reload={loadAp} />
       </div>
+      {st?.team?.length > 0 && <Team items={st.team} />}
       {st?.playbook?.length > 0 && <Playbook items={st.playbook} />}
 
       {/* phones: the agents are one tap away */}

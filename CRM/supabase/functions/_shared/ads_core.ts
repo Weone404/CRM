@@ -170,6 +170,15 @@ export class GoogleAds {
   async mutate(customerId: string, mutateOperations: unknown[], validateOnly = false): Promise<any> {
     return this.call(`customers/${customerId}/googleAds:mutate`, { mutateOperations, partialFailure: false, validateOnly }, !validateOnly);
   }
+  // The CRM tells Google that an ad click became an enquiry (offline click conversion). One row per call, so the answer is unambiguous.
+  // Returns null when Google took it, otherwise Google's error code and message for that row.
+  async uploadClickConversion(customerId: string, conversion: unknown): Promise<string | null> {
+    const b = await this.call(`customers/${customerId}:uploadClickConversions`, { conversions: [conversion], partialFailure: true, validateOnly: false }, true);
+    const pf = b.partialFailureError;
+    if (!pf) return null;
+    const e = (pf.details ?? []).flatMap((d: any) => d.errors ?? [])[0];
+    return `${e ? Object.values(e.errorCode ?? {})[0] ?? "ERROR" : "ERROR"}: ${e?.message ?? pf.message ?? "not accepted"}`.slice(0, 400);
+  }
   // Keyword Planner ideas (needs Basic access).
   async keywordIdeas(customerId: string, seeds: string[], geoIds: string[], languageId = "1000"): Promise<any[]> {
     const b = await this.call(`customers/${customerId}:generateKeywordIdeas`, {

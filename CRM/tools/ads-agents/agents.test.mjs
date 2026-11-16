@@ -64,3 +64,60 @@ test("the role's model and tools reach Claude", async () => {
   const r = await run("args", "researcher");
   assert.match(r.text, /--model sonnet/); assert.match(r.text, /--tools WebSearch,WebFetch/);
 });
+
+// ---- one-pass mode (cloud runner, no Mac) ----
+import { createServer } from "node:http";
+import { spawn as spawnProc } from "node:child_process";
+import { fileURLToPath as toPath } from "node:url";
+const HELPER = toPath(new URL("./agents.mjs", import.meta.url));
+// A stand-in CRM: hands out the given steps one by one, then says "nothing waiting"; records what the helper sends back.
+async function pass(steps, { mode = "ramble", status = 200, token = "tok-123" } = {}) {
+  const seen = [];
+  const srv = createServer((req, res) => {
+    let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => {
+      const body = JSON.parse(b || "{}");
+      seen.push({ ...body, token: req.headers["x-ads-agents-token"] });
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(status !== 200 ? { detail: "no" } : body.action === "next" && steps.length ? { run: steps.shift(), context: {} } : {}));
+    });
+  });
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  const env = { ...process.env, ADS_AGENTS_ONCE: "1", ADS_AGENTS_TOKEN: token, ADS_AGENTS_URL: `http://127.0.0.1:${srv.address().port}`, FAKE_MODE: mode, HOME: dir };
+  const t0 = Date.now();
+  const code = await new Promise((r) => spawnProc(process.execPath, [HELPER], { env, stdio: "ignore" }).on("exit", r));
+  srv.close();
+  return { code, seen, ms: Date.now() - t0 };
+}
+const stepOf = (id, role) => ({ id, role, job: "desk_search_terms", attempt: 1, input: { desk: "search_terms" } });
+
+test("one pass: works through every waiting step, then exits by itself (no Mac, no loop)", async () => {
+  const r = await pass([stepOf(1, "builder"), stepOf(2, "reviewer")]);
+  assert.equal(r.code, 0);
+  assert.deepEqual(r.seen.map((s) => s.action), ["next", "finish", "next", "finish", "next"]);
+  assert.equal(r.seen[3].output.verdict, "approve");
+  assert.ok(r.seen.every((s) => s.token === "tok-123"), "the token comes from the environment, not from a file");
+});
+test("one pass: nothing waiting -> exits at once without calling Claude", async () => {
+  const r = await pass([]);
+  assert.equal(r.code, 0);
+  assert.deepEqual(r.seen.map((s) => s.action), ["next"]);
+});
+test("one pass: Claude's usage limit -> the step is handed back and the pass ends (no 15-minute wait in the cloud)", async () => {
+  const r = await pass([stepOf(1, "builder"), stepOf(2, "reviewer")], { mode: "limit" });
+  assert.equal(r.code, 0);
+  assert.deepEqual(r.seen.map((s) => s.action), ["next", "release"]);
+  assert.ok(r.ms < 20000);
+});
+test("one pass: the CRM rejects the token -> the run fails visibly (exit code 1)", async () => {
+  const r = await pass([stepOf(1, "builder")], { status: 401 });
+  assert.equal(r.code, 1);
+});
+test("one pass: the CRM is down -> exits cleanly; the next pass tries again", async () => {
+  const r = await pass([stepOf(1, "builder")], { status: 500 });
+  assert.equal(r.code, 0);
+});
+test("specialists: the prompts know the desk, the new operations and the 24-hour rule", () => {
+  assert.match(PROMPTS.builder, /cpc_cap/); assert.match(PROMPTS.builder, /"selected": true/);
+  assert.match(PROMPTS.builder, /INPUT\.task\.desk/); assert.match(PROMPTS.researcher, /INPUT\.desk/);
+  assert.match(PROMPTS.reviewer, /after 24 hours/);
+});

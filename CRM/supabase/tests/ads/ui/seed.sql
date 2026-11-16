@@ -58,3 +58,14 @@ INSERT INTO public.ads_autopilot_suggestions (account_id, kind, title, reason, p
 INSERT INTO public.ads_google_snapshot (account_id, kind, data) VALUES ('31000000-0000-0000-0000-000000000001', 'search_terms_365d', '[
   {"searchTermView.searchTerm": "ground classes for cpl", "metrics.costMicros": "400000000", "metrics.conversions": 8, "metrics.clicks": "20"},
   {"searchTermView.searchTerm": "cabin crew course", "metrics.costMicros": "900000000", "metrics.conversions": 0, "metrics.clicks": "30"}]');
+-- 099: the team. A suggestion the Reviewer approved (applied by itself after 24 hours) and a desk that has already worked.
+UPDATE public.ads_config SET value = (now() - interval '1 day')::text WHERE key = 'suggest_auto_since';
+WITH b AS (INSERT INTO public.ads_agent_runs (account_id, role, job, status, summary, finished_at)
+             VALUES ('31000000-0000-0000-0000-000000000001', 'builder', 'desk_search_terms', 'done', 'Proposed 0 change(s), 1 suggestion(s)', now()) RETURNING id),
+     r AS (INSERT INTO public.ads_agent_runs (account_id, role, job, status, parent_id, summary, finished_at)
+             SELECT '31000000-0000-0000-0000-000000000001', 'reviewer', 'desk_search_terms', 'done', id, 'Approved 0 change(s) and 1 suggestion(s)', now() FROM b RETURNING parent_id)
+INSERT INTO public.ads_autopilot_suggestions (account_id, kind, title, reason, proposal, agent_run_id)
+SELECT '31000000-0000-0000-0000-000000000001', 'negatives', 'Block air hostess searches', 'They cost money and never enquire.',
+  '{"ops": [{"kind": "negative_add", "option": "block", "summary": "Block air hostess", "payload": {"level": "campaign", "campaign_id": "111", "keywords": [{"text": "air hostess", "match": "PHRASE"}]}}],
+    "options": [{"id": "block", "label": "Block them", "selected": true}, {"id": "keep", "label": "Keep them", "selected": false}]}', parent_id FROM r;
+

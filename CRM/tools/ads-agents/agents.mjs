@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-// ADS agents helper (Google Ads only) — runs on the owner's Mac Mini with that Mac's Claude Code login (Max plan, no API key).
+// ADS agents helper (Google Ads only). Two ways to run it, and both can run side by side (the CRM hands each step to one of them only):
+//  - on the owner's Mac, always on, with that Mac's Claude Code login (launchd, see install.sh);
+//  - in the cloud on a schedule, with no Mac at all (.github/workflows/ads-agents.yml): ADS_AGENTS_ONCE=1 works through
+//    whatever is waiting and exits. The token then comes from ADS_AGENTS_TOKEN and Claude signs in with CLAUDE_CODE_OAUTH_TOKEN.
 // Separate from the Amazon helper (tools/claude-bridge): own folder (~/.ads-agents), own token, own Edge Function (ads-agents).
 //
 // Loop: ask the CRM for the next step -> run `claude -p` in the role (researcher / builder / reviewer) -> send the JSON back.
@@ -25,6 +28,8 @@ const URL_ = process.env.ADS_AGENTS_URL || CFG.url || "https://syytqcadmtgowckdn
 const CLAUDE = process.env.CLAUDE_BIN || (existsSync(join(CONF, "claude-path")) ? readFileSync(join(CONF, "claude-path"), "utf8").trim() : "claude");
 const MODELS = { researcher: "sonnet", builder: "opus", reviewer: "opus", learner: "opus", ...(CFG.models || {}) };
 const TIMEOUT = { researcher: 15 * 60e3, builder: 8 * 60e3, reviewer: 6 * 60e3, learner: 8 * 60e3 };
+const ONCE = process.env.ADS_AGENTS_ONCE === "1";
+let STOP = false;                  // one-pass mode: a usage limit ends the pass instead of waiting
 const IDLE_MS = 60e3;              // ask for work once a minute when idle
 const LIMIT_PAUSE_MS = 15 * 60e3;  // after a Claude usage limit
 const WORKDIR = mkdtempSync(join(tmpdir(), "ads-agents-"));
@@ -32,7 +37,7 @@ const log = (...a) => console.log(new Date().toISOString(), ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function call(body) {
-  TOKEN ??= readFileSync(join(CONF, "token"), "utf8").trim();
+  TOKEN ??= (process.env.ADS_AGENTS_TOKEN || readFileSync(join(CONF, "token"), "utf8")).trim();
   const res = await fetch(URL_, { method: "POST", headers: { "Content-Type": "application/json", "x-ads-agents-token": TOKEN },
     body: JSON.stringify(body), signal: AbortSignal.timeout(90000) });
   const out = await res.json().catch(() => ({}));
@@ -114,9 +119,13 @@ async function step() {
   log(`step ${run.id}: ${run.role} (${run.job}, try ${run.attempt})`);
   const r = await runClaude(run.role, buildPrompt(run.role, run, context));
   if (!r.ok) {
-    if (r.limit) { await call({ action: "release", id: run.id, reason: r.note }); log(r.note, "- pausing"); await sleep(LIMIT_PAUSE_MS); return true; }
+    if (r.limit) {
+      await call({ action: "release", id: run.id, reason: r.note });
+      if (ONCE) { log(r.note, "- stopping this pass; the step waits for the next one"); STOP = true; return true; }
+      log(r.note, "- pausing"); await sleep(LIMIT_PAUSE_MS); return true;
+    }
     await call({ action: "finish", id: run.id, ok: false, error: r.note });
-    log(`step ${run.id} failed: ${r.note}`);
+    log(`step ${run.id} failed${ONCE ? " (the reason is in the CRM)" : `: ${r.note}`}`);   // cloud logs are public: no detail there
     return true;
   }
   const out = parseJson(r.text);
@@ -125,7 +134,7 @@ async function step() {
     return true;
   }
   const res = await call({ action: "finish", id: run.id, ok: true, output: out, summary: SUMMARY[run.role]?.(out) });
-  log(`step ${run.id} done`, JSON.stringify(res).slice(0, 200));
+  log(`step ${run.id} done`, ONCE ? "" : JSON.stringify(res).slice(0, 200));
   return true;
 }
 
@@ -153,7 +162,25 @@ export async function selfUpdate() {
   } catch { return false; }
 }
 
+// One pass (cloud runner): work until nothing is waiting, the time budget is used, or Claude's usage limit is reached.
+// Exit code 1 only when the CRM rejects the token, so the failed run is visible; anything else is retried by the next pass.
+export async function once() {
+  const until = Date.now() + (Number(process.env.ADS_AGENTS_MAX_MINUTES) || 45) * 60e3;
+  log(`ADS agents helper: one pass (${URL_}); models ${JSON.stringify(MODELS)}`);
+  let n = 0;
+  while (!STOP && Date.now() < until) {
+    try { if (!(await step())) break; n++; }
+    catch (e) {
+      if (e.code === 401) { log("The CRM rejected the token. Make a new one in CRM > ADS > Autopilot and save it as the ADS_AGENTS_TOKEN secret."); process.exitCode = 1; }
+      else log("error:", e.message, "- the next pass will try again");
+      break;
+    }
+  }
+  log(`pass finished: ${n} step(s)`);
+}
+
 async function main() {
+  if (ONCE) return once();
   if (await selfUpdate()) process.exit(0);
   setInterval(async () => { if (await selfUpdate()) process.exit(0); }, 6 * 3600e3);
   log(`ADS agents helper started (${URL_}); models ${JSON.stringify(MODELS)}`);

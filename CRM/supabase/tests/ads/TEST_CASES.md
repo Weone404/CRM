@@ -162,3 +162,38 @@ UTM campaign name that Google ad links here do not carry. They are now matched b
 | L37, L38 | System | 3 valid ad leads under target and budget-limited; later 14 days with no lead | +15%; -20% | 80_ |
 | R01 | Developer | Roll 098 back and apply it again | Old definitions return; re-applies cleanly | run.sh |
 
+## 10. The specialist team (099)
+
+The owner asked for a full team with no human work except adding funds, chose "wait 24 hours, then apply" for bigger
+changes, allowed bids and budget inside the spend limits, and has no Mac that stays on.
+
+| ID | Who | Situation | Expected | Where |
+|---|---|---|---|---|
+| TL01-TL03 | System | Nothing spent / new spend / a desk already working | Only desks that need no new data start; the first specialist starts with its own brief; one desk at a time | 90_ |
+| TL04-TL07 | System | A desk just finished; 3 runs already today; nonsense daily cap | Next one waits 2 hours; at most 3 a day; falls back to 3 | 90_ |
+| TL08 | Owner | Types an instruction when the daily cap is used up | It still starts | 90_ |
+| TL09-TL13 | System | Due by the clock but nothing new spent; desk switched off; team off; emergency stop | Does not run | 90_ |
+| TL14-TL17 | Viewer / Outsider | Opens the team list; reads the briefs directly | 14 members with last / next work; refused | 90_, UI103-UI106 |
+| TL18, TL19 | System | Cloud runner checked in 40 minutes ago / 3 hours ago | "On schedule" (no false alarm) / reported as not working | 90_ |
+| AU01-AU06 | Novice | Never answers a suggestion | Applied 24 hours after it was written, the recommended option only, once; "wait" recommendation changes nothing | 90_, UI100-UI102 |
+| AU07 | Worst case | No recommended option, Reviewer-rejected proposal, never reviewed, review unfinished, nothing to apply, malformed | Never applied by itself | 90_ |
+| AU08-AU12 | Owner | Emergency stop, "Ask me" mode, rule off, 0 hours, nonsense setting | Nothing by itself, no error | 90_ |
+| AU13, AU14 | Owner | Old suggestions when the rule starts; says no in time | A full 24 hours from the start; never applied | 90_ |
+| AU15, AU16 | Worst case | A change that would block "pilot training"; an operation type that does not exist | Stopped by the safety checks; left for the owner, not retried | 90_ |
+| AU18 | Attacker | Triggers the rule from the browser | Permission denied | 90_ |
+| BB01-BB09 | Agent | Max CPC: fair step, doubling, junk values, wrong bidding strategy, account picture missing, unknown / Meta campaign, twice a day | Allowed only inside 3-150, 30% a step, once a day, Maximize Clicks only | 90_, Deno |
+| BB10-BB15 | Agent | Budget raise inside / above the daily limit, all campaigns together, monthly limit, lowering | The owner's limits always win; lowering always allowed | 90_ |
+| BB16-BB20 | Agent | 40% step, junk amounts, shared budget, changed today by the Spend Guard or the owner, twice a day | Refused | 90_ |
+| BB21-BB23 | System | Budget change sent / confirmed / refused by Google | Executor gets the budget's own resource; CRM number follows only a confirmed change | 90_, Deno |
+| BB24-BB27 | Agent | "Ask me" mode; asks for 5x the budget; proposal above the limits | Waits for approval; stored as blocked; sent back to the Builder | 90_ |
+| BB28 | Agent | Tries to switch off the CRM's own conversion action | Refused | 90_ |
+| CV01, CV02 | Privacy | Enquiry under 30 minutes old; person said no, or did not answer, to ad data sharing | Not reported to Google | 90_ |
+| CV03 | Privacy | What leaves the CRM | Click id, time, dedupe id; never name or phone | 90_, Deno |
+| CV04-CV10 | System | Conversion actions; "too recent"; sent; qualified; admission; 12 tries; final refusal | Created once; retried every 3 hours; never sent twice; stops with Google's reason | 90_, Deno |
+| CV11, CV12 | Worst case | Permission withdrawn later, wrong number, spam, 86-day-old click, no click id, Meta click, lead deleted while queued | Not reported | 90_ |
+| CV13-CV19 | System / Attacker | Emergency stop, reporting off, damaged setting, browser calls | Nothing sent; reporter sleeps when idle; permission denied | 90_ |
+| TR01-TR05 | System | 180 clicks and no enquiry in a week; failed reports; all well | One alarm a day; silent when well; server only | 90_ |
+| helper | Cloud | One pass: work waiting, nothing waiting, Claude usage limit, token rejected, CRM down | Works through it and exits; exits at once; hands the step back; fails visibly; exits cleanly | agents.test.mjs |
+| R02 | Developer | Roll 099 back and apply it again | Old scheduler and gate return; re-applies cleanly | run.sh |
+| not automated | - | The cloud runner's first real run on GitHub, and Google accepting a real uploaded conversion | Checked live after the owner adds the two secrets / after the first consenting enquiry | - |
+

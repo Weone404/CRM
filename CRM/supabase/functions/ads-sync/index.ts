@@ -7,12 +7,13 @@
 //   gcheck   Admin / agents. {ops: [{kind, payload}]} -> Google validate-only for each (nothing changes).
 //   ideas    Admin / agents. {seeds: [...], geos: ["2356"]} -> Keyword Planner ideas (Basic access).
 //   execute  Approver. Sends approved changes, reads each campaign back, records verified / failed / outcome_unknown.
+//   convert  Approver / cron. Tells Google which ad clicks became CRM enquiries (only for people who allowed ad data sharing).
 // Every job takes its own lock (svc_ads_run_begin), so overlapping runs skip instead of doubling up.
 // Keys come from Vault through the service role and never leave this function (responses and logs are scrubbed).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { asUser, cors, cronOk, json, HttpError, rpc } from "../_shared/ads_deno.ts";
 import { AdsError, GoogleAds, MetaAds, dateRange, discover, executeOne, scrubSecrets, todayIn, verify, type Platforms, type WorkItem } from "../_shared/ads_core.ts";
-import { buildOps, executeGoogleOp, googleSnapshot, type GoogleOp } from "../_shared/ads_google_ops.ts";
+import { buildOps, conversionRow, convertOutcome, executeGoogleOp, googleSnapshot, resultNames, type ConvItem, type GoogleOp } from "../_shared/ads_google_ops.ts";
 
 const DEADLINE_MS = 120_000;
 
@@ -160,6 +161,43 @@ async function execute(s: Record<string, string>, t0: number) {
   });
 }
 
+// The CRM reports its own enquiries to Google, so Google learns which clicks work even though the website has no Google tag.
+async function convert(s: Record<string, string>, t0: number) {
+  const { p } = platforms(s);
+  return runJob("convert", s, async () => {
+    if (s.EXECUTION_PAUSED === "true") return { items: 0, detail: "Emergency stop is on; nothing sent." };
+    if (!p.google) return { items: 0, status: "error", detail: "Google Ads keys are not set in ADS > Settings" };
+    const w = await rpc("svc_ads_conversions_work") as { account: { external_id: string; login_customer_id?: string | null } | null;
+      actions: Record<string, string>; missing: { event: string; name: string; category: string; primary: boolean }[]; items: ConvItem[] };
+    if (!w?.account) return { items: 0, detail: "No Google Ads account" };
+    const g = p.google.withLogin(w.account.login_customer_id), cid = w.account.external_id;
+    const actions: Record<string, string> = { ...(w.actions ?? {}) };
+    for (const m of w.missing ?? []) {                    // the conversion actions the CRM reports to (made once)
+      const found = await g.search(cid, `SELECT conversion_action.id FROM conversion_action WHERE conversion_action.name = '${m.name.replace(/'/g, "")}' ` +
+        "AND conversion_action.status != 'REMOVED'");
+      let id = found[0]?.conversionAction?.id ? String(found[0].conversionAction.id) : "";
+      if (!id) {
+        const r = await g.mutate(cid, [{ conversionActionOperation: { create: { name: m.name, type: "UPLOAD_CLICKS", category: m.category, status: "ENABLED",
+          countingType: "ONE_PER_CLICK", primaryForGoal: m.primary, clickThroughLookbackWindowDays: 90 } } }]);
+        id = resultNames(r)[0]?.split("/").pop() ?? "";
+      }
+      if (/^\d+$/.test(id)) { await rpc("svc_ads_conversion_action_save", { p_event: m.event, p_id: id }); actions[m.event] = id; }
+    }
+    let sent = 0, later = 0, failed = 0;
+    for (const it of w.items ?? []) {
+      if (Date.now() - t0 > DEADLINE_MS) break;
+      const row = conversionRow(cid, actions[it.event], it);
+      if (!row) continue;
+      let out: { status: "sent" | "retry" | "failed"; error?: string };
+      try { out = convertOutcome(await g.uploadClickConversion(cid, row)); }
+      catch (e) { out = { status: "retry", error: (e as Error).message }; }
+      await rpc("svc_ads_conversion_finish", { p_id: it.id, p_status: out.status, p_error: out.error ? scrubSecrets(out.error, s).slice(0, 400) : null });
+      if (out.status === "sent") sent++; else if (out.status === "retry") later++; else failed++;
+    }
+    return { items: sent, detail: `${sent} reported to Google, ${later} to try again later, ${failed} not accepted`, status: failed ? "error" : "ok" };
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors(req) });
   if (req.method !== "POST") return json(req, 405, { detail: "POST only" });
@@ -167,13 +205,13 @@ Deno.serve(async (req) => {
   try {
     let body: { jobs?: string[]; ops?: { kind: string; payload: unknown }[]; seeds?: string[]; geos?: string[] } = {};
     try { body = await req.json(); } catch { /* empty body */ }
-    const jobs = (body.jobs ?? ["sync"]).filter((j) => ["test", "discover", "sync", "execute", "gcheck", "ideas"].includes(j));
+    const jobs = (body.jobs ?? ["sync"]).filter((j) => ["test", "discover", "sync", "execute", "gcheck", "ideas", "convert"].includes(j));
     if (!jobs.length) return json(req, 422, { detail: "jobs must include test, discover, sync or execute" });
     if (!(await cronOk(req))) {
       const access = await asUser(req, "api_ads_access") as { can_view: boolean; can_approve: boolean; is_admin: boolean };
       if (!access?.can_view) throw new HttpError(403, "You do not have access to the ADS section");
       if ((jobs.includes("test") || jobs.includes("discover") || jobs.includes("gcheck") || jobs.includes("ideas")) && !access.is_admin) throw new HttpError(403, "Only Admin can test connections or find accounts");
-      if (jobs.includes("execute") && !access.can_approve) throw new HttpError(403, "Only approvers can run changes");
+      if ((jobs.includes("execute") || jobs.includes("convert")) && !access.can_approve) throw new HttpError(403, "Only approvers can run changes");
     }
     const secrets = (await rpc("svc_ads_secrets")) as Record<string, string>;
     const results: Record<string, unknown> = {};
@@ -207,6 +245,7 @@ Deno.serve(async (req) => {
     }
     if (jobs.includes("sync")) results.sync = await sync(secrets, t0);
     if (jobs.includes("execute")) results.execute = await execute(secrets, t0);
+    if (jobs.includes("convert")) results.convert = await convert(secrets, t0);
     return json(req, 200, { results });
   } catch (e) {
     if (e instanceof HttpError) return json(req, e.status, { detail: e.message });

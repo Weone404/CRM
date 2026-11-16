@@ -22,7 +22,7 @@ const RED = ['#C4261D', 'rgba(255,59,48,0.12)'];
 const AMBER = ['#8A5A00', 'rgba(255,149,0,0.14)'];
 const BLUE = ['#0062CC', 'rgba(0,122,255,0.10)'];
 const GREY = ['#636366', 'rgba(118,118,128,0.14)'];
-const ROLE = { researcher: 'Researcher', builder: 'Builder', reviewer: 'Reviewer', allocator: 'Budget', learner: 'Learner', supervisor: 'Supervisor' };
+const ROLE = { researcher: 'Researcher', builder: 'Builder', reviewer: 'Reviewer', allocator: 'Budget', learner: 'Learner', supervisor: 'Supervisor', team_lead: 'Team Lead', tracking: 'Tracking' };
 const RUN_TONE = { queued: GREY, running: BLUE, done: GREEN, failed: RED, rejected: AMBER, escalated: RED };
 const OP_TONE = { pending: AMBER, blocked: RED, approved: BLUE, executing: BLUE, verified: GREEN, failed: RED, outcome_unknown: AMBER, rejected: GREY, stale: GREY };
 const OP_LABEL = { pending: 'Waiting', blocked: 'Blocked by checks', approved: 'Approved', executing: 'Sending', verified: 'Live (checked)',
@@ -138,14 +138,17 @@ const WORK = { researcher: 'researching', builder: 'writing changes', reviewer: 
 export function AgentsBadge({ s }) {
   if (!s?.agents) return null;
   const a = s.agents;
-  const tone = a.online ? GREEN : GREY;
+  // online = a helper is connected right now (the Mac); on schedule = the hourly cloud runner checked in within 90 minutes
+  const ok = a.online || a.healthy;
+  const tone = ok ? GREEN : GREY;
   const text = a.online
     ? (a.working_on ? `Agents online · ${WORK[a.working_on.role] || a.working_on.role}${a.queued ? ` · ${a.queued} more waiting` : ''}` : 'Agents online · idle')
-    : (a.last_seen ? `Agents offline · last seen ${ago(a.last_seen)}` : 'Agents not set up on the Mac yet');
+    : a.healthy ? `Agents on schedule · last check-in ${ago(a.last_seen)}${a.queued ? ` · ${a.queued} waiting` : ''}`
+    : (a.last_seen ? `Agents offline · last seen ${ago(a.last_seen)}` : 'Agents not set up yet');
   return (
     <div className="inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2 py-0.5 my-0.5" data-testid="ap-agents"
-      style={{ background: tone[1], color: tone[0] }} title={a.online ? '' : 'Start the Mac Mini and the ADS agents helper (tools/ads-agents/install.sh).'}>
-      <span className="h-1.5 w-1.5 rounded-full" style={{ background: a.online ? '#34C759' : '#8E8E93' }} />{text}
+      style={{ background: tone[1], color: tone[0] }} title={ok ? 'The agents work from the cloud once an hour, and from the Mac whenever it is on.' : 'The agents have not checked in for over 90 minutes. Check the cloud runner (GitHub > Actions) or wake the Mac.'}>
+      <span className="h-1.5 w-1.5 rounded-full" style={{ background: ok ? '#34C759' : '#8E8E93' }} />{text}
     </div>
   );
 }
@@ -171,6 +174,46 @@ export function Playbook({ items }) {
       {open && <ol className="mt-2 space-y-1.5 list-decimal pl-5 text-sm">
         {items.map((p, i) => <li key={i}><span className="text-glass-primary">{p.lesson}</span>{p.evidence && <span className="block text-[11px] text-glass-muted">{p.evidence}</span>}</li>)}
       </ol>}
+    </section>
+  );
+}
+
+// When a thing happens, in plain words: "in 21 hours (17 Nov, 11:20)".
+const whenText = (t) => {
+  const d = new Date(t), h = (d - Date.now()) / 3600e3;
+  const at = d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return h <= 0 ? `within minutes (${at})` : h < 1 ? `in under an hour (${at})` : h < 48 ? `in ${Math.round(h)} hour${Math.round(h) === 1 ? '' : 's'} (${at})` : `in ${Math.round(h / 24)} days (${at})`;
+};
+
+// The team: 7 AI specialists the Team Lead schedules, and 7 members that are plain code and always on.
+export function Team({ items }) {
+  const [open, setOpen] = useState(false);
+  const next = (m) => {
+    if (m.kind !== 'agent') return 'Always on';
+    if (!m.enabled) return 'Switched off';
+    if (m.waiting_for_spend != null) return `Waits for ₹${Math.ceil(Number(m.waiting_for_spend))} more ad spend (nothing new to look at yet)`;
+    return m.next_at ? (new Date(m.next_at) <= Date.now() ? 'Next in line' : `Works again ${whenText(m.next_at)}`) : '';
+  };
+  return (
+    <section className="glass-card p-4" data-testid="ap-team">
+      <button type="button" className="w-full flex items-center justify-between text-left" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <span className="font-bold text-glass-primary">Your ads team ({items.length})</span>
+        <Icon name={open ? 'chevronDown' : 'chevronRight'} size={16} />
+      </button>
+      {open && <ul className="mt-2 divide-y divide-black/5">
+        {items.map((m) => (
+          <li key={m.key} className="py-2" data-testid="ap-team-member">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold text-sm text-glass-primary">{m.title}</span>
+              <Chip fg={m.kind === 'agent' ? BLUE[0] : GREY[0]} bg={m.kind === 'agent' ? BLUE[1] : GREY[1]}>{m.kind === 'agent' ? 'AI specialist' : 'Always on'}</Chip>
+            </div>
+            <div className="text-sm text-glass-secondary">{m.does}</div>
+            <div className="text-[11px] text-glass-muted">
+              {m.last?.at ? `Last worked ${ago(m.last.at)}${m.last.summary ? `: ${m.last.summary}` : ''}` : 'Has not worked yet'}
+              {m.kind === 'agent' && <span className="block">{next(m)}</span>}
+            </div>
+          </li>))}
+      </ul>}
     </section>
   );
 }
@@ -206,6 +249,10 @@ export function Suggestion({ s, reload }) {
       <div className="flex flex-wrap items-center gap-2"><Chip fg={BLUE[0]} bg={BLUE[1]}>{KIND[s.kind] || s.kind}</Chip><span className="font-semibold text-glass-primary">{s.title}</span>
         <span className="text-[11px] text-glass-muted ml-auto">{ago(s.created_at)}</span></div>
       {s.reason && <div className="text-sm text-glass-secondary whitespace-pre-line">{s.reason}</div>}
+      {s.status === 'open' && (s.auto_at
+        ? <div className="text-[12px] font-medium rounded-lg px-2 py-1" style={{ background: 'rgba(255,149,0,0.12)', color: '#B25E00' }} data-testid="ap-sugg-auto">
+            No answer needed: the agents' recommended option is applied by itself {whenText(s.auto_at)}. Decide before then to change that.</div>
+        : <div className="text-[12px] text-glass-muted" data-testid="ap-sugg-manual">This one waits for you. It is never applied by itself.</div>)}
       {opts.length > 0 && (
         <div className="grid sm:grid-cols-2 gap-1.5">
           {opts.map((o) => (
@@ -366,6 +413,7 @@ export default function AdsAutopilot() {
       </div>
       <Suggestions d={d} reload={load} />
       <Activity d={d} />
+      {s?.team?.length > 0 && <Team items={s.team} />}
       {s?.playbook?.length > 0 && <Playbook items={s.playbook} />}
     </div>
   );
