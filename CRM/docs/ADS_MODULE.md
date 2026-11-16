@@ -112,6 +112,56 @@ API versions are settings (`google_api_version` = v26, `meta_api_version` = v26.
 
 Not tested against live Google/Meta accounts: no credentials exist yet. First live run = step 6 above.
 
+## Meta lead sources (migration 100, 2026-11-16)
+
+Meta Ads > Settings > Meta lead sources. Three sources, each switched on and configured there (all start off):
+
+| Source | Leads in | Reported to Meta as |
+|---|---|---|
+| Meta lead forms (Instant Forms) | `ads-meta-webhook` (Page `leadgen`) → `ads-sync meta_leads` → ADS intake; daily `meta_leads_reconcile` reads each form's last 48 h | Conversions API for CRM: `action_source=system_generated`, `custom_data.event_source=crm`, `custom_data.lead_event_source`=CRM name, `user_data.lead_id` |
+| Meta ad → website | already via `ads-intake` (fbclid); intake now also keeps the browser's User-Agent | website events: `fbc` (fb.1.<ms>.<fbclid>, unhashed), `event_source_url`, `client_user_agent` |
+| WhatsApp ads (Click-to-WhatsApp) | `ads-meta-webhook` (WhatsApp `messages` with `referral.ctwa_clid`; needs a Cloud API number) | business messaging: `whatsapp_business_account_id` + `ctwa_clid`, only `LeadSubmitted` / `QualifiedLead` |
+
+Per source: intake on/off, report on/off, consent rule (only yes / everyone except no / everyone), consent purpose, dataset ID,
+default pipeline, and the Meta event name for every stage. Each (lead, source, stage) is sent once; a stage older than 7 days is
+skipped (Meta discards it); phone and email leave the database only as SHA-256; the emergency stop blocks all sending.
+Lead forms: "Check Page" lists the forms and the leadgen subscription, "Connect Page" subscribes it; each form can go to Pilot
+Training or Charter. Organic form fills (no ad) are not made Ads leads.
+
+Go-live steps (in order):
+1. Apply `100_ads_meta_signals.sql` (SQL editor). Rollback: `100_ads_meta_signals_down.sql`.
+2. Deploy: `supabase functions deploy ads-sync`, `supabase functions deploy ads-intake --no-verify-jwt`,
+   `supabase functions deploy ads-meta-webhook --no-verify-jwt`.
+3. Settings > Meta Marketing API: access token (System User with `ads_management`, `leads_retrieval`, `pages_show_list`,
+   `pages_read_engagement`, `pages_manage_metadata`, and the Page as an asset), App secret, Webhook verify token.
+4. Meta App Dashboard > Webhooks: object Page, field `leadgen`, callback URL shown in the panel, the same verify token.
+   Switch the app to **Live** (in Development mode Meta only sends test pings). Own-business use needs no App Review.
+5. Panel: Facebook Page ID > Check Page > Connect Page. Ad accounts: add the Meta ad account.
+6. Turn on "Bring leads into Ads Leads", submit a test lead (Meta Lead Ads Testing Tool), check it appears.
+7. Add the dataset ID, choose the consent rule, then turn on "Report lead stages to Meta".
+WhatsApp reporting needs Advanced Access to `whatsapp_business_manage_events` (App Review) before it is switched on.
+
+Tests: `run.sh` A0_ (MS01–MS35 + R03 rollback), `ads_meta.test.ts` (25), `ui_checks.mjs` UI09/09c, UI120–UI141.
+
+## Two sections and Setup checklists (2026-11-16)
+
+The main menu has **Google Ads** (`#/ads`, the existing screens) and **Meta Ads** (`#/metaads`: Overview, Campaigns, Leads,
+Setup, Settings). Same tables and rules underneath; each section shows only its platform:
+- Campaigns: filtered by account platform. Leads: `api_ads_lead_board(..., p_platform)`; someone who came through both
+  platforms is in both lists, marked "also via …". The AI agents, rules and limits stay in Google Ads.
+- Stops: "Stop everything" (`execution_paused`) stops both; each section's Settings also has "Stop Google Ads only" /
+  "Stop Meta Ads only" (`google_paused` / `meta_paused`, `api_ads_platform_pause`, logged).
+- Setup (Admin): a banner "N steps left → Continue" until done. Steps unlock in order, each with exact instructions and a
+  **Check now** (the page also re-checks every 30 s). Meta: database (the full 100 SQL to copy + SQL editor link), Edge
+  Functions (exact deploy commands; checked by `ads-sync` job `setup`, which calls `ads-intake/version`), keys, connection test,
+  ad account, webhook (turns green when Meta verifies the callback URL), Page, first lead (Live mode + Lead Ads Testing Tool),
+  reporting, and a test event (`meta_test_event` with a Test Events code from Events Manager). Google: database, functions,
+  keys, connection test, limits, conversion action, agents. Status comes from `api_ads_setup_status` (key *presence* only).
+- Deploy check: `ADS_BUILD` in `_shared/ads_meta.ts` must equal the build in `ads-intake` `/version` (a Deno test checks this);
+  bump both when the Edge Functions change, so Setup can tell an old deploy apart.
+
+Go-live order: push the frontend → open Meta Ads > Setup → follow the steps top to bottom.
+
 ## Not built yet
 
 Ad groups / keywords / audiences / creatives management, offline-conversion upload (needs GCLID/FBCLID captured on website

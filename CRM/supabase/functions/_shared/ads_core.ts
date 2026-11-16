@@ -344,6 +344,46 @@ export class MetaAds {
   async setStatus(campaignId: string, status: "ENABLED" | "PAUSED") {
     return this.req("POST", campaignId, { status: status === "ENABLED" ? "ACTIVE" : "PAUSED" }, true);
   }
+
+  // ---------------------------------------------------------------- lead ads and Conversions API (migration 100)
+  // Same settings with another token (a Page token for the Page's leads). appsecret_proof follows the token.
+  withToken(token: string): MetaAds { return new MetaAds({ ...this.c, accessToken: token }, this.fetchFn); }
+  // The Page's own token, read with the System User token (the System User must have the Page as an asset).
+  async pageToken(pageId: string): Promise<string> {
+    const b = await this.req("GET", pageId, { fields: "access_token" });
+    if (!b.access_token) throw new AdsError("permission_missing", "Meta did not return a Page token: give the System User access to the Page (Business Settings > Pages).");
+    return String(b.access_token);
+  }
+  async leadgenForms(pageId: string): Promise<{ id: string; name: string | null; status: string | null }[]> {
+    const rows = await this.all(`${pageId}/leadgen_forms`, { fields: "id,name,status", limit: "100" });
+    return rows.map((r) => ({ id: String(r.id), name: r.name ?? null, status: r.status ?? null }));
+  }
+  async subscribedApps(pageId: string): Promise<{ id: string; subscribed_fields: string[] }[]> {
+    const b = await this.req("GET", `${pageId}/subscribed_apps`);
+    return (b.data ?? []).map((a: any) => ({ id: String(a.id), subscribed_fields: Array.isArray(a.subscribed_fields) ? a.subscribed_fields.map(String) : [] }));
+  }
+  async subscribeLeadgen(pageId: string) {
+    return this.req("POST", `${pageId}/subscribed_apps`, { subscribed_fields: "leadgen" }, true);
+  }
+  static LEAD_FIELDS = "id,created_time,ad_id,adset_id,campaign_id,form_id,field_data,custom_disclaimer_responses,is_organic,platform";
+  async getLead(leadId: string): Promise<any> {
+    return this.req("GET", leadId, { fields: MetaAds.LEAD_FIELDS });
+  }
+  // Leads of one form created after `sinceUnix` (seconds).
+  async formLeads(formId: string, sinceUnix: number): Promise<any[]> {
+    return this.all(`${formId}/leads`, { fields: "id,created_time,ad_id,adset_id,form_id",
+      filtering: JSON.stringify([{ field: "time_created", operator: "GREATER_THAN", value: Math.floor(sinceUnix) }]), limit: "100" });
+  }
+  // Conversions API. `data` is the serialized events array (see ads_meta.serializeEvents). Returns events_received.
+  async sendEvents(datasetId: string, data: string): Promise<{ events_received: number | null; fbtrace_id: string | null }> {
+    const b = await this.req("POST", `${datasetId}/events`, { data }, true);
+    return { events_received: num(b.events_received), fbtrace_id: b.fbtrace_id ?? null };
+  }
+  // Same, marked as test events (Events Manager > Test events); Meta does not use them for optimisation.
+  async sendTestEvents(datasetId: string, data: string, testEventCode: string): Promise<{ events_received: number | null; fbtrace_id: string | null }> {
+    const b = await this.req("POST", `${datasetId}/events`, { data, test_event_code: testEventCode }, true);
+    return { events_received: num(b.events_received), fbtrace_id: b.fbtrace_id ?? null };
+  }
 }
 
 // Ad account account_status values (Marketing API, Ad Account reference).

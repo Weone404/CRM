@@ -24,6 +24,14 @@ const QUALIFY_FIELDS = {
 };
 const CONTACT = [['connected', 'Connected'], ['no_answer', 'No answer'], ['busy', 'Busy'], ['callback_requested', 'Call back later'], ['wrong_number', 'Wrong number']];
 
+// Where an Ads lead came from: Meta lead form, WhatsApp ad, Meta ad -> website, else the platform the board reports.
+const sourceLabel = (r) => {
+  const ft = r?.first_touch || {}, ln = r?.last_non_direct || {};
+  if (ft.meta_source === 'instant_form') return 'Meta form';
+  if (ft.meta_source === 'ctwa') return 'WhatsApp ad';
+  if (ft.fbclid || ft.fbc || ln.fbclid || ln.fbc) return 'Meta → website';
+  return r?.source || 'Ad';
+};
 const Chip = ({ children, fg = '#3C3C43', bg = 'rgba(118,118,128,0.14)' }) => (
   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap" style={{ background: bg, color: fg }}>{children}</span>
 );
@@ -39,7 +47,7 @@ function Wait({ row }) {
   return <Chip fg={fg} bg={bg}>Not called · {span(m)}</Chip>;
 }
 
-export default function AdsLeads({ access }) {
+export default function AdsLeads({ access, platform }) {
   const [pipe, setPipe] = useState('pilot_training');
   const [stage, setStage] = useState('');
   const [quar, setQuar] = useState(false);
@@ -52,10 +60,13 @@ export default function AdsLeads({ access }) {
 
   const load = useCallback(async () => {
     try {
-      setBoard(await rpc('api_ads_lead_board', { p_pipeline: pipe, p_stage: stage || null, p_quarantined: quar, p_search: q || null, p_limit: 200 }));
+      const args = { p_pipeline: pipe, p_stage: stage || null, p_quarantined: quar, p_search: q || null, p_limit: 200 };
+      // per-platform list (migration 100); until that update is run, the combined list is shown
+      setBoard(await rpc('api_ads_lead_board', platform ? { ...args, p_platform: platform } : args)
+        .catch((e) => (platform && /Could not find the function|PGRST202|42883|does not exist/i.test(`${e?.code || ''} ${e?.message}`) ? rpc('api_ads_lead_board', args) : Promise.reject(e))));
       setErr('');
     } catch (e) { setErr(e.message); }
-  }, [pipe, stage, quar, q]);
+  }, [pipe, stage, quar, q, platform]);
   useEffect(() => { const t = setTimeout(load, q ? 250 : 0); return () => clearTimeout(t); }, [load, q]);
   useEffect(() => { rpc('api_ads_staff').then(setStaff, () => setStaff([])); }, []);
   useEffect(() => { const i = setInterval(() => tick((n) => n + 1), 60000); return () => clearInterval(i); }, []);   // timers
@@ -109,7 +120,7 @@ export default function AdsLeads({ access }) {
                   {formatPhone(r.phone_e164)}{r.course_interest ? ` · ${r.course_interest}` : ''}
                   {r.charter_details?.from ? ` · ${r.charter_details.from} → ${r.charter_details.to}` : ''}
                 </span>
-                <span className="block text-[11px] text-glass-muted truncate">{r.source}{r.campaign ? ` · ${r.campaign}` : ''}{r.enquiry_count > 1 ? ` · ${r.enquiry_count} enquiries` : ''}{r.organic_lead_id ? ' · also in Leads' : ''}</span>
+                <span className="block text-[11px] text-glass-muted truncate">{sourceLabel(r)}{(r.platforms || []).length > 1 ? ' · also via ' + (platform === 'meta' ? 'Google' : 'Meta') : ''}{r.campaign ? ` · ${r.campaign}` : ''}{r.enquiry_count > 1 ? ` · ${r.enquiry_count} enquiries` : ''}{r.organic_lead_id ? ' · also in Leads' : ''}</span>
               </span>
               <span className="flex flex-col items-end gap-1 shrink-0">
                 <Chip fg={(STAGE_TONE[r.stage] || [])[0]} bg={(STAGE_TONE[r.stage] || [])[1]}>{label[r.stage] || r.stage}</Chip>
@@ -212,7 +223,7 @@ function LeadPanel({ id, pipe, stages, staff, canEdit, isAdmin, onClose, onChang
 
           <div className="glass-card p-3 text-xs space-y-0.5">
             <div className="font-semibold text-glass-primary text-sm mb-1">Came from</div>
-            <div>{[ft.gclid || ft.gbraid || ft.wbraid ? 'Google Ads click' : ft.fbclid || ft.fbc ? 'Meta ad click' : 'Paid campaign', ft.utm_source, ft.utm_campaign].filter(Boolean).join(' · ')}</div>
+            <div>{[ft.meta_source === 'instant_form' ? 'Meta lead form' : ft.meta_source === 'ctwa' ? 'WhatsApp ad' : ft.gclid || ft.gbraid || ft.wbraid ? 'Google Ads click' : ft.fbclid || ft.fbc ? 'Meta ad click' : 'Paid campaign', ft.utm_source, ft.utm_campaign].filter(Boolean).join(' · ')}</div>
             {ft.landing_page && <div className="truncate text-glass-muted">Landing page: {ft.landing_page}</div>}
             <div className="text-glass-muted">First enquiry {when(l.created_at)}{l.enquiry_count > 1 ? ` · ${l.enquiry_count} enquiries` : ''}
               {l.first_response_at ? ` · first response after ${span(Math.round((Date.parse(l.first_response_at) - Date.parse(l.created_at)) / 60000))}` : ''}</div>

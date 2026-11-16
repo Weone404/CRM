@@ -197,3 +197,30 @@ changes, allowed bids and budget inside the spend limits, and has no Mac that st
 | R02 | Developer | Roll 099 back and apply it again | Old scheduler and gate return; re-applies cleanly | run.sh |
 | not automated | - | The cloud runner's first real run on GitHub, and Google accepting a real uploaded conversion | Checked live after the owner adds the two secrets / after the first consenting enquiry | - |
 
+
+## Meta lead sources (migration 100)
+
+| ID | Who | Situation | Expected | Where |
+|---|---|---|---|---|
+| MS01 | Pro | Fresh install | All three Meta sources off, consent "required"; webhooks store nothing | A0_ |
+| MS02 | Viewer / Approver | Opens or changes Meta settings | Refused (Admin only) | A0_ |
+| MS03 | Novice | Switches reporting on without a dataset ID | Refused with a plain reason | A0_, ui UI123 |
+| MS04 | Pro | Maps a website stage to Purchase / a WhatsApp stage to Lead | Refused; only accepted names | A0_, ui UI126 |
+| MS05 | Meta | Sends the same lead twice (retries for 36 h) | Stored once | A0_, ads_meta.test MW03-06 |
+| MS06-09 | Meta / Agent | Lead fetched / organic / Meta busy 12 times / no valid phone | Filed / skipped / failed with reason | A0_ |
+| MS10-11 | Owner | Each consent rule; a lead under 30 minutes old | Reported per rule; waits | A0_ |
+| MS12-13 | Agent | Lead moves stages; stage older than 7 days | Each stage once, under the dashboard's name; old ones skipped | A0_ |
+| MS14 | Attacker | Reads what goes to Meta | Phone/email only as SHA-256 | A0_, MC08 |
+| MS15-18 | Owner | Emergency stop / source off / quarantined / consent tightened | Nothing sent | A0_ |
+| MS19-20 | Visitor | Website enquiry from a Meta ad; WhatsApp ad chat | Website event with fbc; LeadSubmitted with ctwa_clid | A0_ |
+| MS21 | Browser | Reads raw leads, queue, webhook secrets | Permission denied | A0_ |
+| MS22-24 | Owner | Page forms, daily check, new Vault keys | Pipeline kept; missed leads added; values never shown | A0_ |
+| MW01-02 | Attacker | Unsigned / wrongly signed webhook | Refused | ads_meta.test |
+| MC01-07 | Agent | Builds CRM / website / WhatsApp events | Meta's required fields; 17-digit lead id exact | ads_meta.test |
+| UI120-127 | Admin | Uses the Meta panel | Sources, switches, consent, mappings saved | ui |
+| MS30-32 | Admin / Agent | Stops Meta only; emergency stop; unknown platform | Meta stops, Google runs; both stop; refused | A0_ |
+| MS33 | Admin | Google lead, Meta form lead, person via both | Each in its own list; both-platform person in both, marked | A0_ |
+| MS34-35 | Admin / Sales / Meta | Setup status; webhook verified; test event lead | Key presence only, Admin only; verified time shown; ids exact, contacts hashed | A0_ |
+| DS01-02 | Agent | Edge Function deployed / old / missing | Told apart; intake build equals ADS_BUILD | ads_meta.test |
+| UI09, UI09c | Viewer | Campaigns in each section | Google only / Meta only | ui |
+| UI130-141 | Admin | Meta Ads section, banner, Setup steps, Check now, SQL / deploy / callback copy blocks, per-platform stop, Google section | Separate sections; steps checked by the server; stop only one platform | ui |

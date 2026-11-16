@@ -38,6 +38,7 @@ const BusinessEmail = lazy(() => import('./components/AppAlerts').then((m) => ({
 const Connections = lazy(() => import('./components/Connections'));
 const Amazon = lazy(() => import('./components/Amazon'));
 const Ads = lazy(() => import('./components/Ads'));
+const AdsMeta = lazy(() => import('./components/AdsMeta'));
 
 // Tabs the birthday popup is allowed to appear over: the landing tab plus the
 // two people-facing views. Anywhere else it would be an interruption.
@@ -251,7 +252,8 @@ export default function App() {
     department === 'Admin' && { id: 'policy', label: 'Policy Docs', icon: 'policy' },
     canAccessFlightBridge && { id: 'partnerships', label: 'FlightBridge AI', icon: 'globe' },
     canAccessAmazon && { id: 'amazon', label: 'Amazon', icon: 'cart' },
-    canAccessAds && { id: 'ads', label: 'ADS', icon: 'rocket' },
+    canAccessAds && { id: 'ads', label: 'Google Ads', icon: 'rocket' },
+    canAccessAds && { id: 'metaads', label: 'Meta Ads', icon: 'send' },
     USE_SUPABASE && department === 'Admin' && { id: 'settings', label: 'Settings', icon: 'settings' },
     isEmployeeSession && { id: 'profile', label: 'My Profile', icon: 'profile' },
     isEmployeeSession && { id: 'leave', label: 'My Leave', icon: 'calendar' },
@@ -270,7 +272,7 @@ export default function App() {
       </div>
     </div>
   );
-  // Main sections: Leads, Academy (Students, Team, Attendance, Tasks), Amazon, ADS; everything else is under More.
+  // Main sections: Leads, Academy (Students, Team, Attendance, Tasks), Amazon, Google Ads, Meta Ads; everything else is under More.
   // Each screen keeps its own address (#/students, #/tasks ...), so old links and bookmarks still work.
   const academyKids = ACADEMY.map((id) => tabs.find((t) => t.id === id)).filter(Boolean);
   const pick = (id) => tabs.find((t) => t.id === id);
@@ -279,8 +281,9 @@ export default function App() {
     academyKids.length > 0 && { id: 'academy', label: 'Academy', logo: true },
     pick('amazon'),
     pick('ads'),
+    pick('metaads'),
   ].filter(Boolean);
-  const moreTabs = tabs.filter((t) => !['leads', 'amazon', 'ads', ...ACADEMY].includes(t.id));
+  const moreTabs = tabs.filter((t) => !['leads', 'amazon', 'ads', 'metaads', ...ACADEMY].includes(t.id));
   const lastAcademy = () => { try { const v = localStorage.getItem('academy_tab'); return academyKids.some((k) => k.id === v) ? v : null; } catch { return null; } };
   const wanted = routeTab === 'academy' ? (lastAcademy() || academyKids[0]?.id) : routeTab;
   const activeTab = tabs.some((t) => t.id === wanted) ? wanted : (primary[0]?.id === 'academy' ? academyKids[0]?.id : primary[0]?.id) || tabs[0]?.id || 'tasks';
@@ -451,6 +454,7 @@ export default function App() {
           {activeTab === 'partnerships' && canAccessFlightBridge && <FlightBridge />}
           {activeTab === 'amazon' && canAccessAmazon && <Amazon access={amzAccess} />}
           {activeTab === 'ads' && canAccessAds && <Ads access={adsAccess} />}
+          {activeTab === 'metaads' && canAccessAds && <AdsMeta access={adsAccess} />}
           {activeTab === 'settings' && USE_SUPABASE && department === 'Admin' && <div className="space-y-4">{accountCard}<PhoneApp notifications={canAccessAmazon} /><BusinessEmail /><AIIntegrations /><Connections /></div>}
           {activeTab === 'profile' && isEmployeeSession && <div className="space-y-4">{accountCard}<MyProfile />{USE_SUPABASE && <PhoneApp notifications={canAccessAmazon} />}</div>}
           {activeTab === 'account' && <div className="space-y-4">{accountCard}{USE_SUPABASE && <PhoneApp notifications={canAccessAmazon} />}</div>}

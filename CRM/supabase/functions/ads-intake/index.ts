@@ -6,6 +6,7 @@
 //   page_url, first_touch, submission_id, elapsed_ms, consent{notice_version, marketing, ad_data_sharing}).
 //   The pipeline comes from the website, never from the body: bookmycharter.in -> charter, others -> pilot_training.
 //   200 { status: "created" | "duplicate", lead_id [, reference] }
+//   GET /ads-intake/version -> { build } (the CRM Setup checklist uses it to see that this version is deployed)
 //   409 { detail: "not_an_ad_enquiry" }  -> the site should send this enquiry to crm-leads instead
 //   422 { detail } / { detail: { errors } } for invalid input (same shapes as crm-leads)
 // verify_jwt is off: website visitors have no CRM account. The database function is service_role only.
@@ -39,6 +40,9 @@ async function enquiry(req: Request): Promise<Response> {
   if (text.length > 20000) return json(req, 413, { detail: "Too large" });
   let body: unknown;
   try { body = JSON.parse(text); } catch { return json(req, 422, { detail: "Invalid JSON" }); }
+  // The visitor's browser, kept with the enquiry (payload_extra) for Meta website events, which require it (migration 100).
+  const ua = (req.headers.get("User-Agent") ?? "").slice(0, 400);
+  if (ua && body && typeof body === "object" && !Array.isArray(body)) (body as Record<string, unknown>).client_user_agent = ua;
   const { data, error } = await db.rpc("svc_ads_ingest_enquiry", { payload: body, pipeline });
   if (error) throw error;
   const d = data as Record<string, unknown>;
@@ -53,6 +57,7 @@ Deno.serve(async (req) => {
   const path = new URL(req.url).pathname.replace(/^.*\/ads-intake/, "").replace(/\/+$/, "");
   try {
     if (req.method === "POST" && path === "/enquiry") return await enquiry(req);
+    if (req.method === "GET" && path === "/version") return new Response(JSON.stringify({ build: "2026-11-16.meta1" }), { status: 200, headers: { "Content-Type": "application/json" } });
     return json(req, 404, { detail: "Not found" });
   } catch (e) {
     console.error("ads-intake error", String(e));

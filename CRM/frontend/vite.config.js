@@ -5,7 +5,9 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: '0.0.0.0',
-    port: 3000
+    port: 3000,
+    // ADS > Setup shows the migration SQL from ../backend/migrations (imported with ?raw)
+    fs: { allow: ['..'] }
   },
   build: {
     target: 'es2020',

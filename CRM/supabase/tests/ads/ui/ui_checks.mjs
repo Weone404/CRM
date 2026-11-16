@@ -45,7 +45,7 @@ await tab('Campaigns');
 await page.getByText('Test Search').waitFor();
 t = await body();
 ok(/Test Search/.test(t) && /6 · 3/.test(t), 'UI08 campaign row shows CRM leads · qualified (6 · 3)');
-ok(/not linked/.test(t), 'UI09 campaign without UTM mapping says CRM is not linked');
+ok(!/Test Lead Form/.test(t), 'UI09 Google Ads > Campaigns shows only Google campaigns');
 { const d = await page.getByTestId('delivery').allInnerTexts();
   ok(d.length === 1 && /Limited/.test(d[0]) && /Budget limits delivery/.test(d[0]) && /Keywords have low search volume/.test(d[0]),
     'UI09b enabled campaign shows Google delivery status and reasons in plain words'); }
@@ -93,7 +93,7 @@ await page.getByRole('button', { name: /^Research/ }).click();
 await page.getByRole('button', { name: /Add finding/ }).click();
 await page.getByLabel('Topic').fill('Fees');
 await page.getByLabel('Observation').fill('Competitor lists a fee');
-await page.getByRole('button', { name: 'Save' }).click();
+await page.getByRole('button', { name: 'Save', exact: true }).click();
 t = await body();
 ok(/needs a source URL/.test(t), 'UI17 a verified fact without a source is refused');
 
@@ -113,12 +113,106 @@ t = await body();
 ok(/ON: nothing is being sent/.test(t), 'UI20 emergency stop turns on');
 await page.screenshot({ path: `${SHOTS}/ads_settings.png`, fullPage: true });
 
+// ---- Meta lead sources (migration 100): in the Meta Ads section's Settings
+await page.goto(`${APP}#/metaads/settings`);
+await page.getByTestId('ads-meta-settings').waitFor({ timeout: 15000 });
+t = await page.getByTestId('ads-meta-settings').innerText();
+ok(/Meta lead forms/.test(t) && /Meta ad → your website/.test(t) && /WhatsApp ads/.test(t) && /Callback URL for Meta/.test(t)
+  && /functions\/v1\/ads-meta-webhook/.test(t), 'UI120 Settings shows the three Meta lead sources and the webhook callback URL');
+ok(/Emergency stop is on: nothing is sent to Meta/.test(t), 'UI121 the emergency stop is shown on the Meta panel too');
+let ms = await rpc('api_ads_meta_settings');
+ok(ms.sources.every((s) => !s.intake_enabled && !s.report_enabled), 'UI122 every Meta source starts switched off');
+await page.getByRole('switch', { name: 'Meta lead forms: report' }).click();
+t = await body();
+ok(/Add the dataset ID before switching reporting on/.test(t), 'UI123 reporting cannot be switched on without a dataset ID (plain message)');
+await page.getByTestId('meta-source-instant_form').getByRole('button', { name: /Dataset ID/ }).click();
+await dlg().locator('input').fill('1122334455');
+await dlg().getByRole('button', { name: 'Save' }).click();
+await page.getByRole('switch', { name: 'Meta lead forms: intake' }).click();
+await page.getByRole('switch', { name: 'Meta lead forms: report' }).click();
+await page.waitForTimeout(600);
+ms = await rpc('api_ads_meta_settings');
+ok(ms.sources[0].source === 'instant_form' && ms.sources[0].intake_enabled && ms.sources[0].report_enabled && ms.sources[0].dataset_id === '1122334455',
+  'UI124 Admin switches Meta lead forms on and saves the dataset ID from the dashboard');
+await page.getByTestId('meta-source-instant_form').getByLabel('Consent rule').selectOption('required_if_collected');
+await page.waitForTimeout(600);
+ms = await rpc('api_ads_meta_settings');
+ok(ms.sources[0].consent_mode === 'required_if_collected', 'UI125 the consent rule is changed from the dashboard');
+await page.getByTestId('meta-source-ctwa').getByRole('button', { name: /stage → Meta event names/ }).click();
+const wa = page.getByTestId('meta-source-ctwa').getByLabel('Lead Created event').first();
+const opts = await wa.locator('option').allTextContents();
+ok(opts.join() === 'LeadSubmitted,QualifiedLead', 'UI126 WhatsApp stages offer only the event names Meta accepts');
+await wa.selectOption('QualifiedLead');
+await page.waitForTimeout(600);
+ms = await rpc('api_ads_meta_settings');
+ok(ms.event_map.find((r) => r.source === 'ctwa' && r.pipeline === 'pilot_training' && r.stage === 'lead_created').meta_event_name === 'QualifiedLead',
+  'UI127 a stage → event mapping is saved from the dashboard');
+await page.screenshot({ path: `${SHOTS}/ads_settings_meta.png`, fullPage: true });
+await rpc('api_ads_meta_source_save', { p_source: 'instant_form', p_data: { intake_enabled: false, report_enabled: false, consent_mode: 'required' } });
+await rpc('api_ads_meta_event_map_save', { p_source: 'ctwa', p_pipeline: 'pilot_training', p_stage: 'lead_created', p_event: 'LeadSubmitted', p_enabled: true });
+
+// ---- Two sections: Google Ads and Meta Ads, each with its own Setup checklist and stop
+await page.goto(`${APP}#/metaads`);
+await page.getByTestId('meta-ads').waitFor({ timeout: 15000 });
+t = await body();
+ok(/Meta Ads/.test(t) && ['Overview', 'Campaigns', 'Leads', 'Setup', 'Settings'].every((x) => t.includes(x)) && !/Rules and limits/.test(t),
+  'UI130 Meta Ads is its own section with Overview, Campaigns, Leads, Setup and Settings');
+await page.getByTestId('setup-banner-meta').waitFor({ timeout: 15000 });
+ok(/Meta Ads setup: \d+ steps? left/.test(await page.getByTestId('setup-banner-meta').innerText()), 'UI131 a highlighted banner says how many Meta setup steps are left');
+await page.getByTestId('setup-banner-meta').click();
+await page.getByTestId('setup-meta').waitFor({ timeout: 15000 });
+await page.waitForTimeout(800);
+ok(await page.getByTestId('step-meta-db').getAttribute('data-done') === 'yes' && await page.getByTestId('step-meta-fns').getAttribute('data-done') === 'yes',
+  'UI132 Continue opens Setup; database and Edge Function steps show done when Check now finds them');
+let c0 = (await calls()).filter((x) => x.fn === 'ads-sync' && (x.args.jobs || []).join() === 'setup').length;
+await page.getByRole('button', { name: 'Check all now' }).click();
+await page.waitForTimeout(800);
+ok((await calls()).filter((x) => x.fn === 'ads-sync' && (x.args.jobs || []).join() === 'setup').length > c0 && (await calls()).some((x) => x.fn === 'api_ads_setup_status' && x.args.p_platform === 'meta'),
+  'UI133 Check now asks the server (setup status + deployed functions)');
+await page.getByTestId('step-meta-db').getByRole('button').first().click();
+await page.getByTestId('sql-100').waitFor({ timeout: 15000 });
+await page.waitForTimeout(800);
+t = await page.getByTestId('sql-100').innerText();
+ok(/CREATE TABLE IF NOT EXISTS public\.ads_meta_settings/.test(t) && t.length > 20000 && /supabase\.com\/dashboard\/project\/.+\/sql\/new/.test(await page.getByTestId('step-meta-db').innerHTML()),
+  'UI134 the full 100_ads_meta_signals.sql is shown ready to copy, with a link to the SQL editor');
+await page.getByTestId('step-meta-fns').getByRole('button').first().click();
+t = await page.getByTestId('deploy-cmds').innerText();
+ok(/supabase functions deploy ads-meta-webhook --no-verify-jwt --project-ref \S+/.test(t) && /supabase functions deploy ads-sync --project-ref \S+$/m.test(t),
+  'UI135 exact deploy commands are shown (webhook and intake without JWT check, ads-sync with)');
+await page.getByTestId('step-meta-hook').getByRole('button').first().click();
+ok(/functions\/v1\/ads-meta-webhook/.test(await page.getByTestId('hook-url').innerText()), 'UI136 the webhook step gives the callback URL to paste in Meta');
+await page.screenshot({ path: `${SHOTS}/ads_meta_setup.png`, fullPage: true });
+await page.goto(`${APP}#/metaads/campaigns`);
+await page.getByText('Test Lead Form').waitFor({ timeout: 15000 });
+t = await body();
+ok(!/Test Search/.test(t) && /not linked/.test(t), 'UI09c Meta Ads > Campaigns shows only Meta campaigns; one without UTM mapping says CRM is not linked');
+await page.goto(`${APP}#/metaads/leads`);
+await page.waitForTimeout(1500);
+ok((await calls()).some((x) => x.fn === 'api_ads_lead_board' && x.args.p_platform === 'meta'), 'UI137 Meta Ads > Leads lists only leads that came through Meta');
+await page.goto(`${APP}#/metaads/settings`);
+await page.getByTestId('stop-meta').waitFor({ timeout: 15000 });
+ok(!(await page.locator('[data-testid="stop-google"]').count()) && !/Google Ads API/.test(await body()), 'UI138 Meta settings show only Meta keys and the Meta stop');
+const ex0 = (await rpc('api_ads_settings')).config.execution_paused;
+await page.getByTestId('stop-meta').getByRole('button', { name: 'Stop' }).click();
+await page.waitForTimeout(400);
+if (await dlg().count()) { await dlg().getByRole('button', { name: /Stop|Yes|Confirm/ }).first().click(); await page.waitForTimeout(600); }
+let cfgNow = (await rpc('api_ads_settings')).config;
+ok(cfgNow.meta_paused === 'true' && cfgNow.google_paused !== 'true' && cfgNow.execution_paused === ex0, 'UI139 Stop Meta Ads only stops Meta; Google and the emergency stop are untouched');
+await rpc('api_ads_platform_pause', { p_platform: 'meta', p_on: false });
+await page.goto(`${APP}#/ads/settings`);
+await page.getByTestId('stop-google').waitFor({ timeout: 15000 });
+t = await body();
+ok(/Google Ads/.test(t) && !(await page.locator('[data-testid="ads-meta-settings"]').count()) && /Rules and limits/.test(t), 'UI140 Google Ads settings have no Meta panel and keep the Google rules');
+await page.goto(`${APP}#/ads/adsleads`);
+await page.waitForTimeout(1500);
+ok((await calls()).some((x) => x.fn === 'api_ads_lead_board' && x.args.p_platform === 'google'), 'UI141 Google Ads > Leads lists only leads that came through Google');
+
 await page.goto(`${APP}#/ads/clients`);
 await page.getByRole('button', { name: /^New client/ }).click();
 await page.getByRole('button', { name: /^Next/ }).click();
 t = await body();
 ok(/Pick Google Ads, Meta or both/.test(t), 'UI21 step 1 asks Google, Meta or both first');
-await page.getByRole('button', { name: /Google Ads/ }).first().click();
+await page.locator('button[aria-pressed]', { hasText: 'Google Ads' }).first().click();   // the setup banner above also says Google Ads
 await page.getByRole('button', { name: /^M Meta/ }).click();
 await page.getByRole('button', { name: /^Next/ }).click();
 await page.getByLabel('Business name').fill('Wizard Client');
@@ -153,7 +247,7 @@ ok(wc && wc.platforms.join() === 'google,meta' && wc.google_settings.objective =
   && wc.meta_settings.special_ad_categories[0] === 'NONE' && wc.preset === 'education', 'UI29 saved with both platforms\' settings');
 
 await page.getByRole('button', { name: /^New client/ }).click();
-await page.getByRole('button', { name: /Google Ads/ }).first().click();
+await page.locator('button[aria-pressed]', { hasText: 'Google Ads' }).first().click();
 await page.getByRole('button', { name: /^Next/ }).click();
 await page.getByLabel('Business name').fill('Draft Client');
 await page.getByRole('button', { name: 'Save draft' }).click();

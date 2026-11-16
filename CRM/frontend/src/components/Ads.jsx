@@ -8,6 +8,8 @@ import { ClientWizard, ImportAccounts } from './AdsClientWizard';
 import AdsLeads from './AdsLeads';
 import AdsAutopilot from './AdsAutopilot';
 import AdsToday from './AdsToday';
+import AdsSetup, { SetupBanner, useSetup } from './AdsSetup';
+import AdsMetaSettings from './AdsMetaSettings';
 import { rpc, run, useLoad, Btn, friendly, WorkingBar, OfflineBar } from './adsKit';
 import { PERIODS, periodRange, todayIn, money, int, pct, ratio, delta, isNum, LOWER_IS_BETTER, toCsv, STATUS_LABEL } from '../utils/ads';
 
@@ -18,7 +20,7 @@ import { PERIODS, periodRange, todayIn, money, int, pct, ratio, delta, isNum, LO
 // Platform-reported numbers (spend, platform conversions/ROAS) and CRM-confirmed numbers (leads, customers,
 // revenue) are labelled and never added together.
 
-async function edge(body) {
+export async function edge(body) {
   const { data } = await supabase.auth.getSession();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 170000);   // a full sync can take two minutes
@@ -286,16 +288,17 @@ function Delivery({ c }) {
   );
 }
 
-function Campaigns({ ctx, access }) {
+export function Campaigns({ ctx, access, platform }) {
   const [rows, load, err] = useLoad(() => rpc('api_ads_campaigns', { p_client: ctx.client || null, p_from: ctx.from, p_to: ctx.to }), [ctx.client, ctx.from, ctx.to]);
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('spend');
   const list = useMemo(() => {
     const val = (r) => { const v = sort === 'leads' ? r.crm?.leads : r[sort]; return isNum(v) ? Number(v) : null; };
     const asc = sort === 'cpl';                                   // cheapest first; campaigns with no CPL last
-    return (rows || []).filter((r) => !q || `${r.name} ${r.client} ${r.account}`.toLowerCase().includes(q.toLowerCase()))
+    return (rows || []).filter((r) => !platform || r.platform === platform)
+      .filter((r) => !q || `${r.name} ${r.client} ${r.account}`.toLowerCase().includes(q.toLowerCase()))
       .sort((a, b) => { const x = val(a), y = val(b); if (x === null) return y === null ? 0 : 1; if (y === null) return -1; return asc ? x - y : y - x; });
-  }, [rows, q, sort]);
+  }, [rows, q, sort, platform]);
   if (err) return <Err msg={err} />;
   if (!rows) return <Empty>Loading…</Empty>;
   const budget = async (c) => {
@@ -695,9 +698,11 @@ const SECRETS = {
     ['GOOGLE_ADS_REFRESH_TOKEN', 'Refresh token', 'From the OAuth consent of a user who can access the ad accounts (starts with 1//).'],
     ['GOOGLE_ADS_LOGIN_CUSTOMER_ID', 'Manager (MCC) customer ID', 'Only if accounts are reached through a manager account.']],
   meta: [['META_ACCESS_TOKEN', 'Access token', 'A System User token from Meta Business Settings with ads_read (and ads_management to change budgets/status).'],
-    ['META_APP_ID', 'App ID', 'Optional, for reference.'], ['META_APP_SECRET', 'App secret', 'Optional. When set, every call carries appsecret_proof.']],
+    ['META_APP_ID', 'App ID', 'Optional, for reference.'], ['META_APP_SECRET', 'App secret', 'Optional. When set, every call carries appsecret_proof. Needed for Meta lead webhooks.'],
+    ['META_WEBHOOK_VERIFY_TOKEN', 'Webhook verify token', 'Any long random word; the same word goes in Meta App Dashboard > Webhooks > Verify token.'],
+    ['META_PAGE_TOKEN', 'Page token (optional)', 'A long-lived Page token for reading lead forms. Leave empty to read it with the access token above.']],
 };
-function Settings() {
+export function Settings({ platform = 'google' }) {
   const [s, load, err] = useLoad(() => rpc('api_ads_settings'));
   const [rules, loadRules] = useLoad(() => rpc('api_ads_rules'));
   const [team, loadTeam] = useLoad(() => rpc('api_ads_team'));
@@ -708,6 +713,13 @@ function Settings() {
   };
   const del = async (name) => { if (await confirmDialog(`Remove ${name}?`, { danger: true, confirmText: 'Remove' }) && await run(rpc('api_ads_secret_delete', { p_name: name }), 'Removed.')) load(); };
   const cfg = async (k, label) => { const v = await promptDialog(label, { message: `Now: ${s.config[k]}`, required: true }); if (v !== null && await run(rpc('api_ads_settings_save', { p_name: k, p_value: v }), 'Saved.')) load(); };
+  const pkey = `${platform}_paused`;
+  const pstop = async () => {
+    const on = s.config[pkey] !== 'true';
+    const name = platform === 'meta' ? 'Meta Ads' : 'Google Ads';
+    if (await confirmDialog(on ? `Stop ${name}?` : `Resume ${name}?`, { message: on ? `Nothing is sent to ${platform === 'meta' ? 'Meta' : 'Google'} until you resume. The other platform keeps running.` : 'Approved changes and reports start being sent again.', danger: on, confirmText: on ? `Stop ${name}` : 'Resume' })
+      && await run(rpc('api_ads_platform_pause', { p_platform: platform, p_on: on }), 'Saved.')) load();
+  };
   const stop = async () => {
     const on = s.config.execution_paused !== 'true';
     if (await confirmDialog(on ? 'Turn ON the emergency stop?' : 'Turn OFF the emergency stop?', { message: on ? 'No approved change will be sent to Google or Meta until it is turned off.' : 'Approved changes will start being sent again.', danger: on, confirmText: on ? 'Stop everything' : 'Resume' })
@@ -736,7 +748,11 @@ function Settings() {
         <div className="flex-1"><div className="font-bold">Emergency stop</div><div className="text-xs text-glass-secondary">{s.config.execution_paused === 'true' ? 'ON: nothing is being sent to the ad platforms.' : 'Off: approved changes are sent and checked.'}</div></div>
         <Btn tone={s.config.execution_paused === 'true' ? '#248A3D' : '#FF3B30'} onClick={stop}>{s.config.execution_paused === 'true' ? 'Resume' : 'Stop everything'}</Btn>
       </div>
-      {['google', 'meta'].map((p) => {
+      <div className="glass-card p-4 flex flex-wrap items-center gap-3" data-testid={`stop-${platform}`} style={s.config[pkey] === 'true' ? { boxShadow: 'inset 0 0 0 1px rgba(255,149,0,0.6)' } : undefined}>
+        <div className="flex-1"><div className="font-bold">Stop {platform === 'meta' ? 'Meta Ads' : 'Google Ads'} only</div><div className="text-xs text-glass-secondary">{s.config[pkey] === 'true' ? `ON: nothing is sent to ${platform === 'meta' ? 'Meta' : 'Google'}; ${platform === 'meta' ? 'Google' : 'Meta'} keeps running.` : `Off. "Stop everything" above stops Google and Meta together.`}</div></div>
+        <Btn tone={s.config[pkey] === 'true' ? '#248A3D' : '#FF9500'} onClick={pstop}>{s.config[pkey] === 'true' ? 'Resume' : 'Stop'}</Btn>
+      </div>
+      {[platform].map((p) => {
         const t = s.tests?.[`test_${p}`];
         return (
           <div key={p} className="glass-card p-4">
@@ -759,11 +775,12 @@ function Settings() {
         <Btn onClick={test} disabled={busy}><Icon name="refresh" size={14} />{busy ? 'Testing…' : 'Test connection'}</Btn>
         <span className="text-xs text-glass-muted">Days of metrics re-pulled each sync: {s.config.sync_days} <button type="button" style={{ color: 'var(--accent)' }} onClick={() => cfg('sync_days', 'Days (1–90)')}>change</button></span>
       </div>
-      <div className="glass-card p-4"><h3 className="font-bold mb-2">Rules and limits</h3>
+      {platform === 'meta' && <AdsMetaSettings edge={edge} paused={s.config.execution_paused === 'true' || s.config.meta_paused === 'true'} />}
+      {platform === 'google' && <div className="glass-card p-4"><h3 className="font-bold mb-2">Rules and limits</h3>
         {!rules ? <Empty>Loading…</Empty> : <ul className="space-y-2">{rules.map((r) => (
           <li key={r.code} className="flex flex-wrap items-center gap-2 text-sm"><span className="flex-1 min-w-[12rem]">{r.label}</span><code className="text-xs">{JSON.stringify(r.value)}</code>
             <Btn ghost onClick={() => rule(r)}>Edit</Btn><Btn ghost onClick={() => ruleToggle(r)}>{r.active ? 'On' : 'Off'}</Btn></li>))}</ul>}
-      </div>
+      </div>}
       <div className="glass-card p-4"><h3 className="font-bold mb-2">Team access</h3>
         {!team ? <Empty>Loading…</Empty> : <ul className="space-y-1">{team.map((e) => (
           <li key={e.id} className="flex flex-wrap items-center gap-3 text-sm"><span className="flex-1">{e.name} <span className="text-xs text-glass-muted">{e.department}</span></span>
@@ -794,8 +811,16 @@ const MORE = [
   { id: 'research', label: 'Research', icon: 'search', hint: 'Market and competitor findings with sources' },
   { id: 'experiments', label: 'Experiments', icon: 'zap', hint: 'A/B tests: hypothesis, result, decision' },
   { id: 'activity', label: 'Activity', icon: 'list', hint: 'Every action and sync run' },
+  { id: 'setup', label: 'Setup', icon: 'checkCircle', hint: 'What is still to do, with exact steps and Check Now', admin: true },
   { id: 'settings', label: 'Settings', icon: 'settings', hint: 'API keys, test connection, limits, team', admin: true },
 ];
+
+// The Setup checks need Admin; others get no banner and no checks.
+export function useSetupFor(isAdmin, platform) {
+  const noop = useCallback(async () => ({}), []);
+  const [st, check] = useSetup(platform, isAdmin ? edge : null);
+  return isAdmin ? [st, check] : [null, noop];
+}
 
 export default function Ads({ access }) {
   const route = useRoute();
@@ -813,12 +838,13 @@ export default function Ads({ access }) {
   const sub = more.find((m) => m.id === view);
   const tab = sub ? 'more' : (TABS.find((t) => t.id === view) ? view : 'home');
   const count = { more: pending?.length || 0 };
+  const [setupSt, setupCheck] = useSetupFor(access.is_admin, 'google');
   return (
     <div className="space-y-4">
       <WorkingBar />
       <OfflineBar />
       <div className="flex flex-wrap items-end justify-between gap-2">
-        <div><h2 className="text-xl font-bold text-glass-primary">ADS</h2><div className="text-xs text-glass-muted">Google Ads · Meta · CRM outcomes</div></div>
+        <div><h2 className="text-xl font-bold text-glass-primary">Google Ads</h2><div className="text-xs text-glass-muted">Google Ads · CRM outcomes</div></div>
         <div className="flex flex-wrap gap-2 items-center">
           <select aria-label="Client" className="glass-input px-3 py-2 text-sm" value={ctx.client} onChange={(e) => setParams({ client: e.target.value })}>
             <option value="">All clients</option>{(clients || []).filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -832,6 +858,7 @@ export default function Ads({ access }) {
           </>}
         </div>
       </div>
+      {access.is_admin && view !== 'setup' && <SetupBanner platform="google" st={setupSt} onOpen={() => go('setup')} />}
       <div className="text-[11px] text-glass-muted -mt-2">{from} to {to} · time zone {tz}{client ? ` · ${client.name}` : ' · every client'}</div>
       <div role="tablist" aria-label="ADS" className="glass-card p-1 grid grid-cols-4 gap-1">
         {TABS.map((t) => {
@@ -862,8 +889,8 @@ export default function Ads({ access }) {
       )}
       {tab === 'home' && <AdsToday ctx={ctx} access={access} go={go} parts={{ Kpi, Bars, fillDays, Delivery }} />}
       {view === 'report' && <Home ctx={ctx} access={access} go={go} />}
-      {tab === 'campaigns' && <Campaigns ctx={ctx} access={access} />}
-      {tab === 'adsleads' && <AdsLeads access={access} />}
+      {tab === 'campaigns' && <Campaigns ctx={ctx} access={access} platform="google" />}
+      {tab === 'adsleads' && <AdsLeads access={access} platform="google" />}
       {view === 'leads' && <LeadsRevenue ctx={ctx} access={access} clients={clients} />}
       {view === 'approvals' && <Approvals access={access} onChange={reloadPending} />}
       {view === 'autopilot' && <AdsAutopilot />}
@@ -873,7 +900,8 @@ export default function Ads({ access }) {
       {view === 'research' && <Research ctx={ctx} />}
       {view === 'experiments' && <Experiments ctx={ctx} />}
       {view === 'activity' && <Activity />}
-      {view === 'settings' && access.is_admin && <Settings />}
+      {view === 'settings' && access.is_admin && <Settings platform="google" />}
+      {view === 'setup' && access.is_admin && <AdsSetup platform="google" edge={edge} st={setupSt} check={setupCheck} />}
     </div>
   );
 }

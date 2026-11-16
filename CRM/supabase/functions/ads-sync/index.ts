@@ -8,12 +8,20 @@
 //   ideas    Admin / agents. {seeds: [...], geos: ["2356"]} -> Keyword Planner ideas (Basic access).
 //   execute  Approver. Sends approved changes, reads each campaign back, records verified / failed / outcome_unknown.
 //   convert  Approver / cron. Tells Google which ad clicks became CRM enquiries (only for people who allowed ad data sharing).
+//   meta_page            Admin. Reads the Page's lead forms, checks the leadgen webhook subscription; {subscribe: true} adds it.
+//   meta_leads           Approver / cron. Fetches Meta leads the webhook announced and files them through the ADS intake.
+//   meta_leads_reconcile Approver / cron. Reads each active form's last 48 hours and adds any lead the webhook missed.
+//   setup                Viewer. Which ADS functions are deployed in the current version (for the Setup checklist).
+//   meta_test_event      Admin. {test_event_code} sends one CRM test event, visible in Events Manager > Test events.
+//   meta_convert         Approver / cron. Reports lead stages to Meta (Conversions API: CRM, website, WhatsApp), per source settings.
 // Every job takes its own lock (svc_ads_run_begin), so overlapping runs skip instead of doubling up.
 // Keys come from Vault through the service role and never leave this function (responses and logs are scrubbed).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { asUser, cors, cronOk, json, HttpError, rpc } from "../_shared/ads_deno.ts";
 import { AdsError, GoogleAds, MetaAds, dateRange, discover, executeOne, scrubSecrets, todayIn, verify, type Platforms, type WorkItem } from "../_shared/ads_core.ts";
 import { buildOps, conversionRow, convertOutcome, executeGoogleOp, googleSnapshot, resultNames, type ConvItem, type GoogleOp } from "../_shared/ads_google_ops.ts";
+import { ADS_BUILD, buildEvent, crmEvent, ctwaPayload, deployState, EventError, metaLeadPayload, serializeEvents, type CapiItem } from "../_shared/ads_meta.ts";
+import { URL_ } from "../_shared/ads_deno.ts";
 
 const DEADLINE_MS = 120_000;
 
@@ -125,6 +133,7 @@ async function execute(s: Record<string, string>, t0: number) {
   if (p.meta) p.metaCurrency = (id) => currencies.get(id) ?? null;
   return runJob("execute", s, async () => {
     if (s.EXECUTION_PAUSED === "true") return { items: 0, detail: "Emergency stop is on; nothing sent." };
+    const stopped = (pl: string) => (pl === "google" ? s.GOOGLE_PAUSED : s.META_PAUSED) === "true";   // one platform stopped
     const meta = ((await rpc("svc_ads_accounts")) as Acct[]).filter((a) => a.platform === "meta");
     for (const a of meta) if (p.meta) { try { currencies.set(a.external_id, (await p.meta.account(a.external_id)).currency); } catch { /* resolved per change */ } }
     let n = 0;
@@ -138,6 +147,7 @@ async function execute(s: Record<string, string>, t0: number) {
     // 2. Approved changes
     for (const w of (await rpc("svc_ads_work")) as WorkItem[]) {
       if (Date.now() - t0 > DEADLINE_MS) break;
+      if (stopped(w.platform)) continue;                 // stays approved; sent when that platform is resumed
       if (!(await rpc("svc_ads_claim", { p_id: w.id }))) continue;
       const r = await executeOne(p, w);
       await rpc("svc_ads_finish", { p_id: w.id, p_status: r.status, p_error: r.error ? scrubSecrets(r.error, s) : null, p_verify: r.verify ?? null });
@@ -145,7 +155,7 @@ async function execute(s: Record<string, string>, t0: number) {
     }
     // 3. Google operations (keywords, negatives, ads, locations, assets, goals). Interrupted ones are never re-sent.
     for (const o of (await rpc("svc_ads_google_op_work")) as GoogleOp[]) {
-      if (Date.now() - t0 > DEADLINE_MS) break;
+      if (Date.now() - t0 > DEADLINE_MS || stopped("google")) break;
       if (o.status === "executing") {
         await rpc("svc_ads_google_op_finish", { p_id: o.id, p_status: "outcome_unknown", p_error: "Interrupted while sending; check it in Google Ads.", p_result: null, p_verify: null });
         continue;
@@ -166,6 +176,7 @@ async function convert(s: Record<string, string>, t0: number) {
   const { p } = platforms(s);
   return runJob("convert", s, async () => {
     if (s.EXECUTION_PAUSED === "true") return { items: 0, detail: "Emergency stop is on; nothing sent." };
+    if (s.GOOGLE_PAUSED === "true") return { items: 0, detail: "Google Ads is stopped; nothing sent." };
     if (!p.google) return { items: 0, status: "error", detail: "Google Ads keys are not set in ADS > Settings" };
     const w = await rpc("svc_ads_conversions_work") as { account: { external_id: string; login_customer_id?: string | null } | null;
       actions: Record<string, string>; missing: { event: string; name: string; category: string; primary: boolean }[]; items: ConvItem[] };
@@ -198,21 +209,174 @@ async function convert(s: Record<string, string>, t0: number) {
   });
 }
 
+// ------------------------------------------------------------------ Meta lead ads (migration 100)
+// The Page token: the saved long-lived Page token if there is one, else read with the System User token.
+async function pageApi(s: Record<string, string>, pageId: string): Promise<MetaAds> {
+  const { p } = platforms(s);
+  if (!p.meta) throw new AdsError("auth_required", "Meta access token is not set in ADS > Settings");
+  return p.meta.withToken(s.META_PAGE_TOKEN || await p.meta.pageToken(pageId));
+}
+
+async function metaPage(s: Record<string, string>, subscribe: boolean) {
+  return runJob("meta_page", s, async () => {
+    const pageId = (await rpc("svc_ads_meta_reconcile_work") as { page_id: string | null }).page_id;
+    if (!pageId) return { items: 0, status: "error", detail: "Add the Facebook Page ID first." };
+    const api = await pageApi(s, pageId);
+    const forms = await api.leadgenForms(pageId);
+    const n = await rpc("svc_ads_meta_forms_save", { p_forms: forms });
+    let subs = (await api.subscribedApps(pageId)).some((a) => a.subscribed_fields.includes("leadgen"));
+    if (!subs && subscribe) { await api.subscribeLeadgen(pageId); subs = (await api.subscribedApps(pageId)).some((a) => a.subscribed_fields.includes("leadgen")); }
+    return { items: n, status: subs ? "ok" : "error",
+      detail: `${n} lead form(s) found. ${subs ? "The Page sends new leads to the CRM (leadgen subscribed)." : "The Page is NOT subscribed to leadgen yet: press Connect Page."}` };
+  });
+}
+
+async function metaLeads(s: Record<string, string>, t0: number) {
+  return runJob("meta_leads", s, async () => {
+    const w = await rpc("svc_ads_meta_leads_work") as { page_id: string | null; consent_field: string | null; consent_purpose?: string;
+      items: { id: number; source: "instant_form" | "ctwa"; external_id: string; ad_id: string | null; created_time: string | null; payload: any; pipeline: string }[] };
+    if (!w.items?.length) return { items: 0, detail: "No Meta lead waiting." };
+    const purpose = (w.consent_purpose === "marketing" ? "marketing" : "ad_data_sharing") as "ad_data_sharing" | "marketing";
+    let api: MetaAds | null = null, filed = 0, organic = 0, later = 0;
+    for (const it of w.items) {
+      if (Date.now() - t0 > DEADLINE_MS) break;
+      try {
+        if (it.source === "ctwa") {
+          const r = await rpc("svc_ads_meta_lead_finish", { p_id: it.id, p_status: "fetched", p_payload: ctwaPayload(it), p_pipeline: it.pipeline });
+          if ((r as any)?.lead_id) filed++;
+          continue;
+        }
+        if (!w.page_id && !s.META_PAGE_TOKEN) throw new AdsError("sync_failed", "Add the Facebook Page ID in ADS > Settings > Meta");
+        api ??= await pageApi(s, w.page_id ?? "");
+        const lead = await api.getLead(it.external_id);
+        if (lead.is_organic === true || lead.is_organic === "1") {
+          await rpc("svc_ads_meta_lead_finish", { p_id: it.id, p_status: "organic" }); organic++; continue;
+        }
+        const r = await rpc("svc_ads_meta_lead_finish", { p_id: it.id, p_status: "fetched",
+          p_payload: metaLeadPayload(lead, { consentField: w.consent_field, consentPurpose: purpose }), p_pipeline: it.pipeline });
+        if ((r as any)?.lead_id) filed++;
+      } catch (e) {
+        const msg = scrubSecrets(e instanceof Error ? e.message : String(e), s).slice(0, 400);
+        await rpc("svc_ads_meta_lead_finish", { p_id: it.id, p_status: "retry", p_error: msg });
+        later++;
+        if (e instanceof AdsError && (e.status === "rate_limited" || e.status === "auth_required")) break;   // stop: the rest waits
+      }
+    }
+    return { items: filed, detail: `${filed} Meta lead(s) filed, ${organic} organic (not from an ad), ${later} to try again`, status: later ? "error" : "ok" };
+  });
+}
+
+async function metaReconcile(s: Record<string, string>, t0: number) {
+  return runJob("meta_leads_reconcile", s, async () => {
+    const w = await rpc("svc_ads_meta_reconcile_work") as { page_id: string | null; enabled: boolean; forms: { form_id: string; since: number }[] };
+    if (!w.enabled) return { items: 0, detail: "Meta lead forms are switched off." };
+    if (!w.page_id) return { items: 0, status: "error", detail: "Add the Facebook Page ID first." };
+    const api = await pageApi(s, w.page_id);
+    let added = 0;
+    for (const f of w.forms ?? []) {
+      if (Date.now() - t0 > DEADLINE_MS) break;
+      const rows = await api.formLeads(f.form_id, f.since);
+      added += Number(await rpc("svc_ads_meta_raw_add", { p_items: rows.map((r) => ({ source: "instant_form", external_id: String(r.id),
+        form_id: f.form_id, ad_id: r.ad_id ?? null, adgroup_id: r.adset_id ?? null, created_time: r.created_time ?? null })), p_via: "reconcile" })) || 0;
+      await rpc("svc_ads_meta_reconciled", { p_form: f.form_id });
+    }
+    return { items: added, detail: `${(w.forms ?? []).length} form(s) checked, ${added} lead(s) the webhook had missed` };
+  });
+}
+
+// One request per batch; a batch Meta refuses is retried one event at a time so one bad event cannot block the rest.
+async function metaConvert(s: Record<string, string>, t0: number) {
+  const { p } = platforms(s);
+  return runJob("meta_convert", s, async () => {
+    if (s.EXECUTION_PAUSED === "true" || s.META_PAUSED === "true") return { items: 0, detail: "Meta Ads is stopped; nothing sent." };
+    if (!p.meta) return { items: 0, status: "error", detail: "Meta access token is not set in Meta Ads > Settings" };
+    const w = await rpc("svc_ads_meta_capi_work") as { paused?: boolean; crm_name: string; datasets: Record<string, string>; items: CapiItem[] };
+    if (w.paused) return { items: 0, detail: "Emergency stop is on; nothing sent." };
+    let sent = 0, later = 0, failed = 0, stop = false;
+    const finish = async (id: number, st: "sent" | "retry" | "failed", err?: string) => {
+      await rpc("svc_ads_meta_capi_finish", { p_id: id, p_status: st, p_error: err ? scrubSecrets(err, s).slice(0, 400) : null });
+      if (st === "sent") sent++; else if (st === "retry") later++; else failed++;
+    };
+    const send = async (dataset: string, batch: { it: CapiItem; ev: Record<string, unknown> }[]): Promise<void> => {
+      try {
+        const r = await p.meta!.sendEvents(dataset, serializeEvents(batch.map((b) => b.ev)));
+        if (r.events_received === batch.length) { for (const b of batch) await finish(b.it.id, "sent"); return; }
+        for (const b of batch) await finish(b.it.id, "retry", `Meta received ${r.events_received ?? 0} of ${batch.length}`);
+      } catch (e) {
+        const ae = e instanceof AdsError ? e : null;
+        if (ae && (ae.status === "rate_limited" || ae.status === "auth_required" || ae.status === "permission_missing" || ae.status === "unavailable" || ae.http === 0)) {
+          for (const b of batch) await finish(b.it.id, "retry", ae.message);
+          stop = ae.status === "rate_limited" || ae.status === "auth_required";
+          return;
+        }
+        if (batch.length > 1) { for (const b of batch) { if (stop) break; await send(dataset, [b]); } return; }
+        await finish(batch[0].it.id, "failed", e instanceof Error ? e.message : String(e));   // Meta refused this event
+      }
+    };
+    const bySource = new Map<string, { it: CapiItem; ev: Record<string, unknown> }[]>();
+    for (const it of w.items ?? []) {
+      try { const ev = buildEvent(it, w.crm_name); bySource.set(it.source, [...(bySource.get(it.source) ?? []), { it, ev }]); }
+      catch (e) { await finish(it.id, "failed", e instanceof EventError ? e.message : String(e)); }
+    }
+    for (const [source, list] of bySource) {
+      const dataset = w.datasets?.[source];
+      if (!dataset) { for (const b of list) await finish(b.it.id, "retry", "No dataset ID for this source"); continue; }
+      for (let i = 0; i < list.length && !stop; i += 50) {
+        if (Date.now() - t0 > DEADLINE_MS) { stop = true; break; }
+        await send(dataset, list.slice(i, i + 50));
+      }
+    }
+    return { items: sent, detail: `${sent} reported to Meta, ${later} to try again later, ${failed} not accepted`, status: failed ? "error" : "ok" };
+  });
+}
+
+// Which ADS functions are deployed, and in which version. Checked from here (server to server), not from the browser.
+async function setupCheck() {
+  const probe = async (path: string, want?: string) => {
+    try {
+      const r = await fetch(`${URL_}/functions/v1/${path}`, { method: "GET", signal: AbortSignal.timeout(8000) });
+      return deployState(r.status, (await r.text()).slice(0, 500), want);
+    } catch { return "unknown" as const; }
+  };
+  return { build: ADS_BUILD, functions: { "ads-sync": "current", "ads-intake": await probe("ads-intake/version", ADS_BUILD),
+    "ads-meta-webhook": await probe("ads-meta-webhook") } };
+}
+
+// One CRM test event for the newest Meta form lead, sent with Meta's test_event_code: it shows in Events Manager >
+// Test events and is not used for optimisation.
+async function metaTestEvent(s: Record<string, string>, code: string) {
+  const { p } = platforms(s);
+  return runJob("meta_test_event", s, async () => {
+    if (!/^TEST[0-9A-Za-z]{2,30}$/.test(code)) return { items: 0, status: "error", detail: "Paste the test code from Events Manager > Test events (it starts with TEST)." };
+    if (!p.meta) return { items: 0, status: "error", detail: "Meta access token is not set" };
+    const t = await rpc("svc_ads_meta_test_lead") as { lead_id: string; em: string | null; ph: string | null; dataset_id: string | null; crm_name: string } | null;
+    if (!t?.lead_id) return { items: 0, status: "error", detail: "No Meta form lead yet: send a test lead first (step before)." };
+    if (!t.dataset_id) return { items: 0, status: "error", detail: "Add the dataset ID for Meta lead forms first." };
+    const ev = crmEvent({ id: 0, source: "instant_form", event_name: "lead_created", event_id: `test:${Date.now()}`,
+      event_time: Math.floor(Date.now() / 1000) - 60, lead_id: t.lead_id, em: t.em, ph: t.ph }, t.crm_name);
+    const r = await p.meta.sendTestEvents(t.dataset_id, serializeEvents([ev]), code);
+    return r.events_received === 1 ? { items: 1, detail: "Meta received the test event. Open Events Manager > Test events to see it." }
+      : { items: 0, status: "error", detail: `Meta received ${r.events_received ?? 0} events` };
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors(req) });
   if (req.method !== "POST") return json(req, 405, { detail: "POST only" });
   const t0 = Date.now();
   try {
-    let body: { jobs?: string[]; ops?: { kind: string; payload: unknown }[]; seeds?: string[]; geos?: string[] } = {};
+    let body: { jobs?: string[]; ops?: { kind: string; payload: unknown }[]; seeds?: string[]; geos?: string[]; subscribe?: boolean; test_event_code?: string } = {};
     try { body = await req.json(); } catch { /* empty body */ }
-    const jobs = (body.jobs ?? ["sync"]).filter((j) => ["test", "discover", "sync", "execute", "gcheck", "ideas", "convert"].includes(j));
+    const jobs = (body.jobs ?? ["sync"]).filter((j) => ["test", "discover", "sync", "execute", "gcheck", "ideas", "convert",
+      "meta_page", "meta_leads", "meta_leads_reconcile", "meta_convert", "setup", "meta_test_event"].includes(j));
     if (!jobs.length) return json(req, 422, { detail: "jobs must include test, discover, sync or execute" });
     if (!(await cronOk(req))) {
       const access = await asUser(req, "api_ads_access") as { can_view: boolean; can_approve: boolean; is_admin: boolean };
       if (!access?.can_view) throw new HttpError(403, "You do not have access to the ADS section");
-      if ((jobs.includes("test") || jobs.includes("discover") || jobs.includes("gcheck") || jobs.includes("ideas")) && !access.is_admin) throw new HttpError(403, "Only Admin can test connections or find accounts");
-      if ((jobs.includes("execute") || jobs.includes("convert")) && !access.can_approve) throw new HttpError(403, "Only approvers can run changes");
+      if ((jobs.includes("test") || jobs.includes("discover") || jobs.includes("gcheck") || jobs.includes("ideas") || jobs.includes("meta_page") || jobs.includes("meta_test_event")) && !access.is_admin) throw new HttpError(403, "Only Admin can test connections or find accounts");
+      if ((jobs.includes("execute") || jobs.includes("convert") || jobs.some((j) => j.startsWith("meta_") && j !== "meta_page" && j !== "meta_test_event")) && !access.can_approve) throw new HttpError(403, "Only approvers can run changes");
     }
+    if (jobs.length === 1 && jobs[0] === "setup") return json(req, 200, { results: { setup: await setupCheck() } });   // no keys needed
     const secrets = (await rpc("svc_ads_secrets")) as Record<string, string>;
     const results: Record<string, unknown> = {};
     if (jobs.includes("test")) results.test = await test(secrets);
@@ -246,6 +410,12 @@ Deno.serve(async (req) => {
     if (jobs.includes("sync")) results.sync = await sync(secrets, t0);
     if (jobs.includes("execute")) results.execute = await execute(secrets, t0);
     if (jobs.includes("convert")) results.convert = await convert(secrets, t0);
+    if (jobs.includes("setup")) results.setup = await setupCheck();
+    if (jobs.includes("meta_test_event")) results.meta_test_event = await metaTestEvent(secrets, String(body.test_event_code ?? "").trim());
+    if (jobs.includes("meta_page")) results.meta_page = await metaPage(secrets, body.subscribe === true);
+    if (jobs.includes("meta_leads_reconcile")) results.meta_leads_reconcile = await metaReconcile(secrets, t0);
+    if (jobs.includes("meta_leads")) results.meta_leads = await metaLeads(secrets, t0);
+    if (jobs.includes("meta_convert")) results.meta_convert = await metaConvert(secrets, t0);
     return json(req, 200, { results });
   } catch (e) {
     if (e instanceof HttpError) return json(req, e.status, { detail: e.message });
