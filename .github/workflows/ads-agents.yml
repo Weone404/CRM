@@ -1,0 +1,64 @@
+name: ADS agents (cloud runner)
+
+# Runs the CRM's Google Ads agents with no Mac: once an hour it works through whatever the CRM has waiting, then stops.
+# The Mac helper (CRM/tools/ads-agents/install.sh) can run at the same time; the CRM hands each step to one of them only.
+#
+# Two secrets are needed (repo Settings > Secrets and variables > Actions > New repository secret). Until both exist, a run does nothing.
+#   ADS_AGENTS_TOKEN         the agents token from CRM > ADS > Autopilot (the same one the Mac helper uses)
+#   CLAUDE_CODE_OAUTH_TOKEN  printed by `claude setup-token` on a computer signed in to the Claude subscription (lasts one year)
+#
+# This repository is public, so the run logs are public too: the helper prints only step numbers and roles here,
+# never account data. The workflow runs on a schedule or by hand only (never for pull requests), so forks cannot reach the secrets.
+# GitHub switches scheduled workflows off after 60 days without any commit; "Enable workflow" on the Actions page turns it back on.
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ads-agents
+  cancel-in-progress: false
+
+jobs:
+  pass:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Are the two secrets set?
+        id: ready
+        env:
+          A: ${{ secrets.ADS_AGENTS_TOKEN }}
+          C: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "$A" ] || [ -z "$C" ]; then
+            echo "ADS_AGENTS_TOKEN and CLAUDE_CODE_OAUTH_TOKEN are not both set yet. Nothing to do."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.ready.outputs.ok == 'true'
+        with:
+          sparse-checkout: CRM/tools/ads-agents
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        if: steps.ready.outputs.ok == 'true'
+        with:
+          node-version: 22
+      - name: Install Claude Code
+        if: steps.ready.outputs.ok == 'true'
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "CLAUDE_BIN=$HOME/.local/bin/claude" >> "$GITHUB_ENV"
+      - name: One pass through the waiting work
+        if: steps.ready.outputs.ok == 'true'
+        env:
+          ADS_AGENTS_ONCE: "1"
+          ADS_AGENTS_MAX_MINUTES: "45"
+          ADS_AGENTS_TOKEN: ${{ secrets.ADS_AGENTS_TOKEN }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: node CRM/tools/ads-agents/agents.mjs
