@@ -136,3 +136,29 @@ People in the cases: **Pro** = an experienced ads manager. **Novice** = someone 
 | UI71 | Anyone | Server error | The reason is shown, not a blank page | ui |
 | UI37 | — | Whole run | No console errors | ui |
 | manual | Novice | Very slow mobile data | Loading text, then content (not automated: needs network shaping) | — |
+
+## 9. Leads from ads are counted (098)
+
+Found live on 16 Nov: a real ad enquiry of 13 Nov was in the CRM, yet every screen said "0 leads", because leads were matched by a
+UTM campaign name that Google ad links here do not carry. They are now matched by the campaign id inside the ad click.
+
+| ID | Who | Situation | Expected | Where |
+|---|---|---|---|---|
+| L01–L03 | System | Campaign id as its own field, inside the landing URL, at the end of the URL, before a #anchor | Read correctly | 80_ |
+| L04, L05 | Attacker / broken site | Injected text, look-alike parameter names, unfilled {campaignid}, empty or malformed click data | Never taken as an id, no error | 80_ |
+| L06, L07 | System | Google click, Meta click, paid UTM, organic Google visit, unknown paid source | Right platform, or none | 80_ |
+| L08 | Novice | No ad enquiry has ever arrived | "Not available", never a false 0 | 80_ |
+| L09–L17 | Owner | One real ad enquiry | Counted in the daily report, the agents' data, Today, Campaigns (with cost per lead); other campaigns show a true 0 | 80_ |
+| L12, L13 | Privacy | What the agents receive about a lead | Keyword, ad, ad group, stage; never the name, phone number or click id | 80_ |
+| L18, L19 | Outsider | No ADS access / reads the lead list directly | Refused | 80_ |
+| L20 | Novice | Double tap on Submit; the same person enquires again next day | One lead | 80_ |
+| L21, L22 | System | Spam / test lead (quarantined), deleted lead | Not counted | 80_ |
+| L23, L24 | System | Ad click with no campaign id, or a campaign id that is not ours | Counted for the account, not pinned on a campaign | 80_ |
+| L25, L26 | Worst case | A Meta click carrying a Google campaign id | Not credited to Google (platforms stay separate) | 80_ |
+| L27–L31 | Sales | Wrong number, Interested, Qualified, Admission, Lost | Valid / qualified / customer counts follow the stage; no divide by zero | 80_ |
+| L32 | System | Lead at 00:20 India time | Belongs to the India day, same as Google's spend | 80_ |
+| L33–L35 | System | The same person is in both lead lists; leads matched the old UTM way | Counted once; old matching still works | 80_ |
+| L36 | Worst case | Money spent, lead counting never proven for the client | The allocator does NOT cut the budget for "0 leads" | 80_ |
+| L37, L38 | System | 3 valid ad leads under target and budget-limited; later 14 days with no lead | +15%; -20% | 80_ |
+| R01 | Developer | Roll 098 back and apply it again | Old definitions return; re-applies cleanly | run.sh |
+

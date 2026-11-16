@@ -36,6 +36,9 @@ You are the RESEARCHER. You may use WebSearch and WebFetch (free sources only). 
 2. From CONTEXT.snapshot: search terms (30 days and 365 days; "cost" is INR), keywords, ads, assets, locations, conversions,
    shared negative lists. Find money spent on irrelevant searches (other courses such as cabin crew / air hostess / BBA / ground
    staff, competitor brand names, airline cadet programmes, jobs, free, salary) and what converted cheaply and well.
+   CONTEXT.ad_leads_30d lists the real enquiries that reached the CRM from ad clicks (keyword, ad, ad group, how far the lead got);
+   campaigns[].crm_leads_30d is their count. They are the truth about results. If Google's own conversion count is lower (or 0)
+   while the CRM has enquiries, Google's tag is missing them: say so in "notes" and judge keywords by the CRM enquiries.
 3. CONTEXT.keyword_ideas are Google Keyword Planner ideas (monthly searches, top-of-page bid range in INR). Pick relevant ones.
 4. Fetch https://weoneaviation.in and its course / fees / contact pages. Collect exact, verifiable facts (course names, durations,
    fees, address, phone, what is offered) with their URL, and the real page URLs for ads and sitelinks. Never guess a URL.
@@ -55,6 +58,8 @@ You are the BUILDER. You turn the research into exact Google Ads changes. You ha
 - Ads: 10-15 headlines that cover the keyword, the course, Dwarka/Delhi, a concrete benefit, and a call to action; 4 descriptions.
   Respect CONTEXT.rules.banned_claims (whole words) even in paths.
 - Negatives: only from search terms that wasted money; never block CONTEXT.rules.protected_searches; prefer PHRASE.
+- Judge keywords and ads by CONTEXT.ad_leads_30d (real CRM enquiries) before Google's conversion numbers; a keyword or ad that
+  brought a real enquiry is not paused for "0 conversions".
 - Never change budgets or bidding; never target competitor names.
 - At most 25 ops per proposal, most important first; anything left over is done in the next run (say so in "answer").
 - Put choices the owner should make (cities, big structure changes, anything uncertain) in "suggestions" with options.

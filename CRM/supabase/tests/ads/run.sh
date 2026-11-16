@@ -7,7 +7,12 @@ DB=ads_test_$$
 psql -q -c "CREATE DATABASE $DB" >/dev/null
 trap 'psql -q -c "DROP DATABASE IF EXISTS $DB" >/dev/null' EXIT
 M=../../../backend/migrations
-for f in ../amazon/00_supabase_stub.sql 01_ads_stub.sql $M/076_ads_module.sql $M/078_ads_client_wizard.sql $M/092_ads_google_ops.sql $M/093_ads_autopilot.sql $M/094_ads_agents.sql $M/095_ads_hardening.sql $M/096_ads_supervisor.sql $M/097_ads_today.sql $M/076_ads_module.sql $M/078_ads_client_wizard.sql $M/092_ads_google_ops.sql $M/093_ads_autopilot.sql $M/094_ads_agents.sql $M/095_ads_hardening.sql $M/096_ads_supervisor.sql $M/097_ads_today.sql; do   # twice: must be re-runnable
+for f in ../amazon/00_supabase_stub.sql 01_ads_stub.sql $M/076_ads_module.sql $M/078_ads_client_wizard.sql $M/089_ads_leads_phase1.sql $M/091_ads_campaign_delivery.sql $M/092_ads_google_ops.sql $M/093_ads_autopilot.sql $M/094_ads_agents.sql $M/095_ads_hardening.sql $M/096_ads_supervisor.sql $M/097_ads_today.sql $M/098_ads_lead_attribution.sql $M/076_ads_module.sql $M/078_ads_client_wizard.sql $M/089_ads_leads_phase1.sql $M/091_ads_campaign_delivery.sql $M/092_ads_google_ops.sql $M/093_ads_autopilot.sql $M/094_ads_agents.sql $M/095_ads_hardening.sql $M/096_ads_supervisor.sql $M/097_ads_today.sql $M/098_ads_lead_attribution.sql; do   # twice: must be re-runnable
   psql -q -X -v ON_ERROR_STOP=1 -d $DB -f "$f" >/dev/null 2>&1 || { echo "FAILED applying $f"; psql -X -v ON_ERROR_STOP=1 -d $DB -f "$f" 2>&1 | grep -m3 ERROR; exit 1; }
 done
-cat 10_ads_tests.sql 20_ads_wizard_tests.sql 30_ads_google_ops_tests.sql 40_ads_autopilot_tests.sql 50_ads_agents_tests.sql 60_ads_hardening_tests.sql 70_ads_supervisor_tests.sql | psql -X -q -t -v ON_ERROR_STOP=1 -d $DB 2>&1 | grep -E "PASS|FAIL|ERROR|ALL ADS" | sed 's/^.*NOTICE:  //'
+cat 10_ads_tests.sql 20_ads_wizard_tests.sql 30_ads_google_ops_tests.sql 40_ads_autopilot_tests.sql 50_ads_agents_tests.sql 60_ads_hardening_tests.sql 70_ads_supervisor_tests.sql 80_ads_attribution_tests.sql | psql -X -q -t -v ON_ERROR_STOP=1 -d $DB 2>&1 | grep -E "PASS|FAIL|ERROR|ALL ADS" | sed 's/^.*NOTICE:  //'
+# 098 must roll back to the previous definitions and re-apply cleanly.
+psql -q -X -v ON_ERROR_STOP=1 -d $DB -f $M/098_ads_lead_attribution_down.sql >/dev/null 2>&1 \
+  && psql -q -X -t -v ON_ERROR_STOP=1 -d $DB -c "SELECT crm_private.ads_report_data(current_date)->>'crm_leads', to_regproc('crm_private.ads_ad_leads') IS NULL" 2>&1 | grep -q "| t" \
+  && psql -q -X -v ON_ERROR_STOP=1 -d $DB -f $M/098_ads_lead_attribution.sql >/dev/null 2>&1 \
+  && echo "PASS R01 098 rolls back to the old definitions and re-applies" || echo "FAIL R01 098 rollback"
