@@ -13,6 +13,9 @@
 //                        without an ad -> normal Leads; Lead Ads Testing Tool leads -> kept as 'test', never filed.
 //   meta_leads_reconcile Approver / cron. Reads each active form's last 48 hours and adds any lead the webhook missed.
 //   setup                Viewer. Which ADS functions are deployed in the current version (for the Setup checklist).
+//   meta_history         Admin / cron. Meta Ads > Insights history (read-only): back-fills up to 37 months of ad-level
+//                        numbers month by month (resumable), refreshes the last 30 days daily and the breakdowns weekly,
+//                        then builds (and emails, when CRM email is set up) the previous month's summary.
 //   meta_test_event      Admin. {test_event_code}: one CRM test event, visible in Events Manager > Test events.
 //                        No code: Meta's CRM check - one ordinary event for Meta's newest Verification Lead (a test
 //                        lead, never a real one), which Events Manager > Test events > channel CRM waits for.
@@ -25,6 +28,9 @@ import { AdsError, GoogleAds, MetaAds, dateRange, discover, executeOne, scrubSec
 import { buildOps, conversionRow, convertOutcome, executeGoogleOp, googleSnapshot, resultNames, type ConvItem, type GoogleOp } from "../_shared/ads_google_ops.ts";
 import { ADS_BUILD, buildEvent, crmEvent, ctwaPayload, deployState, EventError, isTestLead, metaLeadPayload, organicPayload, serializeEvents, type CapiItem } from "../_shared/ads_meta.ts";
 import { URL_ } from "../_shared/ads_deno.ts";
+import { BREAKDOWNS, monthChunks, namesFromDays, parseAd, parseAdDay, parseAdset, parseBreakdown, parseCampaign, monthsBack, type DayRow } from "../_shared/meta_history.ts";
+import { findPatterns, reportText } from "../_shared/meta_patterns.ts";
+import { smtpSend } from "../_shared/smtp.ts";
 
 const DEADLINE_MS = 120_000;
 
@@ -350,6 +356,101 @@ async function setupCheck() {
     "ads-meta-webhook": await probe("ads-meta-webhook") } };
 }
 
+// ---------------------------------------------------------------- Meta Ads > Insights history (read-only)
+type HistPlan = { accounts: { id: string; external_id: string; timezone: string | null; currency: string | null }[];
+  months: number; start: string; cursor: string; done: boolean; recent_due: boolean; breakdowns_due: boolean; report_month: string | null };
+async function saveDays(accountId: string, raw: any[]) {
+  const days = raw.map(parseAdDay).filter((x): x is DayRow => x !== null);
+  for (let i = 0; i < days.length; i += 1000) await rpc("svc_ads_meta_ad_days_save", { p_account: accountId, p_items: days.slice(i, i + 1000) });
+  const names = namesFromDays(raw);
+  for (let i = 0; i < names.length; i += 1000) await rpc("svc_ads_meta_objects_save", { p_account: accountId, p_items: names.slice(i, i + 1000) });
+  return days.length;
+}
+async function metaHistory(s: Record<string, string>, t0: number) {
+  const { p } = platforms(s);
+  return runJob("meta_history", s, async () => {
+    if (!p.meta) return { items: 0, status: "error", detail: "Meta access token is not set" };
+    const plan = await rpc("svc_ads_meta_history_plan") as HistPlan;
+    if (!plan.accounts.length) return { items: 0, detail: "No connected Meta ad account." };
+    const time = () => Date.now() - t0 < DEADLINE_MS - 15_000;
+    let rows = 0, cursor = plan.cursor, done = plan.done;
+    const did: string[] = [], problems: string[] = [];
+    for (const a of plan.accounts) {
+      const today = todayIn(a.timezone ?? "Asia/Kolkata");
+      try {
+        // 1. structure: campaigns, ad sets (targeting) and ads (creative) - daily, and before the first back-fill
+        if (plan.recent_due && time()) {
+          // each level on its own: a refusal for one never stops the numbers (names also arrive with them)
+          let n = 0;
+          for (const [what, get, parse] of [["campaigns", () => p.meta!.historyCampaigns(a.external_id), parseCampaign],
+              ["ad sets", () => p.meta!.historyAdsets(a.external_id), parseAdset], ["ads", () => p.meta!.historyAds(a.external_id), parseAd]] as const) {
+            try {
+              const objs = (await get()).map(parse as (r: any) => unknown);
+              for (let i = 0; i < objs.length; i += 500) await rpc("svc_ads_meta_objects_save", { p_account: a.id, p_items: objs.slice(i, i + 500) });
+              n += objs.length;
+            } catch (e) { problems.push(`${what}: ${scrubSecrets(e instanceof Error ? e.message : String(e), s).slice(0, 160)}`); }
+          }
+          did.push(`${n} campaigns/ad sets/ads`);
+        }
+        // 2. back-fill month by month from the cursor (resumes next hour if time runs out)
+        if (!done) {
+          let months = 0;
+          for (const ch of monthChunks(cursor < plan.start ? plan.start : cursor, today)) {
+            if (!time()) break;
+            rows += await saveDays(a.id, await p.meta.adDays(a.external_id, ch.since, ch.until));
+            cursor = ch.next; months++;
+            await rpc("svc_ads_meta_history_mark", { p: { cursor } });
+          }
+          if (cursor > today) { done = true; await rpc("svc_ads_meta_history_mark", { p: { done: true } }); }
+          did.push(done ? `history complete (${months} month(s) this run)` : `${months} month(s) of history, continues next hour`);
+        }
+        // 3. once complete: the last 30 days daily (Meta adjusts recent numbers for a few days)
+        if (done && plan.recent_due && time()) {
+          rows += await saveDays(a.id, await p.meta.adDays(a.external_id, dateRange(30, today).since, today));
+          await rpc("svc_ads_meta_history_mark", { p: { recent: true } });
+          did.push("last 30 days refreshed");
+        }
+        // 4. breakdowns weekly: 13 months (6 for frequency), whole account
+        if (plan.breakdowns_due && time()) {
+          let kinds = 0;
+          for (const b of BREAKDOWNS) {
+            if (!time()) break;
+            const since = monthsBack(today, b.months);
+            try {
+              const items = (await p.meta.breakdown(a.external_id, b.breakdowns, since, today)).map((r) => parseBreakdown(b.kind, r)).filter(Boolean);
+              await rpc("svc_ads_meta_breakdowns_save", { p_account: a.id, p_kind: b.kind, p_from: since, p_items: items });
+              kinds++;
+            } catch (e) { problems.push(`${b.kind}: ${scrubSecrets(e instanceof Error ? e.message : String(e), s).slice(0, 160)}`); }
+          }
+          if (kinds) await rpc("svc_ads_meta_history_mark", { p: { breakdowns: true } });
+          did.push(`${kinds} breakdown(s)`);
+        }
+      } catch (e) {
+        problems.push(`${a.external_id}: ${scrubSecrets(e instanceof Error ? e.message : String(e), s).slice(0, 200)}`);
+      }
+    }
+    // 5. last month's summary, once the history is complete
+    if (plan.report_month && done && time()) {
+      const data = await rpc("svc_ads_meta_report_data", { p_month: plan.report_month });
+      const pats = findPatterns(data).patterns;
+      let emailed = false, err: string | null = null;
+      const mc = await rpc("svc_ads_meta_mail_config") as { ready: boolean; smtp?: any; password?: string; to?: string[] };
+      if (mc.ready && mc.to?.length) {
+        try {
+          const m = reportText(plan.report_month, data, pats);
+          await smtpSend({ host: mc.smtp.host, port: Number(mc.smtp.port) || 465, username: mc.smtp.username, password: mc.password!,
+            fromName: mc.smtp.from_name ?? "We One CRM" }, { to: mc.to, subject: m.subject, text: m.text, html: m.html });
+          emailed = true;
+        } catch (e) { err = e instanceof Error ? e.message : String(e); }
+      } else err = mc.ready ? "No recipients set (Meta Ads > Insights > Monthly summaries)" : "CRM email is not set up";
+      await rpc("svc_ads_meta_report_save", { p_month: plan.report_month, p_data: data, p_patterns: pats, p_emailed: emailed, p_error: err });
+      did.push(`summary for ${plan.report_month.slice(0, 7)} saved${emailed ? " and emailed" : ""}`);
+    }
+    return { items: rows, status: problems.length ? "error" : "ok",
+      detail: `${rows} ad-day rows. ${did.join("; ") || "Nothing due"}${problems.length ? `. Problems: ${problems.join(" | ")}` : ""}` };
+  });
+}
+
 // Meta's CRM check: Events Manager > Test events > channel CRM shows a Verification Lead and waits for an ordinary event
 // for that lead id (Meta gives no test code there). Only a lead kept as 'test' (Testing Tool / Verification Lead) is
 // ever used, so no real lead is reported by this.
@@ -394,13 +495,13 @@ Deno.serve(async (req) => {
     let body: { jobs?: string[]; ops?: { kind: string; payload: unknown }[]; seeds?: string[]; geos?: string[]; subscribe?: boolean; test_event_code?: string } = {};
     try { body = await req.json(); } catch { /* empty body */ }
     const jobs = (body.jobs ?? ["sync"]).filter((j) => ["test", "discover", "sync", "execute", "gcheck", "ideas", "convert",
-      "meta_page", "meta_leads", "meta_leads_reconcile", "meta_convert", "setup", "meta_test_event"].includes(j));
+      "meta_page", "meta_leads", "meta_leads_reconcile", "meta_convert", "setup", "meta_test_event", "meta_history"].includes(j));
     if (!jobs.length) return json(req, 422, { detail: "jobs must include test, discover, sync or execute" });
     if (!(await cronOk(req))) {
       const access = await asUser(req, "api_ads_access") as { can_view: boolean; can_approve: boolean; is_admin: boolean };
       if (!access?.can_view) throw new HttpError(403, "You do not have access to the ADS section");
-      if ((jobs.includes("test") || jobs.includes("discover") || jobs.includes("gcheck") || jobs.includes("ideas") || jobs.includes("meta_page") || jobs.includes("meta_test_event")) && !access.is_admin) throw new HttpError(403, "Only Admin can test connections or find accounts");
-      if ((jobs.includes("execute") || jobs.includes("convert") || jobs.some((j) => j.startsWith("meta_") && j !== "meta_page" && j !== "meta_test_event")) && !access.can_approve) throw new HttpError(403, "Only approvers can run changes");
+      if ((jobs.includes("test") || jobs.includes("discover") || jobs.includes("gcheck") || jobs.includes("ideas") || jobs.includes("meta_page") || jobs.includes("meta_test_event") || jobs.includes("meta_history")) && !access.is_admin) throw new HttpError(403, "Only Admin can test connections or find accounts");
+      if ((jobs.includes("execute") || jobs.includes("convert") || jobs.some((j) => j.startsWith("meta_") && j !== "meta_page" && j !== "meta_test_event" && j !== "meta_history")) && !access.can_approve) throw new HttpError(403, "Only approvers can run changes");
     }
     if (jobs.length === 1 && jobs[0] === "setup") return json(req, 200, { results: { setup: await setupCheck() } });   // no keys needed
     const secrets = (await rpc("svc_ads_secrets")) as Record<string, string>;
@@ -437,6 +538,7 @@ Deno.serve(async (req) => {
     if (jobs.includes("execute")) results.execute = await execute(secrets, t0);
     if (jobs.includes("convert")) results.convert = await convert(secrets, t0);
     if (jobs.includes("setup")) results.setup = await setupCheck();
+    if (jobs.includes("meta_history")) results.meta_history = await metaHistory(secrets, t0);
     if (jobs.includes("meta_test_event")) results.meta_test_event = await metaTestEvent(secrets, String(body.test_event_code ?? "").trim());
     if (jobs.includes("meta_page")) results.meta_page = await metaPage(secrets, body.subscribe === true);
     if (jobs.includes("meta_leads_reconcile")) results.meta_leads_reconcile = await metaReconcile(secrets, t0);

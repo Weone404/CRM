@@ -151,6 +151,39 @@ await page.screenshot({ path: `${SHOTS}/ads_settings_meta.png`, fullPage: true }
 await rpc('api_ads_meta_source_save', { p_source: 'instant_form', p_data: { intake_enabled: false, report_enabled: false, consent_mode: 'required' } });
 await rpc('api_ads_meta_event_map_save', { p_source: 'ctwa', p_pipeline: 'pilot_training', p_stage: 'lead_created', p_event: 'LeadSubmitted', p_enabled: true });
 
+// ---- Meta Ads > Insights (migration 103)
+await page.goto(`${APP}#/metaads/insights`);
+await page.getByTestId('meta-insights').waitFor({ timeout: 15000 });
+await page.getByTestId('insights-tiles').waitFor({ timeout: 20000 });
+t = await page.getByTestId('insights-tiles').innerText();
+ok(/Spend\s+₹[\d,]+/.test(t) && /Admissions\s+\d+/.test(t) && /Cost per admission/.test(t) && /vs previous/.test(t),
+  'UI150 Insights shows spend, CRM results and cost per result with the change against the previous period');
+t = await page.getByTestId('insights-patterns').innerText();
+ok(/Do more of/.test(t) && /Do less of/.test(t) && /CPL Reels Delhi/.test(t) && /(Proven|Early)/.test(t),
+  'UI151 proven patterns are listed as wins and losses with a confidence badge');
+ok(await page.getByTestId('pattern').count() >= 3, 'UI151b several patterns are found in the sample history');
+ok(/CPL Reels Delhi/.test(await page.getByTestId('insights-board').innerText()) && /Delhi 18-24/.test(await (async () => {
+  await page.getByTestId('insights-board').getByRole('button', { name: 'Ad sets' }).click(); return page.getByTestId('insights-board').innerText(); })()),
+  'UI152 the leaderboard ranks campaigns and ad sets');
+t = await page.getByTestId('insights-gallery').innerText();
+ok(/Pilot banna hai\? Reel/.test(t) && /Best/.test(t) && /Worst/.test(t) && /Fees banner/.test(t), 'UI153 the creative gallery shows the best and worst ads with their text');
+ok(await page.getByTestId('insights-trend').locator('rect').count() >= 8 && /Age × gender/.test(await page.getByTestId('insights-audience').innerText()),
+  'UI154 weekly chart and audience charts are drawn');
+t = await page.getByTestId('insights-whatif').innerText();
+ok(/Moving ₹[\d,]+\/week from Broad India Static to CPL Reels Delhi: about \+[\d.]+ admissions per week/.test(t), 'UI155 the budget what-if estimates extra admissions from moving budget loser -> winner');
+const c150 = (await calls()).filter((x) => x.fn === 'api_ads_meta_insights').length;
+await page.getByLabel('Campaign').selectOption('7101');
+await page.waitForTimeout(1200);
+ok((await calls()).filter((x) => x.fn === 'api_ads_meta_insights').length > c150 && (await calls()).some((x) => x.fn === 'api_ads_meta_insights' && x.args.p_campaign === '7101'),
+  'UI156 filters reload the numbers for one campaign');
+await page.getByLabel('Note text').fill('DGCA exam results out');
+await page.getByRole('button', { name: 'Add note' }).click();
+await page.waitForTimeout(1200);
+ok(/DGCA exam results out/.test(await page.getByTestId('insights-notes').innerText()), 'UI157 a timeline note is added');
+ok(/Monthly summaries/.test(await page.getByTestId('insights-reports').innerText()) && /CRM email is not set up/.test(await page.getByTestId('insights-reports').innerText()),
+  'UI158 monthly summaries say when CRM email is not set up');
+await page.screenshot({ path: `${SHOTS}/ads_meta_insights.png`, fullPage: true });
+
 // ---- Two sections: Google Ads and Meta Ads, each with its own Setup checklist and stop
 await page.goto(`${APP}#/metaads`);
 await page.getByTestId('meta-ads').waitFor({ timeout: 15000 });
@@ -178,10 +211,10 @@ await page.getByTestId('step-meta-db').getByRole('button').first().click();
 await page.getByTestId('sql-101').waitFor({ timeout: 15000 });
 await page.waitForTimeout(800);
 t = await page.getByTestId('sql-101').innerText();
-ok(/101: Meta lead forms, part 2/.test(t) && (await page.locator('[data-testid="sql-102"]').count()) === 1 && /INSERT INTO public\.ads_config \(key, value\) VALUES \('ads_schema', '101'\)/.test(t)
+ok(/101: Meta lead forms, part 2/.test(t) && (await page.locator('[data-testid="sql-102"]').count()) === 1 && (await page.locator('[data-testid="sql-103"]').count()) === 1 && /INSERT INTO public\.ads_config \(key, value\) VALUES \('ads_schema', '101'\)/.test(t)
   && !(await page.locator('[data-testid="sql-100"]').count()) && /supabase\.com\/dashboard\/project\/.+\/sql\/new/.test(await page.getByTestId('step-meta-db').innerHTML()),
-  'UI134b only the missing files (101, 102) are shown, complete and ready to copy, with a link to the SQL editor');
-await fetch(`${API}/__schema/102`);
+  'UI134b only the missing files (101-103) are shown, complete and ready to copy, with a link to the SQL editor');
+await fetch(`${API}/__schema/103`);
 await page.getByRole('button', { name: 'Check all now' }).click();
 await page.waitForTimeout(800);
 ok(await page.getByTestId('step-meta-db').getAttribute('data-done') === 'yes', 'UI134c after the update the database step is done again');

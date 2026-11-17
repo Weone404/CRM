@@ -17,7 +17,7 @@
 export type MetaSource = "instant_form" | "website" | "ctwa";
 
 // Build stamp of the ADS Edge Functions. The Setup checklist compares it to see whether each function was redeployed.
-export const ADS_BUILD = "2026-11-17.meta3";
+export const ADS_BUILD = "2026-11-17.meta4";
 
 // Reads what a deploy check got back. Supabase answers 404 NOT_FOUND for a function that is not deployed.
 export function deployState(status: number, body: string, wantBuild?: string): "current" | "old" | "missing" | "unknown" {

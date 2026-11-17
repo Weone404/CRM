@@ -334,6 +334,31 @@ export class MetaAds {
     });
     return rows.map(parseMetaInsight);
   }
+  // ---- history for Meta Ads > Insights (read-only; migration 103)
+  async historyCampaigns(accountId: string): Promise<any[]> {
+    return this.all(`act_${accountId}/campaigns`, { fields: "id,name,status,effective_status,objective,created_time", limit: "200",
+      filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: ["ACTIVE", "PAUSED", "ARCHIVED", "IN_PROCESS", "WITH_ISSUES"] }]) });
+  }
+  async historyAdsets(accountId: string): Promise<any[]> {
+    return this.all(`act_${accountId}/adsets`, { fields: "id,name,campaign_id,status,effective_status,created_time,optimization_goal,targeting",
+      limit: "200", filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: ["ACTIVE", "PAUSED", "ARCHIVED", "CAMPAIGN_PAUSED", "IN_PROCESS", "WITH_ISSUES"] }]) });
+  }
+  async historyAds(accountId: string): Promise<any[]> {
+    return this.all(`act_${accountId}/ads`, {
+      fields: "id,name,adset_id,campaign_id,status,effective_status,created_time,creative{id,object_type,title,body,call_to_action_type,thumbnail_url,image_url,video_id,object_story_spec,asset_feed_spec}",
+      limit: "100", filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: META_HISTORY_STATUSES }]) });
+  }
+  // One row per ad per day (spend, impressions, clicks, link clicks, actions incl. leads, frequency) with names.
+  async adDays(accountId: string, since: string, until: string): Promise<any[]> {
+    return this.all(`act_${accountId}/insights`, { level: "ad",
+      fields: "ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,spend,impressions,clicks,inline_link_clicks,actions,frequency",
+      time_range: JSON.stringify({ since, until }), time_increment: "1", limit: "500" });
+  }
+  // Whole-account monthly numbers split by one breakdown (age,gender / region / placement / device / hour / frequency).
+  async breakdown(accountId: string, breakdowns: string, since: string, until: string): Promise<any[]> {
+    return this.all(`act_${accountId}/insights`, { level: "account", fields: "spend,impressions,clicks,actions", breakdowns,
+      time_range: JSON.stringify({ since, until }), time_increment: "monthly", limit: "500" });
+  }
   async campaignState(campaignId: string, currency: string | null) {
     const b = await this.req("GET", campaignId, { fields: "status,daily_budget" });
     return { status: normMetaStatus(b.status), daily_budget: metaMinorToUnits(b.daily_budget, currency) };
@@ -385,6 +410,10 @@ export class MetaAds {
     return { events_received: num(b.events_received), fbtrace_id: b.fbtrace_id ?? null };
   }
 }
+
+// Ads: everything except DELETED, which Meta does not list (campaigns and ad sets use the values valid for them).
+export const META_HISTORY_STATUSES = ["ACTIVE", "PAUSED", "ARCHIVED", "CAMPAIGN_PAUSED", "ADSET_PAUSED", "PENDING_REVIEW", "DISAPPROVED",
+  "PREAPPROVED", "PENDING_BILLING_INFO", "IN_PROCESS", "WITH_ISSUES"];
 
 // Ad account account_status values (Marketing API, Ad Account reference).
 export const META_ACCOUNT_STATUS: Record<number, string> = { 1: "ACTIVE", 2: "DISABLED", 3: "UNSETTLED", 7: "PENDING_RISK_REVIEW",

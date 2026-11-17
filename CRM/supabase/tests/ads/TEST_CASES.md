@@ -231,5 +231,14 @@ changes, allowed bids and budget inside the spend limits, and has no Mac that st
 | R04 | Owner | 101 down, then up | Rolls back and re-applies | run.sh |
 | MS48 | Admin / Agent / Browser | Meta's CRM check; test lead over 7 days old; browser reads it | Newest test lead + Lead Created name; not used; refused | A1_ |
 | R05 | Owner | 102 down, then up | Rolls back and re-applies | run.sh |
+| MI01-04 | Agent | Save campaigns / ad sets / ads and ad-days | Bad ids ignored; names never wipe creative; a day saved again replaces | A2_ |
+| MI05-09 | Admin | Insights totals, leaderboard, filters, trend | Meta + CRM numbers per campaign / ad set / ad / form; previous period | A2_ |
+| MI10 | Agent | Breakdown saved again | Its months replaced | A2_ |
+| MI11-13 | Sales / Viewer / Browser | Insights, notes, raw tables | No access refused; only Admin notes; tables and job functions closed | A2_ |
+| MI14-17 | Cron / Agent | History plan and progress | 37-month start, resumes, wakes only when due, daily / weekly refresh | A2_ |
+| MI18-20 | Agent / Viewer / Admin | Monthly summary, recipients | Due once, exact month, saved with why not emailed; Admin sets valid recipients | A2_ |
+| R06 | Owner | 103 down, then up | Rolls back and re-applies | run.sh |
+| MH | Agent | Graph rows, history calls, patterns, what-if, summary text | Parsed; read-only GETs; proven wins / losses; estimate; safe HTML | meta_insights.test |
+| UI150-158 | Admin | Meta Ads > Insights | Tiles, patterns, leaderboard, gallery, charts, what-if, filters, notes, summaries | ui |
 | UI136c | Admin | Test-event step | No-code button for Meta's Verification Lead; TEST code still accepted | ui |
 | UI134-136b | Admin | Older database; deploy commands; test-lead step | "Update waiting" + only 101 shown; CLI 3 commands; delivered/webhook status | ui |

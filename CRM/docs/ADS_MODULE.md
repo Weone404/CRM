@@ -143,6 +143,22 @@ WhatsApp reporting needs Advanced Access to `whatsapp_business_manage_events` (A
 
 Tests: `run.sh` A0_ (MS01–MS35 + R03 rollback), `ads_meta.test.ts` (25), `ui_checks.mjs` UI09/09c, UI120–UI141.
 
+## Meta Ads > Insights (migration 103, 2026-11-17)
+
+Read-only history dashboard. ads-sync job `meta_history` (cron `crm-ads-meta-history`, minute 50, only when work is due):
+back-fills up to 37 months of ad-level daily numbers month by month (resumable; Meta keeps totals 37 months), saves campaigns /
+ad sets (targeting summary) / ads (creative: format, text, call to action, thumbnail, lead form), refreshes the last 30 days daily,
+whole-account breakdowns weekly (age x gender, region, placement, device, hour: 13 months; frequency: 6 months), and on the 1st
+saves last month's summary (emailed via the CRM's SMTP when set up; recipients in Insights > Monthly summaries).
+CRM outcomes per campaign / ad set / ad / form come from Ads leads' ad ids (`crm_private.ads_meta_crm`).
+Dashboard (`AdsMetaInsights.jsx`): filters, number tiles vs previous period, proven patterns, funnel, budget what-if, weekly
+chart with notes, leaderboard, creative gallery, audience / timing charts, ad fatigue, notes, monthly summaries, print to PDF.
+Patterns / what-if / summary text: `_shared/meta_patterns.ts` (same code in browser and ads-sync). Goal = admissions (8+),
+else qualified (15+), else Meta leads; win <= 0.8x average cost, loss >= 1.4x (or 2x average spent with no result);
+"Proven" needs enough results (win) or enough spend (loss), else "Early". Splits are judged against their own average and the
+whole-account splits are hidden when filtered to a campaign or form. Build `2026-11-17.meta4`.
+Undo: `103_ads_meta_insights_down.sql`. Tests: A2_ (MI01-20), R06, `meta_insights.test.ts` (16), UI150-158.
+
 ## Meta's CRM check (migration 102, 2026-11-17)
 
 Events Manager > dataset > Test events > channel **CRM** gives no TEST code: Meta creates a Verification Lead (a Testing Tool

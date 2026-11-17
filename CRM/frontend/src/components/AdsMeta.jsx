@@ -3,6 +3,7 @@ import { useRoute, navigate, setParams } from '../utils/route';
 import Icon from './icons';
 import AdsLeads from './AdsLeads';
 import AdsSetup, { SetupBanner, progress } from './AdsSetup';
+import AdsMetaInsights from './AdsMetaInsights';
 import { Campaigns, Settings, edge, useSetupFor } from './Ads';
 import { rpc, useLoad, WorkingBar, OfflineBar } from './adsKit';
 import { PERIODS, periodRange, todayIn } from '../utils/ads';
@@ -13,6 +14,7 @@ import { PERIODS, periodRange, todayIn } from '../utils/ads';
 
 const TABS = [
   { id: 'home', label: 'Overview', icon: 'chart' },
+  { id: 'insights', label: 'Insights', icon: 'sparkles' },
   { id: 'campaigns', label: 'Campaigns', icon: 'rocket' },
   { id: 'leads', label: 'Leads', icon: 'leads' },
   { id: 'setup', label: 'Setup', icon: 'checkCircle', admin: true },
@@ -101,6 +103,7 @@ export default function AdsMeta({ access }) {
         })}
       </div>
       {view === 'home' && <Overview access={access} st={st} go={go} />}
+      {view === 'insights' && <AdsMetaInsights access={access} edge={edge} />}
       {view === 'campaigns' && <Campaigns ctx={ctx} access={access} platform="meta" />}
       {view === 'leads' && <AdsLeads access={access} platform="meta" />}
       {view === 'setup' && access.is_admin && <AdsSetup platform="meta" edge={edge} st={st || {}} check={async () => { const r = await check(); force((n) => n + 1); return r; }} />}

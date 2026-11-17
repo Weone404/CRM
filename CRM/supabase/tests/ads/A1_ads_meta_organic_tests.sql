@@ -53,7 +53,7 @@ SELECT pg_temp.fails($q$UPDATE public.ads_meta_lead_raw SET status = 'bogus' WHE
 
 -- Setup status and the test-event lead
 SELECT pg_temp.as_('a'); SET ROLE authenticated;
-SELECT pg_temp.ok((SELECT (s->>'schema')::int = 102 AND (s->'meta'->'leads'->>'test')::int >= 1 AND (s->'meta'->'leads'->>'organic_filed')::int >= 3
+SELECT pg_temp.ok((SELECT (s->>'schema')::int >= 102 AND (s->'meta'->'leads'->>'test')::int >= 1 AND (s->'meta'->'leads'->>'organic_filed')::int >= 3
     AND (s->'meta'->'leads'->>'by_webhook')::int >= 5 AND s->'meta'->'leads'->>'last_error' LIKE '%phone%' FROM public.api_ads_setup_status('meta') s),
   'MS45 Setup sees the database version and what happened to each delivered lead');
 RESET ROLE;
