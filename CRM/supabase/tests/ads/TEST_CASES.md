@@ -255,6 +255,10 @@ changes, allowed bids and budget inside the spend limits, and has no Mac that st
 | RP01-06 | Viewer / Admin / ads-sync | Reports options, saved views, CRM per object, cache | Filters offered; views private unless Admin shares; CRM per campaign / ad; cache expires; closed to browsers | A4_ |
 | HL01-07 | ads-sync / Viewer / Admin | Health and warnings | Old helper told to update; new high warnings sent once; closed when gone; webhook and failed-lead checks; dismiss | A4_ |
 | R08 | Owner | 105 down, then up | Rolls back and re-applies | run.sh |
+| QL01-04 | Viewer | Lead quality | Qualified and admission rates by form answer, form, platform, time to first call; small groups flagged; only known groupings | A5_ |
+| SC01-06 | Viewer / Admin / trigger | Lead score | New leads scored on arrival; neutral with little history; learns (smoothed) with reasons; Admin-only rules, checked; saving rescores; lists | A5_ |
+| R09 | Owner | 106 down, then up | Rolls back and re-applies | run.sh |
+| UI181-187 | Viewer / Admin | Lead quality UI | Score chips on waiting leads, highest first; Lead quality view by any grouping; scored leads; rules editor; phone width | ui_checks.mjs |
 | MR | ads-sync | Report settings, Insights query, rows, totals, cache, health rules | Meta's limits; filters; leads / video / rankings; disjoint reach; warnings | meta_reports.test |
 | UI170-180 | Viewer / Admin | Reports and Overview health | Live table, breakdown and value filter, compare, presets, drill-down, rankings, custom columns, saved view, CSV, phone width, health card | ui_checks |
 

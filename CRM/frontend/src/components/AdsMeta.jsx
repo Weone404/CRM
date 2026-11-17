@@ -6,6 +6,7 @@ import AdsSetup, { SetupBanner, progress } from './AdsSetup';
 import AdsMetaInsights from './AdsMetaInsights';
 import AdsMetaStrategy from './AdsMetaStrategy';
 import AdsMetaReports from './AdsMetaReports';
+import AdsMetaQuality from './AdsMetaQuality';
 import AdsMetaHealth from './AdsMetaHealth';
 import { SpeedAlerts, LeadArchive } from './AdsMetaLeadTools';
 import { Campaigns, Settings, edge, useSetupFor } from './Ads';
@@ -111,7 +112,7 @@ export default function AdsMeta({ access }) {
         })}
       </div>
       {view === 'home' && <Overview access={access} st={st} go={go} edge={edge} />}
-      {view === 'reports' && <AdsMetaReports access={access} edge={edge} />}
+      {view === 'reports' && <ReportsView access={access} edge={edge} />}
       {view === 'insights' && <AdsMetaInsights access={access} edge={edge} />}
       {view === 'strategy' && <AdsMetaStrategy access={access} edge={edge} />}
       {view === 'campaigns' && <Campaigns ctx={ctx} access={access} platform="meta" />}
@@ -120,4 +121,18 @@ export default function AdsMeta({ access }) {
       {view === 'settings' && access.is_admin && <Settings platform="meta" />}
     </div>
   );
+}
+
+// Reports: Meta's numbers (Ads Manager style) or what the CRM adds (lead quality and score).
+function ReportsView({ access, edge }) {
+  const [mode, setMode] = useState('meta');
+  return (
+    <div className="space-y-3">
+      <div role="tablist" aria-label="Report type" className="inline-flex rounded-xl overflow-hidden no-print" style={{ background: 'rgba(118,118,128,0.12)' }}>
+        {[['meta', 'Meta results'], ['quality', 'Lead quality (CRM)']].map(([id, l]) => (
+          <button key={id} role="tab" aria-selected={mode === id} onClick={() => setMode(id)} className="px-3 py-1.5 text-sm font-semibold"
+            style={mode === id ? { background: '#0088FF', color: '#fff' } : {}}>{l}</button>))}
+      </div>
+      {mode === 'meta' ? <AdsMetaReports access={access} edge={edge} /> : <AdsMetaQuality access={access} />}
+    </div>);
 }

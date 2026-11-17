@@ -2,6 +2,7 @@ import { useState } from 'react';
 import Icon from './icons';
 import { rpc, run, useLoad, Btn } from './adsKit';
 import { showToast } from '../utils/toast';
+import { ScoreChip } from './AdsMetaQuality';
 
 // CRM > Meta Ads > Overview (migration 104): speed-to-lead alerts and the Meta lead archive.
 
@@ -12,10 +13,12 @@ const day = (t) => (t ? new Date(t).toLocaleDateString('en-IN', { day: 'numeric'
 export function SpeedAlerts({ access }) {
   const [a, reload] = useLoad(() => rpc('api_ads_lead_alerts'), [], { refreshMs: 60000 });
   const [cfg, setCfg] = useState(null);
+  const ids = (a?.waiting || []).map((w) => w.lead_id).join(',');
+  const [scores] = useLoad(() => (ids ? rpc('api_ads_lead_scores', { p_ids: ids.split(',') }).catch(() => ({})) : Promise.resolve({})), [ids]);
   if (!a) return null;
   const s = cfg ?? a.settings;
   const set = (k) => (e) => setCfg({ ...s, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
-  const waiting = a.waiting || [];
+  const waiting = [...(a.waiting || [])].sort((x, y) => (scores?.[y.lead_id]?.score ?? -1) - (scores?.[x.lead_id]?.score ?? -1));
   return (
     <section className="glass-card p-4 space-y-3" data-testid="speed-alerts">
       <div className="flex items-start gap-2">
@@ -26,6 +29,7 @@ export function SpeedAlerts({ access }) {
       </div>
       {waiting.length > 0 && <div className="space-y-1">{waiting.slice(0, 8).map((w) => (
         <div key={w.lead_id} className="flex items-center gap-2 text-sm">
+          <ScoreChip s={scores?.[w.lead_id]} />
           <span className="flex-1 truncate"><b>{w.name || 'New lead'}</b>{w.course ? ` · ${w.course}` : ''} <span className="text-glass-muted text-xs">({w.platform})</span></span>
           <span className="text-xs font-semibold" style={{ color: w.waited_min >= a.settings.escalate_minutes ? C.red : C.amber }}>{fmt(w.waited_min)} min</span>
         </div>))}</div>}

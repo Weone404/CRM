@@ -337,6 +337,44 @@ await page.getByTestId('meta-warnings').getByRole('button', { name: 'Dismiss' })
 await page.waitForTimeout(800);
 ok(/dismissed/.test(await page.getByTestId('meta-warnings').innerText()), 'UI179b Admin can dismiss a warning');
 
+// ---- Meta Ads > Lead quality and lead score (migration 106)
+await page.goto(`${APP}#/metaads`);
+await page.getByTestId('speed-alerts').waitFor({ timeout: 15000 });
+await page.waitForTimeout(1200);
+t = await page.getByTestId('speed-alerts').innerText();
+const chips = await page.getByTestId('speed-alerts').getByTestId('score-chip').allInnerTexts();
+ok(chips.length === 2 && /hot|warm/.test(chips[0]) && Number(chips[0].split(' ')[0]) > Number(chips[1].split(' ')[0]) && t.indexOf('Hot Prospect') < t.indexOf('Cold Prospect'),
+  `UI181 waiting leads carry a lead score, highest first (${chips.join(', ')})`);
+await page.goto(`${APP}#/metaads/reports`);
+await page.getByRole('tab', { name: 'Lead quality (CRM)' }).click();
+await page.getByTestId('quality-table').waitFor({ timeout: 15000 });
+t = await page.getByTestId('lead-quality').innerText();
+ok(/CPL enquiry/.test(t) && /Meta leads · \d+ followed in the CRM · \d+ qualified · \d+ admissions/.test(t), 'UI182 Reports has a Lead quality (CRM) view with leads, qualified and admissions');
+await page.getByLabel('Group by').selectOption('answer:class_12_with_maths_and_physics?');
+await page.waitForTimeout(1200);
+const qr = Object.fromEntries((await page.getByTestId('quality-table').locator('tbody tr').evaluateAll((trs) => trs.map((tr) => [...tr.children].map((td) => td.innerText.trim()))))
+  .map((c) => [c[0], parseFloat(c[4])]));
+ok(qr.Yes > 90 && qr.No === 0, `UI183 grouping by any lead-form answer shows its qualified rate (${JSON.stringify(qr)})`);
+await page.getByLabel('Group by').selectOption('speed');
+await page.waitForTimeout(1000);
+ok(/not called yet|within 5 min/.test(await page.getByTestId('quality-table').innerText()), 'UI184 grouping by time to first call');
+t = await page.getByTestId('scored-leads').innerText();
+ok(/\bHot\b/.test(t) && /not called/.test(t) && t.indexOf('Hot') < t.indexOf('Cold'), 'UI185 the newest scored leads are listed, not-called first');
+await page.getByTestId('score-rules').locator('summary').click();
+await page.getByRole('button', { name: '+ Add rule' }).click();
+await page.getByLabel('Rule 1 field').fill('answer:class_12_with_maths_and_physics?');
+await page.getByLabel('Rule 1 value').fill('No');
+await page.getByLabel('Rule 1 points').fill('-20');
+await page.getByRole('button', { name: 'Save and rescore' }).click();
+await page.waitForTimeout(1500);
+const sv = (await calls()).filter((x) => x.fn === 'api_ads_lead_score_save').pop();
+ok(sv && sv.args.p_rules?.[0]?.points === -20 && sv.args.p_hot === 60, 'UI186 Admin adds a score rule and saves; recent leads are rescored');
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(600);
+const ovq = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+ok(ovq <= 1, `UI187 Lead quality fits a phone screen (${ovq}px)`);
+await page.setViewportSize({ width: 1280, height: 900 });
+
 // ---- Two sections: Google Ads and Meta Ads, each with its own Setup checklist and stop
 await page.goto(`${APP}#/metaads`);
 await page.getByTestId('meta-ads').waitFor({ timeout: 15000 });
@@ -365,10 +403,11 @@ await page.getByTestId('sql-101').waitFor({ timeout: 15000 });
 await page.waitForTimeout(800);
 t = await page.getByTestId('sql-101').innerText();
 ok(/101: Meta lead forms, part 2/.test(t) && (await page.locator('[data-testid="sql-102"]').count()) === 1 && (await page.locator('[data-testid="sql-103"]').count()) === 1
-  && (await page.locator('[data-testid="sql-104"]').count()) === 1 && (await page.locator('[data-testid="sql-105"]').count()) === 1 && /INSERT INTO public\.ads_config \(key, value\) VALUES \('ads_schema', '101'\)/.test(t)
+  && (await page.locator('[data-testid="sql-104"]').count()) === 1 && (await page.locator('[data-testid="sql-105"]').count()) === 1
+  && (await page.locator('[data-testid="sql-106"]').count()) === 1 && /INSERT INTO public\.ads_config \(key, value\) VALUES \('ads_schema', '101'\)/.test(t)
   && !(await page.locator('[data-testid="sql-100"]').count()) && /supabase\.com\/dashboard\/project\/.+\/sql\/new/.test(await page.getByTestId('step-meta-db').innerHTML()),
-  'UI134b only the missing files (101-105) are shown, complete and ready to copy, with a link to the SQL editor');
-await fetch(`${API}/__schema/105`);
+  'UI134b only the missing files (101-106) are shown, complete and ready to copy, with a link to the SQL editor');
+await fetch(`${API}/__schema/106`);
 await page.getByRole('button', { name: 'Check all now' }).click();
 await page.waitForTimeout(800);
 ok(await page.getByTestId('step-meta-db').getAttribute('data-done') === 'yes', 'UI134c after the update the database step is done again');

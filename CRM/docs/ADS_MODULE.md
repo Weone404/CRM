@@ -143,6 +143,26 @@ WhatsApp reporting needs Advanced Access to `whatsapp_business_manage_events` (A
 
 Tests: `run.sh` A0_ (MS01–MS35 + R03 rollback), `ads_meta.test.ts` (25), `ui_checks.mjs` UI09/09c, UI120–UI141.
 
+## Meta Ads > Lead quality and lead score (migration 106, 2026-11-17)
+
+Meta counts form fills; the CRM knows which became qualified leads and admissions. Reports now has two views: Meta results
+(Ads Manager style, 105) and Lead quality (CRM).
+
+- Lead quality (`api_ads_meta_lead_quality(from, to, dim)`, any ADS viewer): leads, leads the CRM can follow, qualified,
+  admissions, both rates and median first call, grouped by lead form, campaign, ad set, ad, Facebook / Instagram, any
+  lead-form answer (`answer:<key>`), time to first call, weekday or hour. Built from the lead archive (104) joined to CRM
+  stages; groups under 10 followed leads are flagged.
+- Lead score (`ads_lead_score`, 0-100, hot / warm / cold): each new Meta lead is scored as it is archived. With 20+ followed
+  leads in the last year the score starts at the average qualified rate and moves by how past leads with the same form,
+  campaign, ad, platform and answers did (each rate smoothed toward the average and weighted by sample size, so a few
+  leads never swing it); otherwise it is 50. Admin rules (`lead_score_rules`: field form / campaign / platform /
+  answer:<key>, equals or contains, -50..50 points) add on top; bands from `lead_score_hot` (60) and `lead_score_warm` (35).
+  Every score keeps its reasons. Saving rules rescores the last 30 days.
+- Where it shows: score chips on Overview > Speed to lead (highest first) and the Lead quality view's last-7-days list
+  (not-called first). APIs: `api_ads_lead_scores(ids)`, `api_ads_meta_scored_leads(days)`, `api_ads_lead_score_settings()`,
+  `api_ads_lead_score_save(rules, hot, warm)` (Admin).
+- No Edge Function change (build stays meta6). Rollback: `106_ads_meta_quality_down.sql`.
+
 ## Meta Ads > Reports and account health (migration 105, 2026-11-17)
 
 - **Reports tab** (`AdsMetaReports.jsx`): Ads Manager-style table. Levels (campaigns / ad sets / ads / account), date presets

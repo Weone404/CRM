@@ -15,7 +15,7 @@ const REF = (() => { try { return new URL(SUPABASE_URL).hostname.split('.')[0]; 
 const SQL_EDITOR = `https://supabase.com/dashboard/project/${REF}/sql/new`;
 const HOOK = `${SUPABASE_URL}/functions/v1/ads-meta-webhook`;
 const BUILD = '2026-11-17.meta6';      // must equal ADS_BUILD in supabase/functions/_shared/ads_meta.ts
-const SCHEMA = 105;                     // newest ADS migration this screen needs (ads_config ads_schema)
+const SCHEMA = 106;                     // newest ADS migration this screen needs (ads_config ads_schema)
 // Migrations the Setup page can hand out, oldest first; each is safe to run again.
 const MIGRATIONS = [
   { n: 100, file: '100_ads_meta_signals.sql', load: () => import('../../../backend/migrations/100_ads_meta_signals.sql?raw') },
@@ -24,6 +24,7 @@ const MIGRATIONS = [
   { n: 103, file: '103_ads_meta_insights.sql', load: () => import('../../../backend/migrations/103_ads_meta_insights.sql?raw') },
   { n: 104, file: '104_ads_meta_strategy.sql', load: () => import('../../../backend/migrations/104_ads_meta_strategy.sql?raw') },
   { n: 105, file: '105_ads_meta_reports.sql', load: () => import('../../../backend/migrations/105_ads_meta_reports.sql?raw') },
+  { n: 106, file: '106_ads_meta_quality.sql', load: () => import('../../../backend/migrations/106_ads_meta_quality.sql?raw') },
 ];
 const schemaOf = (st) => (st.db ? Number(st.db.schema) || 100 : 0);
 const dbOk = (st) => schemaOf(st) >= SCHEMA;
