@@ -224,3 +224,9 @@ changes, allowed bids and budget inside the spend limits, and has no Mac that st
 | DS01-02 | Agent | Edge Function deployed / old / missing | Told apart; intake build equals ADS_BUILD | ads_meta.test |
 | UI09, UI09c | Viewer | Campaigns in each section | Google only / Meta only | ui |
 | UI130-141 | Admin | Meta Ads section, banner, Setup steps, Check now, SQL / deploy / callback copy blocks, per-platform stop, Google section | Separate sections; steps checked by the server; stop only one platform | ui |
+| MS40 | Meta | Lead Ads Testing Tool lead | Kept as test; not an Ads lead, not a normal lead | A1_ |
+| MS41-43 | Visitor | Form filled without an ad; same phone again; Charter form | Normal lead (Meta lead form / organic / form name); no second lead; charter lead | A1_ |
+| MS44 | Visitor | Fill without a valid phone; handled lead again; unknown status | Not filed, reason shown; never filed twice; refused | A1_ |
+| MS45-47 | Admin / Agent | Setup status; test event with no Ads lead; reporting | Version + per-lead outcome; newest delivered id used; never reported | A1_ |
+| R04 | Owner | 101 down, then up | Rolls back and re-applies | run.sh |
+| UI134-136b | Admin | Older database; deploy commands; test-lead step | "Update waiting" + only 101 shown; CLI 3 commands; delivered/webhook status | ui |

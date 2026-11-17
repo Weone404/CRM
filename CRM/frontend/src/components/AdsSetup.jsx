@@ -14,10 +14,20 @@ import Icon from './icons';
 const REF = (() => { try { return new URL(SUPABASE_URL).hostname.split('.')[0]; } catch { return ''; } })();
 const SQL_EDITOR = `https://supabase.com/dashboard/project/${REF}/sql/new`;
 const HOOK = `${SUPABASE_URL}/functions/v1/ads-meta-webhook`;
-const BUILD = '2026-11-16.meta1';
+const BUILD = '2026-11-17.meta2';      // must equal ADS_BUILD in supabase/functions/_shared/ads_meta.ts
+const SCHEMA = 101;                     // newest ADS migration this screen needs (ads_config ads_schema)
+// Migrations the Setup page can hand out, oldest first; each is safe to run again.
+const MIGRATIONS = [
+  { n: 100, file: '100_ads_meta_signals.sql', load: () => import('../../../backend/migrations/100_ads_meta_signals.sql?raw') },
+  { n: 101, file: '101_ads_meta_organic.sql', load: () => import('../../../backend/migrations/101_ads_meta_organic.sql?raw') },
+];
+const schemaOf = (st) => (st.db ? Number(st.db.schema) || 100 : 0);
+const dbOk = (st) => schemaOf(st) >= SCHEMA;
 const ago = (t) => { if (!t) return ''; const m = Math.round((Date.now() - new Date(t).getTime()) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
 const notFound = (e) => /Could not find the function|PGRST202|does not exist|404/i.test(`${e?.code || ''} ${e?.message || e}`);
-const DEPLOY = (fns) => `cd CRM\n${fns.map((f) => `supabase functions deploy ${f}${f === 'ads-sync' ? '' : ' --no-verify-jwt'} --project-ref ${REF}`).join('\n')}`;
+// Supabase CLI 3.x: --remote=<ref> (was --project-ref), --use-api builds on Supabase (no Docker), --yes confirms the hosted change.
+// All three run with JWT checking off: ads-sync checks the caller itself (CRM login or cron token), the other two are public.
+const DEPLOY = (fns) => `cd ~/Desktop/CRM/CRM/CRM\n${fns.map((f) => `npx -y supabase@latest functions deploy ${f} --no-verify-jwt --use-api --remote=${REF} --yes`).join('\n')}`;
 
 async function copy(text, what = 'Copied.') {
   try { await navigator.clipboard.writeText(text); showToast(what, 'success'); } catch { showToast('Copy did not work here: select the text and copy it.', 'error'); }
@@ -41,17 +51,30 @@ export function useSetup(platform, edge) {
   return [st, check];
 }
 
-const fnOk = (st, names) => st.fns && names.every((n) => st.fns.functions?.[n] === 'current');
+// ads-sync answers the check itself, so it is current only when its build is the one this screen expects.
+const fnState = (st, n) => (n === 'ads-sync' && st.fns && st.fns.build !== BUILD ? 'old' : st.fns?.functions?.[n]);
+const L = (st) => st.db?.meta?.leads || {};
+const leadsHandled = (st) => (L(st).ingested || 0) + (L(st).quarantined || 0) + (L(st).organic || 0) + (L(st).test || 0);
+const leadSub = (st) => {
+  const l = L(st);
+  const parts = [`${l.received || 0} delivered: ${(l.ingested || 0) + (l.quarantined || 0)} to Ads Leads, ${l.organic_filed || 0} without an ad to Leads, ${l.test || 0} test`];
+  parts.push((l.by_webhook || 0) > 0 ? `webhook works${st.db?.meta?.webhook_last_at ? ` (last ${ago(st.db.meta.webhook_last_at)})` : ''}`
+    : 'Meta has not sent a lead to the webhook yet');
+  if (l.failed) parts.push(`${l.failed} not filed${l.last_error ? `: ${l.last_error}` : ''}`);
+  if (!st.db?.meta?.sources?.instant_form?.intake) parts.push('lead intake is off');
+  return `${parts.join(' · ')}.`;
+};
+const fnOk = (st, names) => st.fns && names.every((n) => fnState(st, n) === 'current');
 const fnSub = (st, names) => (st.fnError ? `Not yet: ${st.fnError}.` : st.fns
-  ? names.map((n) => `${n}: ${({ current: 'deployed', old: 'older version, deploy again', missing: 'not deployed', unknown: 'could not check' })[st.fns.functions?.[n]] || 'not deployed'}`).join(' · ')
+  ? names.map((n) => `${n}: ${({ current: 'deployed', old: 'older version, deploy again', missing: 'not deployed', unknown: 'could not check' })[fnState(st, n)] || 'not deployed'}`).join(' · ')
   : 'Checking…');
 
 // Each step: id, title, why, done(st), sub(st) (what Check Now found), body(ctx) (the guide), required.
 function metaSteps() {
   return [
     { id: 'db', title: 'Run the database update', why: 'Creates the Meta lead tables, the report queue and this checklist.',
-      done: (st) => !!st.db, sub: (st) => (st.db ? 'Done: the database has the Meta tables.' : st.dbError || 'Not run yet.'),
-      body: () => <SqlStep /> },
+      done: dbOk, sub: (st) => (dbOk(st) ? 'Done: the database is up to date.' : st.db ? 'A database update is waiting: run the SQL below.' : st.dbError || 'Not run yet.'),
+      body: (x) => <SqlStep st={x.st} /> },
     { id: 'fns', title: 'Deploy the three ADS functions', why: 'ads-sync (jobs), ads-intake (website enquiries) and ads-meta-webhook (Meta calls it with new leads).',
       done: (st) => fnOk(st, ['ads-sync', 'ads-intake', 'ads-meta-webhook']), sub: (st) => fnSub(st, ['ads-sync', 'ads-intake', 'ads-meta-webhook']),
       body: () => <CmdStep fns={['ads-sync', 'ads-intake', 'ads-meta-webhook']} /> },
@@ -78,8 +101,9 @@ function metaSteps() {
       sub: (st) => (st.db?.runs?.meta_page ? `${st.db.runs.meta_page.detail || ''} (${ago(st.db.runs.meta_page.at)})` : st.db?.meta?.page_id ? `Page ${st.db.meta.page_id}: press Connect Page.` : 'No Page ID yet.'),
       body: (x) => <PageStep x={x} /> },
     { id: 'lead', title: 'Go Live and send a test lead', why: 'Meta only sends real leads to a Live app. A test lead proves the whole path end to end.',
-      done: (st) => (st.db?.meta?.leads?.ingested || 0) > 0,
-      sub: (st) => `${st.db?.meta?.leads?.received || 0} received, ${st.db?.meta?.leads?.ingested || 0} filed in Leads${st.db?.meta?.webhook_last_at ? ` · last call from Meta ${ago(st.db.meta.webhook_last_at)}` : ''}${st.db?.meta?.sources?.instant_form?.intake ? '' : ' · lead intake is off'}.`,
+      // Done when Meta delivered a lead through the webhook AND the CRM handled it (Ads lead, normal lead or test lead).
+      done: (st) => leadsHandled(st) > 0 && (st.db?.meta?.leads?.by_webhook || 0) > 0,
+      sub: (st) => leadSub(st),
       body: (x) => <LeadStep x={x} /> },
     { id: 'report', title: 'Turn on reporting to Meta', why: 'Tells Meta which leads became qualified and admitted, so it finds more people like them.',
       done: (st) => !!(st.db?.meta?.sources?.instant_form?.report && st.db?.meta?.sources?.instant_form?.dataset),
@@ -95,7 +119,8 @@ function metaSteps() {
 function googleSteps() {
   return [
     { id: 'db', title: 'Run the database update', why: 'Adds the separate Google / Meta stops, the per-platform Leads lists and this checklist.',
-      done: (st) => !!st.db, sub: (st) => (st.db ? 'Done.' : st.dbError || 'Not run yet.'), body: () => <SqlStep /> },
+      done: dbOk, sub: (st) => (dbOk(st) ? 'Done.' : st.db ? 'A database update is waiting: run the SQL below.' : st.dbError || 'Not run yet.'),
+      body: (x) => <SqlStep st={x.st} /> },
     { id: 'fns', title: 'Deploy the ADS functions', why: 'ads-sync runs every job; ads-intake receives the website\'s ad enquiries.',
       done: (st) => fnOk(st, ['ads-sync', 'ads-intake']), sub: (st) => fnSub(st, ['ads-sync', 'ads-intake']),
       body: () => <CmdStep fns={['ads-sync', 'ads-intake']} /> },
@@ -236,23 +261,25 @@ function CopyBlock({ label, text, big, testid }) {
   );
 }
 
-function SqlStep() {
-  const [sql, setSql] = useState('');
+function SqlStep({ st }) {
+  const have = schemaOf(st || {});
+  const need = MIGRATIONS.filter((m) => m.n > have);
+  const [sql, setSql] = useState({});
   const [err, setErr] = useState('');
   useEffect(() => {
-    import('../../../backend/migrations/100_ads_meta_signals.sql?raw').then((m) => setSql(m.default), (e) => setErr(String(e)));
-  }, []);
+    need.forEach((m) => { if (!sql[m.file]) m.load().then((x) => setSql((o) => ({ ...o, [m.file]: x.default })), (e) => setErr(String(e))); });
+  }, [need.map((m) => m.file).join()]);  // eslint-disable-line react-hooks/exhaustive-deps
+  if (!need.length) return <p className="text-sm">The database is up to date.</p>;
   return (
     <>
       <ol className="text-sm list-decimal pl-5 space-y-1">
-        <li>Press <b>Copy</b> below (the whole file, {sql ? `${Math.round(sql.length / 1024)} KB` : '…'}).</li>
         <li>Open the Supabase SQL Editor: <a className="font-semibold" style={{ color: 'var(--accent)' }} href={SQL_EDITOR} target="_blank" rel="noopener noreferrer">open SQL Editor</a> (a new empty query).</li>
-        <li>Paste, then press <b>Run</b>. "Success. No rows returned" means it worked. Running it again is safe.</li>
+        <li>{need.length > 1 ? 'For each file below, in this order: ' : ''}press <b>Copy</b>, paste into the editor, press <b>Run</b>. "Success. No rows returned" means it worked. Running a file again is safe.</li>
         <li>Come back here and press <b>Check now</b>.</li>
       </ol>
       {err ? <p className="text-xs" style={{ color: '#C4261D' }}>Could not load the file in this build: {err}</p>
-        : <CopyBlock label="100_ads_meta_signals.sql" text={sql || 'Loading…'} big testid="sql-100" />}
-      <p className="text-[11px] text-glass-muted">To undo: the file 100_ads_meta_signals_down.sql in the repo removes it again.</p>
+        : need.map((m) => <CopyBlock key={m.file} label={m.file} text={sql[m.file] || 'Loading…'} big testid={`sql-${m.n}`} />)}
+      <p className="text-[11px] text-glass-muted">To undo: each file has a _down.sql partner in backend/migrations.</p>
     </>
   );
 }
@@ -261,13 +288,13 @@ function CmdStep({ fns }) {
   return (
     <>
       <ol className="text-sm list-decimal pl-5 space-y-1">
-        <li>On the Mac, open Terminal in the repo folder (Weone404/CRM, the folder that has the inner CRM folder).</li>
-        <li>First time only: <code>supabase login</code>.</li>
-        <li>Copy and paste the commands below, then press Enter.</li>
+        <li>On the Mac, open Terminal (Node.js must be installed; nothing else).</li>
+        <li>First time only: <code>npx -y supabase@latest login</code> (opens the browser once).</li>
+        <li>Copy and paste the commands below, then press Enter. They go to the repo folder and deploy each function.</li>
         <li>Press <b>Check now</b>. Each function must show "deployed".</li>
       </ol>
       <CopyBlock label="Deploy commands" text={DEPLOY(fns)} testid="deploy-cmds" />
-      <p className="text-[11px] text-glass-muted">Build expected: {BUILD}. Webhooks and website forms have no CRM login, which is why they deploy with --no-verify-jwt.</p>
+      <p className="text-[11px] text-glass-muted">Build expected: {BUILD}. --no-verify-jwt: Meta and website visitors have no CRM login; ads-sync checks the caller itself.</p>
     </>
   );
 }
@@ -307,10 +334,10 @@ function HookStep() {
   return (
     <>
       <ol className="text-sm list-decimal pl-5 space-y-1">
-        <li>Open <a href="https://developers.facebook.com/apps/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>developers.facebook.com/apps</a> → your app → <b>Webhooks</b> (add the product if it is not there).</li>
-        <li>Choose <b>Page</b> in the list, press <b>Subscribe to this object</b>.</li>
+        <li>Open <a href="https://developers.facebook.com/apps/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>developers.facebook.com/apps</a> → your app → <b>Use cases</b> → <b>Capture &amp; manage ad leads</b> → <b>Customize</b> → <b>Webhooks</b> (older apps: <b>Webhooks</b> in the left menu).</li>
+        <li>Choose <b>Page</b> in the object list.</li>
         <li>Callback URL: paste the address below. Verify token: the same word you saved in step 3.</li>
-        <li>Press <b>Verify and save</b>, then subscribe to the <b>leadgen</b> field.</li>
+        <li>Press <b>Verify and save</b>, then press <b>Subscribe</b> next to the <b>leadgen</b> field.</li>
         <li>Press <b>Check now</b> here: it turns green when Meta has checked the address.</li>
       </ol>
       <CopyBlock label="Callback URL" text={HOOK} testid="hook-url" />
@@ -341,11 +368,13 @@ function LeadStep({ x }) {
     <>
       <ol className="text-sm list-decimal pl-5 space-y-1">
         <li>{on ? 'Lead intake is on.' : <>Turn on lead intake: <Btn onClick={turnOn}>Turn on</Btn></>}</li>
-        <li>In the Meta App Dashboard switch the app from <b>Development</b> to <b>Live</b> (top bar). In Development Meta sends only test pings.</li>
-        <li>Open the <a href="https://developers.facebook.com/tools/lead-ads-testing" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>Lead Ads Testing Tool</a>, choose your Page and form, press <b>Create lead</b>.</li>
-        <li>Within about 2 minutes it appears in Meta Ads → Leads, and this step turns green.</li>
+        <li>Publish the app: <a href="https://developers.facebook.com/apps/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>developers.facebook.com/apps</a> → your app → <b>Publish</b>. An unpublished app gets no real leads.</li>
+        <li>Same app → <b>Use cases</b> → <b>Capture &amp; manage ad leads</b> → <b>Customize</b> → <b>Webhooks</b>: object <b>Page</b>, field <b>leadgen</b> must show <b>Subscribed</b>.</li>
+        <li>Open the <a href="https://developers.facebook.com/tools/lead-ads-testing" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>Lead Ads Testing Tool</a>, choose your Page and a form, press <b>Create lead</b> (one per form: press <b>Delete lead</b> first if one exists).</li>
+        <li>Within about 2 minutes this step turns green ("webhook works"). Test leads are recognised and never added to Leads.</li>
       </ol>
-      <ActStep text="Not waiting for the 2-minute run? Fetch now." btn="Fetch leads now" onClick={() => x.job(['meta_leads_reconcile', 'meta_leads'])} />
+      <p className="text-xs text-glass-secondary">After setup: a form filled from an ad becomes an Ads lead; a form filled without an ad (opened from the Page) becomes a normal lead in Leads; every form is also re-read every hour, so a missed webhook never loses a lead.</p>
+      <ActStep text="Webhook not arriving? Read the forms now (does not prove the webhook)." btn="Fetch leads now" onClick={() => x.job(['meta_leads_reconcile', 'meta_leads'])} />
     </>
   );
 }

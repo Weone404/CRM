@@ -19,6 +19,10 @@ http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   if (url.pathname.startsWith('/__as/')) { sub = url.pathname.slice(6); return send(res, 200, { sub }); }
   if (url.pathname === '/__calls') return send(res, 200, calls);
+  if (url.pathname.startsWith('/__schema/')) {   // test-only: pretend the database is at another ADS version
+    await pool.query("UPDATE public.ads_config SET value = $1 WHERE key = 'ads_schema'", [url.pathname.slice(10)]);
+    return send(res, 200, { ok: true });
+  }
   let raw = ''; for await (const c of req) raw += c;
   const args = raw ? JSON.parse(raw) : {};
   if (url.pathname.startsWith('/functions/v1/')) {
@@ -35,7 +39,7 @@ http.createServer(async (req, res) => {
           { platform: 'meta', external_id: '5554443', name: 'Pilot School Meta', currency: 'INR', timezone: 'Asia/Kolkata', status: 'ACTIVE', active: true, business: 'Test Biz' }] },
         known: [{ platform: 'google', external_id: '1112223333', client: 'Test Client A' }] };
       if (jobs.includes('sync')) results.sync = { job: 'sync', status: 'ok', items: 0, detail: 'UI test stub: platforms not called' };
-      if (jobs.includes('setup')) results.setup = { build: '2026-11-16.meta1', functions: { 'ads-sync': 'current', 'ads-intake': 'current', 'ads-meta-webhook': 'current' } };
+      if (jobs.includes('setup')) results.setup = { build: '2026-11-17.meta2', functions: { 'ads-sync': 'current', 'ads-intake': 'current', 'ads-meta-webhook': 'current' } };
       if (jobs.includes('execute')) results.execute = { job: 'execute', status: 'ok', items: 0, detail: '0 change(s) processed (UI test stub)' };
       return send(res, 200, { results });
     }

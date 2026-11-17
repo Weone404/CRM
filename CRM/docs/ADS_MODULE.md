@@ -143,6 +143,23 @@ WhatsApp reporting needs Advanced Access to `whatsapp_business_manage_events` (A
 
 Tests: `run.sh` A0_ (MS01–MS35 + R03 rollback), `ads_meta.test.ts` (25), `ui_checks.mjs` UI09/09c, UI120–UI141.
 
+## Meta lead forms, part 2 (migration 101, 2026-11-17)
+
+- A lead form filled **without an ad** (opened from the Page) becomes a normal lead in **Leads**: utm_source `Meta lead form`,
+  utm_medium `organic`, utm_campaign = the form's name, same phone de-duplication as the website (`crm_private.ingest_website_lead`);
+  a form set to Charter makes a charter lead. Not an Ads lead, never reported to Meta. Extra answers stay on
+  `ads_meta_lead_raw.payload.answers`; a fill without a valid phone is not filed and the reason shows in Setup.
+- Leads made with Meta's **Lead Ads Testing Tool** (every answer "test lead: dummy data for …") are status `test`: they prove the
+  path and are never filed. "Send a test event" falls back to the newest delivered lead's id.
+- The safety re-read of every active form runs **every hour** (was daily).
+- Setup: step 8 turns green only when Meta delivered a lead **through the webhook** and the CRM handled it; the database reports its
+  version (`ads_config.ads_schema`), so Setup shows "A database update is waiting" and hands out only the missing SQL file(s);
+  an ads-sync with an older build shows "older version, deploy again".
+- Deploy (Supabase CLI 3: `--project-ref` is now `--remote=`):
+  `npx -y supabase@latest functions deploy <name> --no-verify-jwt --use-api --remote=syytqcadmtgowckdnbqh --yes`
+  for ads-sync, ads-intake and ads-meta-webhook (ads-sync checks the caller itself, as it is deployed today).
+- Undo: `101_ads_meta_organic_down.sql`. Tests: `A1_` (MS40–47), R04 rollback, Deno (test lead, organic payload, build), UI134–136b.
+
 ## Two sections and Setup checklists (2026-11-16)
 
 The main menu has **Google Ads** (`#/ads`, the existing screens) and **Meta Ads** (`#/metaads`: Overview, Campaigns, Leads,

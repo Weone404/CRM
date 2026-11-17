@@ -169,18 +169,32 @@ await page.getByRole('button', { name: 'Check all now' }).click();
 await page.waitForTimeout(800);
 ok((await calls()).filter((x) => x.fn === 'ads-sync' && (x.args.jobs || []).join() === 'setup').length > c0 && (await calls()).some((x) => x.fn === 'api_ads_setup_status' && x.args.p_platform === 'meta'),
   'UI133 Check now asks the server (setup status + deployed functions)');
-await page.getByTestId('step-meta-db').getByRole('button').first().click();
-await page.getByTestId('sql-100').waitFor({ timeout: 15000 });
+await fetch(`${API}/__schema/100`);                           // a database that still needs 101
+await page.getByRole('button', { name: 'Check all now' }).click();
 await page.waitForTimeout(800);
-t = await page.getByTestId('sql-100').innerText();
-ok(/CREATE TABLE IF NOT EXISTS public\.ads_meta_settings/.test(t) && t.length > 20000 && /supabase\.com\/dashboard\/project\/.+\/sql\/new/.test(await page.getByTestId('step-meta-db').innerHTML()),
-  'UI134 the full 100_ads_meta_signals.sql is shown ready to copy, with a link to the SQL editor');
+ok(await page.getByTestId('step-meta-db').getAttribute('data-done') === 'no' && /A database update is waiting/.test(await page.getByTestId('step-meta-db').innerText()),
+  'UI134 an older database shows "A database update is waiting"');
+await page.getByTestId('step-meta-db').getByRole('button').first().click();
+await page.getByTestId('sql-101').waitFor({ timeout: 15000 });
+await page.waitForTimeout(800);
+t = await page.getByTestId('sql-101').innerText();
+ok(/101: Meta lead forms, part 2/.test(t) && /INSERT INTO public\.ads_config \(key, value\) VALUES \('ads_schema', '101'\)/.test(t)
+  && !(await page.locator('[data-testid="sql-100"]').count()) && /supabase\.com\/dashboard\/project\/.+\/sql\/new/.test(await page.getByTestId('step-meta-db').innerHTML()),
+  'UI134b only the missing file (101) is shown, complete and ready to copy, with a link to the SQL editor');
+await fetch(`${API}/__schema/101`);
+await page.getByRole('button', { name: 'Check all now' }).click();
+await page.waitForTimeout(800);
+ok(await page.getByTestId('step-meta-db').getAttribute('data-done') === 'yes', 'UI134c after the update the database step is done again');
 await page.getByTestId('step-meta-fns').getByRole('button').first().click();
 t = await page.getByTestId('deploy-cmds').innerText();
-ok(/supabase functions deploy ads-meta-webhook --no-verify-jwt --project-ref \S+/.test(t) && /supabase functions deploy ads-sync --project-ref \S+$/m.test(t),
-  'UI135 exact deploy commands are shown (webhook and intake without JWT check, ads-sync with)');
+ok(/^cd ~\/Desktop\/CRM\/CRM\/CRM$/m.test(t) && ['ads-sync', 'ads-intake', 'ads-meta-webhook'].every((f) =>
+    new RegExp(`^npx -y supabase@latest functions deploy ${f} --no-verify-jwt --use-api --remote=\\S+ --yes$`, 'm').test(t)),
+  'UI135 exact deploy commands for Supabase CLI 3 are shown (--remote, --use-api, --yes; JWT check as deployed)');
 await page.getByTestId('step-meta-hook').getByRole('button').first().click();
 ok(/functions\/v1\/ads-meta-webhook/.test(await page.getByTestId('hook-url').innerText()), 'UI136 the webhook step gives the callback URL to paste in Meta');
+t = await page.getByTestId('step-meta-lead').innerText();
+ok(/\d+ delivered: \d+ to Ads Leads, \d+ without an ad to Leads, \d+ test/.test(t) && /Meta has not sent a lead to the webhook yet/.test(t),
+  'UI136b the test-lead step says what happened to delivered leads and whether the webhook has delivered one');
 await page.screenshot({ path: `${SHOTS}/ads_meta_setup.png`, fullPage: true });
 await page.goto(`${APP}#/metaads/campaigns`);
 await page.getByText('Test Lead Form').waitFor({ timeout: 15000 });

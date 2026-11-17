@@ -9,7 +9,8 @@
 //   execute  Approver. Sends approved changes, reads each campaign back, records verified / failed / outcome_unknown.
 //   convert  Approver / cron. Tells Google which ad clicks became CRM enquiries (only for people who allowed ad data sharing).
 //   meta_page            Admin. Reads the Page's lead forms, checks the leadgen webhook subscription; {subscribe: true} adds it.
-//   meta_leads           Approver / cron. Fetches Meta leads the webhook announced and files them through the ADS intake.
+//   meta_leads           Approver / cron. Fetches Meta leads the webhook announced and files them: from an ad -> ADS intake;
+//                        without an ad -> normal Leads; Lead Ads Testing Tool leads -> kept as 'test', never filed.
 //   meta_leads_reconcile Approver / cron. Reads each active form's last 48 hours and adds any lead the webhook missed.
 //   setup                Viewer. Which ADS functions are deployed in the current version (for the Setup checklist).
 //   meta_test_event      Admin. {test_event_code} sends one CRM test event, visible in Events Manager > Test events.
@@ -20,7 +21,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { asUser, cors, cronOk, json, HttpError, rpc } from "../_shared/ads_deno.ts";
 import { AdsError, GoogleAds, MetaAds, dateRange, discover, executeOne, scrubSecrets, todayIn, verify, type Platforms, type WorkItem } from "../_shared/ads_core.ts";
 import { buildOps, conversionRow, convertOutcome, executeGoogleOp, googleSnapshot, resultNames, type ConvItem, type GoogleOp } from "../_shared/ads_google_ops.ts";
-import { ADS_BUILD, buildEvent, crmEvent, ctwaPayload, deployState, EventError, metaLeadPayload, serializeEvents, type CapiItem } from "../_shared/ads_meta.ts";
+import { ADS_BUILD, buildEvent, crmEvent, ctwaPayload, deployState, EventError, isTestLead, metaLeadPayload, organicPayload, serializeEvents, type CapiItem } from "../_shared/ads_meta.ts";
 import { URL_ } from "../_shared/ads_deno.ts";
 
 const DEADLINE_MS = 120_000;
@@ -237,7 +238,7 @@ async function metaLeads(s: Record<string, string>, t0: number) {
       items: { id: number; source: "instant_form" | "ctwa"; external_id: string; ad_id: string | null; created_time: string | null; payload: any; pipeline: string }[] };
     if (!w.items?.length) return { items: 0, detail: "No Meta lead waiting." };
     const purpose = (w.consent_purpose === "marketing" ? "marketing" : "ad_data_sharing") as "ad_data_sharing" | "marketing";
-    let api: MetaAds | null = null, filed = 0, organic = 0, later = 0;
+    let api: MetaAds | null = null, filed = 0, organic = 0, tests = 0, later = 0;
     for (const it of w.items) {
       if (Date.now() - t0 > DEADLINE_MS) break;
       try {
@@ -249,8 +250,13 @@ async function metaLeads(s: Record<string, string>, t0: number) {
         if (!w.page_id && !s.META_PAGE_TOKEN) throw new AdsError("sync_failed", "Add the Facebook Page ID in ADS > Settings > Meta");
         api ??= await pageApi(s, w.page_id ?? "");
         const lead = await api.getLead(it.external_id);
-        if (lead.is_organic === true || lead.is_organic === "1") {
-          await rpc("svc_ads_meta_lead_finish", { p_id: it.id, p_status: "organic" }); organic++; continue;
+        if (isTestLead(lead)) {                      // Lead Ads Testing Tool: proves the path, never filed
+          await rpc("svc_ads_meta_lead_finish", { p_id: it.id, p_status: "test" }); tests++; continue;
+        }
+        if (lead.is_organic === true || lead.is_organic === "1" || !lead.ad_id) {
+          // filled without an ad: a normal lead in Leads (migration 101), not an Ads lead
+          await rpc("svc_ads_meta_lead_finish", { p_id: it.id, p_status: "organic", p_payload: organicPayload(lead), p_pipeline: it.pipeline });
+          organic++; continue;
         }
         const r = await rpc("svc_ads_meta_lead_finish", { p_id: it.id, p_status: "fetched",
           p_payload: metaLeadPayload(lead, { consentField: w.consent_field, consentPurpose: purpose }), p_pipeline: it.pipeline });
@@ -262,7 +268,7 @@ async function metaLeads(s: Record<string, string>, t0: number) {
         if (e instanceof AdsError && (e.status === "rate_limited" || e.status === "auth_required")) break;   // stop: the rest waits
       }
     }
-    return { items: filed, detail: `${filed} Meta lead(s) filed, ${organic} organic (not from an ad), ${later} to try again`, status: later ? "error" : "ok" };
+    return { items: filed, detail: `${filed} Ads lead(s) filed, ${organic} without an ad (to Leads), ${tests} test lead(s), ${later} to try again`, status: later ? "error" : "ok" };
   });
 }
 

@@ -8,7 +8,7 @@ import { MetaAds, AdsError } from "../../functions/_shared/ads_core.ts";
 import {
   buildEvent, consentAnswer, crmEvent, ctwaPayload, EventError, messagingEvent, metaLeadPayload, parseWebhook,
   safeEqual, serializeEvents, verifySignature, webEvent, type CapiItem,
-  deployState, ADS_BUILD,
+  deployState, ADS_BUILD, isTestLead, organicPayload,
 } from "../../functions/_shared/ads_meta.ts";
 
 const hmac = async (k: string, m: string) => createHmac("sha256", k).update(m).digest("hex");
@@ -238,4 +238,25 @@ test("deployState tells a deployed, old and missing Edge Function apart (Setup >
 test("ads-intake /version answers the same build as ADS_BUILD (else Setup would say 'old version')", async () => {
   const src = await Deno.readTextFile(new URL("../../functions/ads-intake/index.ts", import.meta.url));
   assert.ok(src.includes(`build: "${ADS_BUILD}"`));
+});
+
+test("isTestLead: Meta's Lead Ads Testing Tool leads are recognised; real answers are not", () => {
+  const t = { field_data: [{ name: "full_name", values: ["<test lead: dummy data for full_name>"] }, { name: "phone_number", values: ["<test lead: dummy data for phone_number>"] }] };
+  assert.equal(isTestLead(t), true);
+  assert.equal(isTestLead({ field_data: [{ name: "email", values: ["test@fb.com"] }, { name: "first_name", values: ["test lead: dummy data for first_name"] }] }), true);
+  assert.equal(isTestLead({ field_data: [{ name: "full_name", values: ["Ravi Test"] }, { name: "phone_number", values: ["+919811300001"] }] }), false);
+  assert.equal(isTestLead({}), false);
+});
+
+test("organicPayload: a form fill without an ad becomes a normal lead labelled Meta lead form / organic", () => {
+  const p = organicPayload({ id: "1", field_data: [{ name: "full_name", values: ["Asha K"] }, { name: "phone_number", values: ["+919811300009"] },
+    { name: "email", values: ["a@x.in"] }, { name: "course_interest", values: ["CPL"] }, { name: "city", values: ["Delhi"] }] });
+  assert.deepEqual(p, { name: "Asha K", phone: "+919811300009", email: "a@x.in", course_interest: "CPL", utm_source: "Meta lead form",
+    utm_medium: "organic", meta_answers: { city: "Delhi" } });
+  assert.equal("first_touch" in p || "submission_id" in p, false);    // not an Ads lead: no click data
+});
+
+test("the Setup screen expects the same build as the Edge Functions", async () => {
+  const src = await Deno.readTextFile(new URL("../../../frontend/src/components/AdsSetup.jsx", import.meta.url));
+  assert.ok(src.includes(`const BUILD = '${ADS_BUILD}'`));
 });

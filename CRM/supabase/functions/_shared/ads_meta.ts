@@ -17,7 +17,7 @@
 export type MetaSource = "instant_form" | "website" | "ctwa";
 
 // Build stamp of the ADS Edge Functions. The Setup checklist compares it to see whether each function was redeployed.
-export const ADS_BUILD = "2026-11-16.meta1";
+export const ADS_BUILD = "2026-11-17.meta2";
 
 // Reads what a deploy check got back. Supabase answers 404 NOT_FOUND for a function that is not deployed.
 export function deployState(status: number, body: string, wantBuild?: string): "current" | "old" | "missing" | "unknown" {
@@ -142,6 +142,26 @@ export function metaLeadPayload(lead: any, opts: { consentField?: string | null;
     course_interest: a.course_interest || a.course || null, submission_id: `meta-lead-${lead.id}`,
     utm_source: "facebook", utm_medium: "paid_social", site: "facebook.com", touch_at: at,
     first_touch: stripNull(ft), consent, meta_answers: Object.keys(extra).length ? extra : null });
+}
+
+// Meta's Lead Ads Testing Tool fills every answer with "test lead: dummy data for <field>" (some versions wrap it
+// in < >). Such a lead proves the path works; it is never filed as a lead.
+const TEST_VALUE = /^<?\s*test lead\s*:\s*dummy data/i;
+export function isTestLead(lead: any): boolean {
+  const vals = Object.values(answers(lead));
+  return vals.length > 0 && vals.some((v) => TEST_VALUE.test(v.trim()));
+}
+
+// A form filled without an ad (opened from the Page): a normal CRM lead, not an Ads lead (migration 101).
+// utm_campaign is filled in by the database with the form's name.
+export function organicPayload(lead: any): Record<string, unknown> {
+  const a = answers(lead);
+  const name = a.full_name || [a.first_name, a.last_name].filter(Boolean).join(" ") || null;
+  const extra = Object.fromEntries(Object.entries(a).filter(([k]) => !KNOWN.has(k)).slice(0, 30)
+    .map(([k, v]) => [k.slice(0, 80), v.slice(0, 500)]));
+  return stripNull({ name, phone: a.phone_number || a.phone || null, email: a.email || null,
+    course_interest: a.course_interest || a.course || null, utm_source: "Meta lead form", utm_medium: "organic",
+    meta_answers: Object.keys(extra).length ? extra : null });
 }
 
 export function ctwaPayload(item: { external_id: string; ad_id?: string | null; created_time?: string | null;
