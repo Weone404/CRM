@@ -229,4 +229,7 @@ changes, allowed bids and budget inside the spend limits, and has no Mac that st
 | MS44 | Visitor | Fill without a valid phone; handled lead again; unknown status | Not filed, reason shown; never filed twice; refused | A1_ |
 | MS45-47 | Admin / Agent | Setup status; test event with no Ads lead; reporting | Version + per-lead outcome; newest delivered id used; never reported | A1_ |
 | R04 | Owner | 101 down, then up | Rolls back and re-applies | run.sh |
+| MS48 | Admin / Agent / Browser | Meta's CRM check; test lead over 7 days old; browser reads it | Newest test lead + Lead Created name; not used; refused | A1_ |
+| R05 | Owner | 102 down, then up | Rolls back and re-applies | run.sh |
+| UI136c | Admin | Test-event step | No-code button for Meta's Verification Lead; TEST code still accepted | ui |
 | UI134-136b | Admin | Older database; deploy commands; test-lead step | "Update waiting" + only 101 shown; CLI 3 commands; delivered/webhook status | ui |

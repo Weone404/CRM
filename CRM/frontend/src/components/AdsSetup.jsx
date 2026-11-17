@@ -14,12 +14,13 @@ import Icon from './icons';
 const REF = (() => { try { return new URL(SUPABASE_URL).hostname.split('.')[0]; } catch { return ''; } })();
 const SQL_EDITOR = `https://supabase.com/dashboard/project/${REF}/sql/new`;
 const HOOK = `${SUPABASE_URL}/functions/v1/ads-meta-webhook`;
-const BUILD = '2026-11-17.meta2';      // must equal ADS_BUILD in supabase/functions/_shared/ads_meta.ts
-const SCHEMA = 101;                     // newest ADS migration this screen needs (ads_config ads_schema)
+const BUILD = '2026-11-17.meta3';      // must equal ADS_BUILD in supabase/functions/_shared/ads_meta.ts
+const SCHEMA = 102;                     // newest ADS migration this screen needs (ads_config ads_schema)
 // Migrations the Setup page can hand out, oldest first; each is safe to run again.
 const MIGRATIONS = [
   { n: 100, file: '100_ads_meta_signals.sql', load: () => import('../../../backend/migrations/100_ads_meta_signals.sql?raw') },
   { n: 101, file: '101_ads_meta_organic.sql', load: () => import('../../../backend/migrations/101_ads_meta_organic.sql?raw') },
+  { n: 102, file: '102_ads_meta_verification.sql', load: () => import('../../../backend/migrations/102_ads_meta_verification.sql?raw') },
 ];
 const schemaOf = (st) => (st.db ? Number(st.db.schema) || 100 : 0);
 const dbOk = (st) => schemaOf(st) >= SCHEMA;
@@ -109,7 +110,7 @@ function metaSteps() {
       done: (st) => !!(st.db?.meta?.sources?.instant_form?.report && st.db?.meta?.sources?.instant_form?.dataset),
       sub: (st) => (st.db?.meta?.sources?.instant_form?.dataset ? (st.db.meta.sources.instant_form.report ? 'On.' : 'Dataset saved; reporting is off.') : 'No dataset ID yet.'),
       body: (x) => <ReportStep x={x} /> },
-    { id: 'event', title: 'Send a test event', why: 'Shows a report arriving in Meta before real ones are sent.',
+    { id: 'event', title: 'Send a test event', why: 'Shows a report arriving in Meta before real ones are sent. Only Meta\'s test leads are used, never a real lead.',
       done: (st) => st.db?.runs?.meta_test_event?.status === 'ok',
       sub: (st) => (st.db?.runs?.meta_test_event ? `${st.db.runs.meta_test_event.detail || ''} (${ago(st.db.runs.meta_test_event.at)})` : 'Not sent yet.'),
       body: (x) => <TestEventStep x={x} /> },
@@ -405,13 +406,18 @@ function TestEventStep({ x }) {
   return (
     <>
       <ol className="text-sm list-decimal pl-5 space-y-1">
-        <li>Open <a href="https://business.facebook.com/events_manager2" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>Events Manager</a> → your dataset → <b>Test events</b>, copy the test code (starts with TEST).</li>
-        <li>Paste it here and press Send. The event appears in Meta's Test events tab within seconds.</li>
+        <li>Open <a href="https://business.facebook.com/events_manager2" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>Events Manager</a> (top right: your business portfolio) → <b>Datasets</b> → your dataset → <b>Test events</b> → channel <b>CRM</b>, Page and form.</li>
+        <li>Meta shows a <b>Verification Lead</b> and "Waiting for an event". Wait until step 8 above shows a new test lead (about a minute).</li>
+        <li>Press <b>Send for Meta's Verification Lead</b>. Meta's waiting screen turns green within a minute.</li>
       </ol>
-      <div className="flex flex-wrap gap-2">
-        <input aria-label="Test event code" className="glass-input px-3 py-2 text-sm flex-1 min-w-[10rem]" placeholder="TEST12345" value={code} onChange={(e) => setCode(e.target.value.trim())} />
-        <Btn disabled={!/^TEST\w{2,30}$/.test(code)} onClick={() => x.job(['meta_test_event'], { test_event_code: code })}>Send test event</Btn>
-      </div>
+      <Btn onClick={() => x.job(['meta_test_event'])}>Send for Meta's Verification Lead</Btn>
+      <details className="text-xs text-glass-secondary">
+        <summary className="cursor-pointer">Meta showed a code starting with TEST instead (channel Website / server)</summary>
+        <div className="flex flex-wrap gap-2 mt-2">
+          <input aria-label="Test event code" className="glass-input px-3 py-2 text-sm flex-1 min-w-[10rem]" placeholder="TEST12345" value={code} onChange={(e) => setCode(e.target.value.trim())} />
+          <Btn disabled={!/^TEST\w{2,30}$/.test(code)} onClick={() => x.job(['meta_test_event'], { test_event_code: code })}>Send test event</Btn>
+        </div>
+      </details>
     </>
   );
 }

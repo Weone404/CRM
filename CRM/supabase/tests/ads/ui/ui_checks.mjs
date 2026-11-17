@@ -178,10 +178,10 @@ await page.getByTestId('step-meta-db').getByRole('button').first().click();
 await page.getByTestId('sql-101').waitFor({ timeout: 15000 });
 await page.waitForTimeout(800);
 t = await page.getByTestId('sql-101').innerText();
-ok(/101: Meta lead forms, part 2/.test(t) && /INSERT INTO public\.ads_config \(key, value\) VALUES \('ads_schema', '101'\)/.test(t)
+ok(/101: Meta lead forms, part 2/.test(t) && (await page.locator('[data-testid="sql-102"]').count()) === 1 && /INSERT INTO public\.ads_config \(key, value\) VALUES \('ads_schema', '101'\)/.test(t)
   && !(await page.locator('[data-testid="sql-100"]').count()) && /supabase\.com\/dashboard\/project\/.+\/sql\/new/.test(await page.getByTestId('step-meta-db').innerHTML()),
-  'UI134b only the missing file (101) is shown, complete and ready to copy, with a link to the SQL editor');
-await fetch(`${API}/__schema/101`);
+  'UI134b only the missing files (101, 102) are shown, complete and ready to copy, with a link to the SQL editor');
+await fetch(`${API}/__schema/102`);
 await page.getByRole('button', { name: 'Check all now' }).click();
 await page.waitForTimeout(800);
 ok(await page.getByTestId('step-meta-db').getAttribute('data-done') === 'yes', 'UI134c after the update the database step is done again');
@@ -195,6 +195,10 @@ ok(/functions\/v1\/ads-meta-webhook/.test(await page.getByTestId('hook-url').inn
 t = await page.getByTestId('step-meta-lead').innerText();
 ok(/\d+ delivered: \d+ to Ads Leads, \d+ without an ad to Leads, \d+ test/.test(t) && /Meta has not sent a lead to the webhook yet/.test(t),
   'UI136b the test-lead step says what happened to delivered leads and whether the webhook has delivered one');
+await page.getByTestId('step-meta-event').getByRole('button').first().click();
+t = await page.getByTestId('step-meta-event').innerText();
+ok(/Send for Meta's Verification Lead/.test(t) && /channel CRM/.test(t) && /starting with TEST/.test(t),
+  'UI136c the test-event step handles Meta\'s CRM check (no code) and still accepts a TEST code');
 await page.screenshot({ path: `${SHOTS}/ads_meta_setup.png`, fullPage: true });
 await page.goto(`${APP}#/metaads/campaigns`);
 await page.getByText('Test Lead Form').waitFor({ timeout: 15000 });

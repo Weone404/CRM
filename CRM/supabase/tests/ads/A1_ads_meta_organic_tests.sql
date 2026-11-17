@@ -53,7 +53,7 @@ SELECT pg_temp.fails($q$UPDATE public.ads_meta_lead_raw SET status = 'bogus' WHE
 
 -- Setup status and the test-event lead
 SELECT pg_temp.as_('a'); SET ROLE authenticated;
-SELECT pg_temp.ok((SELECT (s->>'schema')::int = 101 AND (s->'meta'->'leads'->>'test')::int >= 1 AND (s->'meta'->'leads'->>'organic_filed')::int >= 3
+SELECT pg_temp.ok((SELECT (s->>'schema')::int = 102 AND (s->'meta'->'leads'->>'test')::int >= 1 AND (s->'meta'->'leads'->>'organic_filed')::int >= 3
     AND (s->'meta'->'leads'->>'by_webhook')::int >= 5 AND s->'meta'->'leads'->>'last_error' LIKE '%phone%' FROM public.api_ads_setup_status('meta') s),
   'MS45 Setup sees the database version and what happened to each delivered lead');
 RESET ROLE;
@@ -61,6 +61,15 @@ UPDATE public.ads_lead SET deleted_at = now() WHERE deleted_at IS NULL;
 SET ROLE service_role;
 SELECT pg_temp.ok((SELECT t->>'lead_id' = '2000000000000005' AND t->>'em' IS NULL AND t ? 'dataset_id' AND t->>'crm_name' <> '' FROM public.svc_ads_meta_test_lead() t),
   'MS46 with no Ads lead from a form, the test event uses the newest lead Meta delivered');
+SELECT pg_temp.ok((SELECT v->>'lead_id' = '2000000000000001' AND v->>'event_name' <> '' AND v ? 'dataset_id' FROM public.svc_ads_meta_verification_lead() v),
+  'MS48 Meta''s CRM check uses the newest test lead (never a real one), with the dashboard''s Lead Created event name');
+RESET ROLE;
+UPDATE public.ads_meta_lead_raw SET received_at = now() - interval '8 days' WHERE status = 'test';
+SET ROLE service_role;
+SELECT pg_temp.ok(public.svc_ads_meta_verification_lead() IS NULL, 'MS48b a test lead older than 7 days is not used (Meta drops events that old)');
+RESET ROLE;
+SET ROLE authenticated;
+SELECT pg_temp.fails($q$SELECT public.svc_ads_meta_verification_lead()$q$, '%permission denied%', 'MS48c the browser cannot read it');
 RESET ROLE;
 SELECT pg_temp.ok(NOT EXISTS (SELECT 1 FROM public.ads_meta_capi_uploads u JOIN public.ads_meta_lead_raw r ON r.lead_id = u.lead_id WHERE r.external_id LIKE '2000000000000%'),
   'MS47 test leads and form fills without an ad are never reported to Meta');

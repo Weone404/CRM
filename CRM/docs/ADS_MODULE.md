@@ -143,6 +143,15 @@ WhatsApp reporting needs Advanced Access to `whatsapp_business_manage_events` (A
 
 Tests: `run.sh` A0_ (MS01–MS35 + R03 rollback), `ads_meta.test.ts` (25), `ui_checks.mjs` UI09/09c, UI120–UI141.
 
+## Meta's CRM check (migration 102, 2026-11-17)
+
+Events Manager > dataset > Test events > channel **CRM** gives no TEST code: Meta creates a Verification Lead (a Testing Tool
+lead, delivered by the webhook, kept as `test`) and waits for one ordinary Conversions API event for that lead id. Setup step 10
+"Send for Meta's Verification Lead" = ads-sync `meta_test_event` with no code: `svc_ads_meta_verification_lead()` gives the
+newest test lead of the last 7 days, the dataset and the Lead Created event name; only test leads are ever used; the Meta stop
+blocks it. A TEST code (Website / server channel) still sends a Test events event as before. Build `2026-11-17.meta3`.
+Undo: `102_ads_meta_verification_down.sql`. Tests: MS48 (A1_), R05, UI136c.
+
 ## Meta lead forms, part 2 (migration 101, 2026-11-17)
 
 - A lead form filled **without an ad** (opened from the Page) becomes a normal lead in **Leads**: utm_source `Meta lead form`,

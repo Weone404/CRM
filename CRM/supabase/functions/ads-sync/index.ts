@@ -13,7 +13,9 @@
 //                        without an ad -> normal Leads; Lead Ads Testing Tool leads -> kept as 'test', never filed.
 //   meta_leads_reconcile Approver / cron. Reads each active form's last 48 hours and adds any lead the webhook missed.
 //   setup                Viewer. Which ADS functions are deployed in the current version (for the Setup checklist).
-//   meta_test_event      Admin. {test_event_code} sends one CRM test event, visible in Events Manager > Test events.
+//   meta_test_event      Admin. {test_event_code}: one CRM test event, visible in Events Manager > Test events.
+//                        No code: Meta's CRM check - one ordinary event for Meta's newest Verification Lead (a test
+//                        lead, never a real one), which Events Manager > Test events > channel CRM waits for.
 //   meta_convert         Approver / cron. Reports lead stages to Meta (Conversions API: CRM, website, WhatsApp), per source settings.
 // Every job takes its own lock (svc_ads_run_begin), so overlapping runs skip instead of doubling up.
 // Keys come from Vault through the service role and never leave this function (responses and logs are scrubbed).
@@ -348,11 +350,29 @@ async function setupCheck() {
     "ads-meta-webhook": await probe("ads-meta-webhook") } };
 }
 
+// Meta's CRM check: Events Manager > Test events > channel CRM shows a Verification Lead and waits for an ordinary event
+// for that lead id (Meta gives no test code there). Only a lead kept as 'test' (Testing Tool / Verification Lead) is
+// ever used, so no real lead is reported by this.
+async function metaVerificationEvent(s: Record<string, string>, meta: MetaAds | undefined): Promise<{ items: number; detail?: string; status?: "ok" | "error" }> {
+  if (s.EXECUTION_PAUSED === "true" || s.META_PAUSED === "true") return { items: 0, status: "error", detail: "Meta Ads is stopped; resume it in Settings first." };
+  if (!meta) return { items: 0, status: "error", detail: "Meta access token is not set" };
+  const v = await rpc("svc_ads_meta_verification_lead") as { lead_id: string; dataset_id: string | null; crm_name: string; event_name: string } | null;
+  if (!v?.lead_id) return { items: 0, status: "error", detail: "No Meta Verification Lead in the CRM yet: in Events Manager > Test events pick channel CRM, wait until step 8 shows a new test lead, then press again." };
+  if (!v.dataset_id) return { items: 0, status: "error", detail: "Add the dataset ID first (step before)." };
+  const ev = crmEvent({ id: 0, source: "instant_form", event_name: v.event_name, event_id: `verify:${v.lead_id}`,
+    event_time: Math.floor(Date.now() / 1000) - 5, lead_id: v.lead_id }, v.crm_name);
+  const r = await meta.sendEvents(v.dataset_id, serializeEvents([ev]));
+  return r.events_received === 1
+    ? { items: 1, detail: `Meta received the event for its Verification Lead ${v.lead_id}. Events Manager > Test events (channel CRM) shows it within a minute.` }
+    : { items: 0, status: "error", detail: `Meta received ${r.events_received ?? 0} events` };
+}
+
 // One CRM test event for the newest Meta form lead, sent with Meta's test_event_code: it shows in Events Manager >
 // Test events and is not used for optimisation.
 async function metaTestEvent(s: Record<string, string>, code: string) {
   const { p } = platforms(s);
   return runJob("meta_test_event", s, async () => {
+    if (!code) return await metaVerificationEvent(s, p.meta);
     if (!/^TEST[0-9A-Za-z]{2,30}$/.test(code)) return { items: 0, status: "error", detail: "Paste the test code from Events Manager > Test events (it starts with TEST)." };
     if (!p.meta) return { items: 0, status: "error", detail: "Meta access token is not set" };
     const t = await rpc("svc_ads_meta_test_lead") as { lead_id: string; em: string | null; ph: string | null; dataset_id: string | null; crm_name: string } | null;
