@@ -1,13 +1,14 @@
 #!/usr/bin/env node
-// ADS agents helper (Google Ads only). Two ways to run it, and both can run side by side (the CRM hands each step to one of them only):
+// ADS agents helper (Google Ads, and Meta Ads > Strategy plans). Two ways to run it, and both can run side by side (the CRM hands each step to one of them only):
 //  - on the owner's Mac, always on, with that Mac's Claude Code login (launchd, see install.sh);
 //  - in the cloud on a schedule, with no Mac at all (.github/workflows/ads-agents.yml): ADS_AGENTS_ONCE=1 works through
 //    whatever is waiting and exits. The token then comes from ADS_AGENTS_TOKEN and Claude signs in with CLAUDE_CODE_OAUTH_TOKEN.
 // Separate from the Amazon helper (tools/claude-bridge): own folder (~/.ads-agents), own token, own Edge Function (ads-agents).
 //
-// Loop: ask the CRM for the next step -> run `claude -p` in the role (researcher / builder / reviewer) -> send the JSON back.
+// Loop: ask the CRM for the next step -> run `claude -p` in the role (researcher / builder / reviewer, or meta_researcher /
+// meta_strategist / meta_reviewer) -> send the JSON back.
 // Safety:
-//  - Only the Researcher may use tools, and only WebSearch + WebFetch. Builder and Reviewer have no tools at all.
+//  - Only the Researchers may use tools, and only WebSearch + WebFetch. Everyone else has no tools at all.
 //  - The agents never see Google credentials. What they propose is checked in the CRM (code checks, then the Reviewer, then
 //    Google's own pre-check) and every change is read back from Google before it counts as done.
 //  - The token (~/.ads-agents/token, mode 600) is the only secret here. Emergency stop in CRM > ADS > Autopilot pauses everything.
@@ -26,8 +27,11 @@ let TOKEN = null;   // read on first use
 const CFG = existsSync(join(CONF, "config.json")) ? JSON.parse(readFileSync(join(CONF, "config.json"), "utf8")) : {};
 const URL_ = process.env.ADS_AGENTS_URL || CFG.url || "https://syytqcadmtgowckdnbqh.supabase.co/functions/v1/ads-agents";
 const CLAUDE = process.env.CLAUDE_BIN || (existsSync(join(CONF, "claude-path")) ? readFileSync(join(CONF, "claude-path"), "utf8").trim() : "claude");
-const MODELS = { researcher: "sonnet", builder: "opus", reviewer: "opus", learner: "opus", ...(CFG.models || {}) };
-const TIMEOUT = { researcher: 15 * 60e3, builder: 8 * 60e3, reviewer: 6 * 60e3, learner: 8 * 60e3 };
+const MODELS = { researcher: "sonnet", builder: "opus", reviewer: "opus", learner: "opus",
+  meta_researcher: "sonnet", meta_strategist: "opus", meta_reviewer: "opus", ...(CFG.models || {}) };
+const TIMEOUT = { researcher: 15 * 60e3, builder: 8 * 60e3, reviewer: 6 * 60e3, learner: 8 * 60e3,
+  meta_researcher: 15 * 60e3, meta_strategist: 12 * 60e3, meta_reviewer: 8 * 60e3 };
+export const WEB_ROLES = new Set(["researcher", "meta_researcher"]);
 const ONCE = process.env.ADS_AGENTS_ONCE === "1";
 let STOP = false;                  // one-pass mode: a usage limit ends the pass instead of waiting
 const IDLE_MS = 60e3;              // ask for work once a minute when idle
@@ -52,7 +56,7 @@ export function buildPrompt(role, run, context) {
 
 export function claudeArgs(role) {
   const base = ["-p", "--output-format", "json", "--strict-mcp-config", "--no-session-persistence", "--model", MODELS[role] || "sonnet"];
-  return role === "researcher"
+  return WEB_ROLES.has(role)
     ? [...base, "--tools", "WebSearch,WebFetch", "--allowedTools", "WebSearch,WebFetch", "--max-turns", "40"]
     : [...base, "--tools", "", "--disallowedTools", "*", "--max-turns", "2"];
 }
@@ -106,10 +110,13 @@ const SUMMARY = {
   learner: (o) => `Learned ${(o.playbook || []).length} lesson(s)${o.answer ? `: ${String(o.answer).slice(0, 200)}` : ""}`,
   reviewer: (o) => (String(o.verdict).toLowerCase() === "approve" ? `Approved${o.notes ? `: ${String(o.notes).slice(0, 200)}` : ""}`
     : `Rejected: ${(o.problems || []).slice(0, 2).join("; ").slice(0, 300)}`),
+  meta_researcher: (o) => String(o.summary || "").split("\n")[0].slice(0, 300),
+  meta_strategist: (o) => `Plan: ${String(o.plan?.title || "").slice(0, 120)}${o.answer ? ` - ${String(o.answer).slice(0, 200)}` : ""}`,
 };
+SUMMARY.meta_reviewer = SUMMARY.reviewer;
 
 async function step() {
-  const job = await call({ action: "next" });
+  const job = await call({ action: "next", meta: true });   // meta: this helper knows the Meta strategy roles
   if (!job.run) return false;
   const { run, context } = job;
   if (!PROMPTS[run.role]) {

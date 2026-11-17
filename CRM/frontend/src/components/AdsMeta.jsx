@@ -4,6 +4,8 @@ import Icon from './icons';
 import AdsLeads from './AdsLeads';
 import AdsSetup, { SetupBanner, progress } from './AdsSetup';
 import AdsMetaInsights from './AdsMetaInsights';
+import AdsMetaStrategy from './AdsMetaStrategy';
+import { SpeedAlerts, LeadArchive } from './AdsMetaLeadTools';
 import { Campaigns, Settings, edge, useSetupFor } from './Ads';
 import { rpc, useLoad, WorkingBar, OfflineBar } from './adsKit';
 import { PERIODS, periodRange, todayIn } from '../utils/ads';
@@ -15,6 +17,7 @@ import { PERIODS, periodRange, todayIn } from '../utils/ads';
 const TABS = [
   { id: 'home', label: 'Overview', icon: 'chart' },
   { id: 'insights', label: 'Insights', icon: 'sparkles' },
+  { id: 'strategy', label: 'Strategy', icon: 'zap' },
   { id: 'campaigns', label: 'Campaigns', icon: 'rocket' },
   { id: 'leads', label: 'Leads', icon: 'leads' },
   { id: 'setup', label: 'Setup', icon: 'checkCircle', admin: true },
@@ -49,6 +52,7 @@ function Overview({ access, st, go }) {
           {card('Last call from Meta', ago(m.config.webhook_last_at), m.config.webhook_last_at ? 'webhook' : 'no lead yet')}
           {card('Sending to Meta', m.config.execution_paused ? 'Stopped' : 'On', m.config.execution_paused ? 'Settings → Resume' : 'emergency stop is off', m.config.execution_paused ? '#C4261D' : '#1E7B34')}
         </div>)}
+      <div className="grid md:grid-cols-2 gap-3"><SpeedAlerts access={access} /><LeadArchive access={access} /></div>
       <div className="grid sm:grid-cols-2 gap-2">
         <button type="button" onClick={() => go('leads')} className="glass-card p-3 text-left flex items-center gap-3">
           <Icon name="leads" size={20} /><span className="flex-1"><span className="block font-semibold">Leads from Meta</span><span className="block text-xs text-glass-secondary">Lead forms, Meta ad → website, WhatsApp ads</span></span><Icon name="chevronRight" size={16} /></button>
@@ -104,6 +108,7 @@ export default function AdsMeta({ access }) {
       </div>
       {view === 'home' && <Overview access={access} st={st} go={go} />}
       {view === 'insights' && <AdsMetaInsights access={access} edge={edge} />}
+      {view === 'strategy' && <AdsMetaStrategy access={access} edge={edge} />}
       {view === 'campaigns' && <Campaigns ctx={ctx} access={access} platform="meta" />}
       {view === 'leads' && <AdsLeads access={access} platform="meta" />}
       {view === 'setup' && access.is_admin && <AdsSetup platform="meta" edge={edge} st={st || {}} check={async () => { const r = await check(); force((n) => n + 1); return r; }} />}

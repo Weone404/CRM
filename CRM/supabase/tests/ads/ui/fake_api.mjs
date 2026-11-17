@@ -39,7 +39,7 @@ http.createServer(async (req, res) => {
           { platform: 'meta', external_id: '5554443', name: 'Pilot School Meta', currency: 'INR', timezone: 'Asia/Kolkata', status: 'ACTIVE', active: true, business: 'Test Biz' }] },
         known: [{ platform: 'google', external_id: '1112223333', client: 'Test Client A' }] };
       if (jobs.includes('sync')) results.sync = { job: 'sync', status: 'ok', items: 0, detail: 'UI test stub: platforms not called' };
-      if (jobs.includes('setup')) results.setup = { build: '2026-11-17.meta4', functions: { 'ads-sync': 'current', 'ads-intake': 'current', 'ads-meta-webhook': 'current' } };
+      if (jobs.includes('setup')) results.setup = { build: '2026-11-17.meta5', functions: { 'ads-sync': 'current', 'ads-intake': 'current', 'ads-meta-webhook': 'current', 'ads-agents': 'current' } };
       if (jobs.includes('execute')) results.execute = { job: 'execute', status: 'ok', items: 0, detail: '0 change(s) processed (UI test stub)' };
       return send(res, 200, { results });
     }
@@ -49,7 +49,7 @@ http.createServer(async (req, res) => {
   if (!m) return send(res, 404, { message: 'not found' });
   const fn = m[1]; calls.push({ fn, args });
   const keys = Object.keys(args);
-  const vals = keys.map((k) => (args[k] !== null && typeof args[k] === 'object' && !Array.isArray(args[k]) ? JSON.stringify(args[k])
+  const vals = keys.map((k) => (args[k] !== null && typeof args[k] === 'object' && (!Array.isArray(args[k]) || args[k].some((x) => x !== null && typeof x === 'object')) ? JSON.stringify(args[k])
     : Array.isArray(args[k]) ? `{${args[k].map((x) => JSON.stringify(String(x))).join(',')}}` : args[k]));
   const sql = `SELECT to_jsonb(public.${fn}(${keys.map((k, i) => `${k} => $${i + 1}`).join(', ')})) AS r`;
   const db = await pool.connect();   // one connection per request: role and user are per transaction

@@ -14,21 +14,24 @@ import Icon from './icons';
 const REF = (() => { try { return new URL(SUPABASE_URL).hostname.split('.')[0]; } catch { return ''; } })();
 const SQL_EDITOR = `https://supabase.com/dashboard/project/${REF}/sql/new`;
 const HOOK = `${SUPABASE_URL}/functions/v1/ads-meta-webhook`;
-const BUILD = '2026-11-17.meta4';      // must equal ADS_BUILD in supabase/functions/_shared/ads_meta.ts
-const SCHEMA = 103;                     // newest ADS migration this screen needs (ads_config ads_schema)
+const BUILD = '2026-11-17.meta5';      // must equal ADS_BUILD in supabase/functions/_shared/ads_meta.ts
+const SCHEMA = 104;                     // newest ADS migration this screen needs (ads_config ads_schema)
 // Migrations the Setup page can hand out, oldest first; each is safe to run again.
 const MIGRATIONS = [
   { n: 100, file: '100_ads_meta_signals.sql', load: () => import('../../../backend/migrations/100_ads_meta_signals.sql?raw') },
   { n: 101, file: '101_ads_meta_organic.sql', load: () => import('../../../backend/migrations/101_ads_meta_organic.sql?raw') },
   { n: 102, file: '102_ads_meta_verification.sql', load: () => import('../../../backend/migrations/102_ads_meta_verification.sql?raw') },
   { n: 103, file: '103_ads_meta_insights.sql', load: () => import('../../../backend/migrations/103_ads_meta_insights.sql?raw') },
+  { n: 104, file: '104_ads_meta_strategy.sql', load: () => import('../../../backend/migrations/104_ads_meta_strategy.sql?raw') },
 ];
 const schemaOf = (st) => (st.db ? Number(st.db.schema) || 100 : 0);
 const dbOk = (st) => schemaOf(st) >= SCHEMA;
 const ago = (t) => { if (!t) return ''; const m = Math.round((Date.now() - new Date(t).getTime()) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
 const notFound = (e) => /Could not find the function|PGRST202|does not exist|404/i.test(`${e?.code || ''} ${e?.message || e}`);
 // Supabase CLI 3.x: --remote=<ref> (was --project-ref), --use-api builds on Supabase (no Docker), --yes confirms the hosted change.
-// All three run with JWT checking off: ads-sync checks the caller itself (CRM login or cron token), the other two are public.
+// All run with JWT checking off: ads-sync checks the caller itself (CRM login or cron token), ads-agents its own token, the rest are public.
+// Meta: ads-agents too, since Meta Ads > Strategy runs on the same agents (it answers /version with the build).
+const META_FNS = ['ads-sync', 'ads-intake', 'ads-meta-webhook', 'ads-agents'];
 const DEPLOY = (fns) => `cd ~/Desktop/CRM/CRM/CRM\n${fns.map((f) => `npx -y supabase@latest functions deploy ${f} --no-verify-jwt --use-api --remote=${REF} --yes`).join('\n')}`;
 
 async function copy(text, what = 'Copied.') {
@@ -78,8 +81,8 @@ function metaSteps() {
       done: dbOk, sub: (st) => (dbOk(st) ? 'Done: the database is up to date.' : st.db ? 'A database update is waiting: run the SQL below.' : st.dbError || 'Not run yet.'),
       body: (x) => <SqlStep st={x.st} /> },
     { id: 'fns', title: 'Deploy the three ADS functions', why: 'ads-sync (jobs), ads-intake (website enquiries) and ads-meta-webhook (Meta calls it with new leads).',
-      done: (st) => fnOk(st, ['ads-sync', 'ads-intake', 'ads-meta-webhook']), sub: (st) => fnSub(st, ['ads-sync', 'ads-intake', 'ads-meta-webhook']),
-      body: () => <CmdStep fns={['ads-sync', 'ads-intake', 'ads-meta-webhook']} /> },
+      done: (st) => fnOk(st, META_FNS), sub: (st) => fnSub(st, META_FNS),
+      body: () => <CmdStep fns={META_FNS} /> },
     { id: 'keys', title: 'Save the Meta keys', why: 'The access token reads leads and sends reports; the app secret proves webhook calls come from Meta; the verify token is a password you give Meta.',
       done: (st) => ['META_ACCESS_TOKEN', 'META_APP_SECRET', 'META_WEBHOOK_VERIFY_TOKEN'].every((k) => st.db?.secrets?.[k]),
       sub: (st) => ['META_ACCESS_TOKEN', 'META_APP_SECRET', 'META_WEBHOOK_VERIFY_TOKEN'].map((k) => `${k.replace('META_', '').toLowerCase().replace(/_/g, ' ')}: ${st.db?.secrets?.[k] ? 'saved' : 'missing'}`).join(' · '),

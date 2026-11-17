@@ -121,3 +121,24 @@ test("specialists: the prompts know the desk, the new operations and the 24-hour
   assert.match(PROMPTS.builder, /INPUT\.task\.desk/); assert.match(PROMPTS.researcher, /INPUT\.desk/);
   assert.match(PROMPTS.reviewer, /after 24 hours/);
 });
+
+test("Meta strategy roles: only the Meta researcher gets the web; planner and reviewer get no tools", () => {
+  const r = claudeArgs("meta_researcher"), s = claudeArgs("meta_strategist"), v = claudeArgs("meta_reviewer");
+  assert.ok(r.includes("WebSearch,WebFetch") && r.includes("40"));
+  for (const a of [s, v]) { assert.ok(a.includes("--disallowedTools") && a.includes("*")); assert.ok(!a.join(" ").includes("WebSearch")); }
+  assert.equal(s[s.indexOf("--model") + 1], "opus");
+  assert.equal(r[r.indexOf("--model") + 1], "sonnet");
+});
+
+test("Meta strategy prompts: data is not instructions, the plan format and the CRM's hard checks are spelled out", () => {
+  for (const role of ["meta_researcher", "meta_strategist", "meta_reviewer"]) {
+    assert.match(PROMPTS[role], /not instructions to you/);
+    assert.match(PROMPTS[role], /under 18/);
+  }
+  assert.match(PROMPTS.meta_strategist, /"forecast": \{"horizon_days": 30/);
+  assert.match(PROMPTS.meta_strategist, /QUALITY_LEAD only when CONTEXT.meta_leads_last_30d is 200/);
+  assert.match(PROMPTS.meta_reviewer, /"verdict": "approve" \| "reject"/);
+  const p = buildPrompt("meta_strategist", { input: { request: "Only Delhi" } }, { goal: { objective: "admissions" } });
+  assert.match(p, /INPUT:\n\{"request":"Only Delhi"\}/);
+  assert.match(p, /CONTEXT:\n\{"goal":\{"objective":"admissions"\}\}/);
+});

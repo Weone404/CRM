@@ -143,6 +143,38 @@ WhatsApp reporting needs Advanced Access to `whatsapp_business_manage_events` (A
 
 Tests: `run.sh` A0_ (MS01–MS35 + R03 rollback), `ads_meta.test.ts` (25), `ui_checks.mjs` UI09/09c, UI120–UI141.
 
+## Meta Ads > Strategy, lead archive, speed to lead (migration 104, 2026-11-17)
+
+- **Strategy tab** (`AdsMetaStrategy.jsx`). Admin sets a goal (admissions / qualified / leads, target, monthly budget limit or
+  "suggest", courses, places, languages, start, length, lead-to-admission %, value of an admission, website, privacy policy, notes;
+  checked by `crm_private.ads_meta_goal_clean`). The ADS agents work on it on the same helper as the Google agents:
+  `meta_researcher` (web only: Meta guidance, benchmarks, timing, website facts, competitors) -> `meta_strategist` (full plan)
+  -> `meta_reviewer`. Code checks (`crm_private.ads_meta_plan_check`: structure, keys, budgets x 30.4 = monthly within 10%,
+  owner's limit, PHONE + FULL_NAME, ages 18-65, forecast arithmetic, banned claims, QUALITY_LEAD only at 200+ Meta leads a month)
+  run before the Reviewer; 3 tries in all, then the plan is kept as "needs review" with the problems. Every plan / change is a
+  version (`ads_meta_strategy_version`); the owner approves one. Change requests (text, optional fresh research, or a new goal)
+  revise the latest version. 8 owner-started runs per 24 h (`meta_strategy_per_day`). Context: 37-month Insights cut by
+  `trimMetaContext` + the CRM's own patterns (`meta_patterns.ts`), CRM funnel, lead archive, past strategies and checks.
+- **Agents helper**: `next` with `meta: true` (`svc_ads_agent_next2`); older helpers only get Google steps. `finish` goes to
+  `svc_ads_meta_agent_finish` first ({handled:false} for Google). Prompts: `tools/ads-agents/prompts.mjs` (META_*).
+- **Create in Meta** (ads-sync `meta_build`, Admin): builds the approved version, everything PAUSED: lead forms (Page token;
+  intro / thank-you retried without if refused), campaigns (`is_adset_budget_sharing_enabled=false` for ad-set budgets),
+  ad sets (locations and interests looked up with Meta search; `advantage_audience` 1 or 0; Advantage+ keeps 18-65 and takes the
+  plan's ages as `age_range`), image creatives with an uploaded picture (`meta_image`, PNG / JPEG up to 8 MB), ads. Each step is
+  saved at once (`svc_ads_meta_build_step`), so pressing again continues and never duplicates. Video / carousel ads are left
+  for Ads Manager. Names end with `· CRM S<id>`. Builder: `_shared/meta_build.ts`.
+- **Plan vs actual**: weekly (`crm-ads-meta-track`, Monday 06:05 IST) for approved strategies with linked or built campaigns;
+  "behind" drafts a revision (at most once in 14 days) that waits for approval; the approved version stays.
+- **Lead archive** (`ads_meta_lead_archive`): every Meta form lead the CRM files (ad or organic) is copied by trigger with its
+  answers and kept for good; each form is read back once for the 89 days Meta still holds (`full_swept_at`); old CSV downloads
+  import (Overview, Admin; matched to Leads by phone); Admin can download everything as CSV.
+- **Speed to lead**: ad leads (Google and Meta) with no first call after 5 min (owner) / 15 min (Admin), 09:00-20:00 IST,
+  only leads after the feature was switched on (`lead_alert_since`). Cron `crm-ads-lead-alerts` (every 2 min, wakes ads-sync
+  `lead_alerts` only when due): phone notifications (CRM push keys, people who turned them on) and email (CRM SMTP, when set
+  up). Overview shows waiting leads and the settings.
+- Build `2026-11-17.meta5`; ads-agents answers `GET /version` and is in Meta Setup step 2. Undo: `104_ads_meta_strategy_down.sql`.
+  Tests: A3_ (SG01-36), R07, `meta_strategy.test.ts` (8), `agents.test.mjs` (+2), UI160-169.
+
 ## Meta Ads > Insights (migration 103, 2026-11-17)
 
 Read-only history dashboard. ads-sync job `meta_history` (cron `crm-ads-meta-history`, minute 50, only when work is due):

@@ -20,6 +20,10 @@
 //                        No code: Meta's CRM check - one ordinary event for Meta's newest Verification Lead (a test
 //                        lead, never a real one), which Events Manager > Test events > channel CRM waits for.
 //   meta_convert         Approver / cron. Reports lead stages to Meta (Conversions API: CRM, website, WhatsApp), per source settings.
+//   meta_build           Admin. {strategy_id}: Meta Ads > Strategy > Create in Meta - creates the approved plan in the ad account,
+//                        everything PAUSED (lead forms, campaigns, ad sets, image ads). Resumable: each step is saved at once.
+//   meta_image           Admin. {strategy_id, creative_key, image_base64, filename}: uploads a creative's picture (PNG / JPEG).
+//   lead_alerts          Cron / approver. Speed-to-lead: phone notifications and emails for ad leads still waiting for a first call.
 // Every job takes its own lock (svc_ads_run_begin), so overlapping runs skip instead of doubling up.
 // Keys come from Vault through the service role and never leave this function (responses and logs are scrubbed).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -31,6 +35,10 @@ import { URL_ } from "../_shared/ads_deno.ts";
 import { BREAKDOWNS, monthChunks, namesFromDays, parseAd, parseAdDay, parseAdset, parseBreakdown, parseCampaign, monthsBack, type DayRow } from "../_shared/meta_history.ts";
 import { findPatterns, reportText } from "../_shared/meta_patterns.ts";
 import { smtpSend } from "../_shared/smtp.ts";
+import * as webpush from "jsr:@negrel/webpush@0.5.0";
+import { alertText, type DueAlert } from "../_shared/lead_alerts.ts";
+import { adParams, adsetParams, bestMatch, campaignParams, countryCode, creativeParams, formParams, geoQueries, imageKind, MAX_IMAGE_B64,
+  planSteps, targeting, type BuildWork, type Geo } from "../_shared/meta_build.ts";
 
 const DEADLINE_MS = 120_000;
 
@@ -353,7 +361,7 @@ async function setupCheck() {
     } catch { return "unknown" as const; }
   };
   return { build: ADS_BUILD, functions: { "ads-sync": "current", "ads-intake": await probe("ads-intake/version", ADS_BUILD),
-    "ads-meta-webhook": await probe("ads-meta-webhook") } };
+    "ads-meta-webhook": await probe("ads-meta-webhook"), "ads-agents": await probe("ads-agents/version", ADS_BUILD) } };
 }
 
 // ---------------------------------------------------------------- Meta Ads > Insights history (read-only)
@@ -487,21 +495,170 @@ async function metaTestEvent(s: Record<string, string>, code: string) {
   });
 }
 
+// ------------------------------------------------------------------ Meta Ads > Strategy > Create in Meta (migration 104)
+async function metaBuild(s: Record<string, string>, strategyId: number, t0: number) {
+  return runJob("meta_build", s, async () => {
+    if (!Number.isInteger(strategyId) || strategyId <= 0) return { items: 0, status: "error", detail: "strategy_id is required" };
+    const { p } = platforms(s);
+    if (!p.meta) return { items: 0, status: "error", detail: "Meta access token is not set" };
+    const w = await rpc("svc_ads_meta_build_work", { p_id: strategyId }) as BuildWork | null;
+    if (!w) return { items: 0, status: "error", detail: "Nothing to create: approve the plan and press Create in Meta first." };
+    if (!w.goal?.privacy_url && (w.plan?.forms ?? []).some((f: any) => !w.steps[`form:${f.key}`]?.id)) {
+      await rpc("svc_ads_meta_build_end", { p_id: strategyId, p_status: "error", p_detail: "Add the privacy policy link to the goal (Meta requires it on lead forms)." });
+      return { items: 0, status: "error", detail: "privacy policy link missing" };
+    }
+    const meta = p.meta, act = `act_${w.account_id}`;
+    let page: MetaAds | null = null;
+    const steps = planSteps(w);
+    const ids: Record<string, string> = Object.fromEntries(Object.entries(w.steps ?? {}).filter(([, v]) => v?.id).map(([k, v]) => [k, String(v.id)]));
+    const today = todayIn("Asia/Kolkata");
+    const P = w.plan;
+    const find = (kind: string, key: string) => kind === "form" ? P.forms.find((f: any) => f.key === key)
+      : kind === "campaign" ? P.campaigns.find((c: any) => c.key === key)
+      : kind === "adset" ? P.campaigns.flatMap((c: any) => (c.adsets ?? []).map((a: any) => ({ ...a, _c: c }))).find((a: any) => a.key === key)
+      : P.creatives.find((c: any) => c.key === key);
+    const save = (key: string, step: Record<string, unknown>) => rpc("svc_ads_meta_build_step", { p_id: strategyId, p_key: key, p_step: step });
+    let made = 0, waiting = 0, failed = 0, manual = 0, stopped = false;
+    for (const st of steps) {
+      if (ids[st.key]) continue;
+      if (Date.now() - t0 > DEADLINE_MS - 15_000) { stopped = true; break; }
+      if (st.skip) { manual++; await save(st.key, { status: "manual", note: st.skip }); continue; }
+      const missing = st.needs.filter((k) => !ids[k]);
+      if (missing.length) { waiting++; await save(st.key, { status: "waiting", note: `Needs ${missing.join(", ")} first` }); continue; }
+      const [kind, k1, k2] = st.key.split(":");
+      let note: string | undefined;
+      try {
+        let id: string;
+        if (kind === "form") {
+          page ??= await pageApi(s, w.page_id);
+          const f = find("form", k1);
+          try { id = await page.create(`${w.page_id}/leadgen_forms`, formParams(w, f)); }
+          catch (e) {   // the intro / thank-you screens are extras: retry without them rather than fail the form
+            if (e instanceof AdsError && (e.status === "auth_required" || e.status === "rate_limited")) throw e;
+            id = await page.create(`${w.page_id}/leadgen_forms`, formParams(w, f, true));
+          }
+        } else if (kind === "campaign") {
+          id = await meta.create(`${act}/campaigns`, campaignParams(w, find("campaign", k1)));
+        } else if (kind === "adset") {
+          const a = find("adset", k1);
+          const geo: Geo = { countries: [], regions: [], cities: [] };
+          const notFound: string[] = [];
+          for (const q of geoQueries(a)) {
+            if (q.type === "country" && countryCode(q.name)) { geo.countries.push(countryCode(q.name)!); continue; }
+            const hit = bestMatch(await meta.search({ type: "adgeolocation", q: q.name, location_types: JSON.stringify([q.type]) }), q.name) as any;
+            if (!hit?.key) { notFound.push(q.name); continue; }
+            if (q.type === "country") geo.countries.push(String(hit.country_code ?? hit.key));
+            else if (q.type === "region") geo.regions.push({ key: String(hit.key) });
+            else geo.cities.push({ key: String(hit.key), ...(q.radius_km ? { radius: q.radius_km, distance_unit: "kilometer" } : {}) });
+          }
+          if (!geo.countries.length && !geo.regions.length && !geo.cities.length) throw new AdsError("sync_failed", `Meta did not find the locations: ${notFound.join(", ")}`);
+          const interests: { id: string; name: string }[] = [];
+          for (const name of (a.audience?.interests ?? []).slice(0, 15)) {
+            const hit = bestMatch(await meta.search({ type: "adinterest", q: String(name) }), String(name)) as any;
+            if (hit?.id) interests.push({ id: String(hit.id), name: String(hit.name) });
+          }
+          id = await meta.create(`${act}/adsets`, adsetParams(w, a._c, a, ids[`campaign:${a._c.key}`], targeting(a, geo, interests), today));
+          if (notFound.length) note = `Not found by Meta, left out: ${notFound.join(", ")}`;
+        } else if (kind === "creative") {
+          id = await meta.create(`${act}/adcreatives`, creativeParams(w, find("creative", k1), ids[`form:${k2}`]));
+        } else {
+          const cr = find("creative", k2);
+          id = await meta.create(`${act}/ads`, adParams(w, cr?.name ?? k2, ids[`adset:${k1}`], ids[`creative:${k2}:${find("adset", k1).form}`]));
+        }
+        await save(st.key, { id, status: "done", ...(note ? { note } : {}) });
+        ids[st.key] = id; made++;
+      } catch (e) {
+        failed++;
+        const msg = scrubSecrets(e instanceof Error ? e.message : String(e), s).slice(0, 400);
+        await save(st.key, { status: "error", error: msg });
+        if (e instanceof AdsError && (e.status === "auth_required" || e.status === "rate_limited" || e.status === "permission_missing")) { stopped = true; break; }
+      }
+    }
+    const left = steps.filter((x) => !ids[x.key]).length;
+    const status = left === 0 ? "done" : stopped || failed ? "error" : "partial";
+    const detail = `${made} created now, ${Object.keys(ids).length} of ${steps.length} in Meta (all paused)`
+      + (manual ? `, ${manual} to add in Ads Manager` : "") + (failed ? `, ${failed} failed` : "") + (waiting ? `, ${waiting} waiting on those` : "")
+      + (stopped && !failed ? ", more to do: press Create in Meta again" : "");
+    await rpc("svc_ads_meta_build_end", { p_id: strategyId, p_status: status, p_detail: detail });
+    return { items: made, detail, status: failed ? "error" : "ok" };
+  });
+}
+
+async function metaImage(s: Record<string, string>, strategyId: number, key: string, b64: string, filename: string) {
+  if (!Number.isInteger(strategyId) || !/^[A-Za-z0-9_-]{1,40}$/.test(key)) throw new HttpError(422, "strategy_id and creative_key are required");
+  const data = b64.replace(/^data:image\/[a-z]+;base64,/, "");
+  if (!imageKind(data)) throw new HttpError(422, "Use a PNG or JPEG picture");
+  if (data.length > MAX_IMAGE_B64) throw new HttpError(422, "The picture is over 8 MB");
+  const { p } = platforms(s);
+  if (!p.meta) throw new HttpError(409, "Meta access token is not set");
+  const w = await rpc("svc_ads_meta_build_work_peek", { p_id: strategyId }) as { account_id: string } | null;
+  if (!w?.account_id) throw new HttpError(409, "Connect the Meta ad account first");
+  try {
+    const hash = await p.meta.uploadImage(w.account_id, data, filename || `${key}.${imageKind(data) === "png" ? "png" : "jpg"}`);
+    await rpc("svc_ads_meta_build_image", { p_id: strategyId, p_key: key, p_hash: hash, p_name: filename || key });
+    return { ok: true, hash };
+  } catch (e) {
+    throw new HttpError(502, scrubSecrets(e instanceof Error ? e.message : String(e), s).slice(0, 300));
+  }
+}
+
+// ------------------------------------------------------------------ speed-to-lead alerts (migration 104)
+async function leadAlerts(s: Record<string, string>) {
+  return runJob("lead_alerts", s, async () => {
+    const c = await rpc("svc_ads_lead_alerts_claim") as { alerts: DueAlert[]; vapid_keys: string | null;
+      mail: { ready: boolean; smtp?: any; password?: string } };
+    if (!c?.alerts?.length) return { items: 0, detail: "No lead waiting." };
+    let server: webpush.ApplicationServer | null = null;
+    if (c.vapid_keys && c.alerts.some((a) => a.subs.length)) {
+      try {
+        const vapidKeys = await webpush.importVapidKeys(JSON.parse(c.vapid_keys), { extractable: false });
+        server = await webpush.ApplicationServer.new({ contactInformation: "mailto:info@weoneaviation.in", vapidKeys });
+      } catch (e) { console.error("lead_alerts push keys", String(e).slice(0, 200)); }
+    }
+    const results: { lead_id: string; level: number; sent: Record<string, unknown> }[] = [];
+    let pushed = 0, emailed = 0;
+    for (const a of c.alerts) {
+      const m = alertText(a);
+      const sent: Record<string, unknown> = { push: 0, email: 0 };
+      if (server) for (const sub of a.subs) {
+        try { await server.subscribe({ endpoint: sub.endpoint, keys: sub.keys }).pushTextMessage(JSON.stringify(m), { ttl: 3600, urgency: webpush.Urgency.High });
+          sent.push = Number(sent.push) + 1; pushed++; }
+        catch (e) { sent.push_error = String(e instanceof Error ? e.message : e).slice(0, 120); }
+      }
+      if (c.mail?.ready && a.emails.length) {
+        try {
+          await smtpSend({ host: c.mail.smtp.host, port: Number(c.mail.smtp.port) || 465, username: c.mail.smtp.username, password: c.mail.password!,
+            fromName: c.mail.smtp.from_name ?? "We One CRM" }, { to: a.emails, subject: m.title, text: `${m.body}\n\nOpen the CRM: ${m.url}`,
+            html: `<p>${m.body.replace(/[&<>]/g, (x) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[x]!))}</p><p><a href="${m.url}">Open the CRM</a></p>` });
+          sent.email = a.emails.length; emailed++;
+        } catch (e) { sent.email_error = String(e instanceof Error ? e.message : e).slice(0, 160); }
+      }
+      if (!a.subs.length && !(c.mail?.ready && a.emails.length)) sent.note = "No phone notifications or email set up for the people to alert";
+      results.push({ lead_id: a.lead_id, level: a.level, sent });
+    }
+    await rpc("svc_ads_lead_alerts_done", { p_results: results });
+    return { items: c.alerts.length, detail: `${c.alerts.length} alert(s): ${pushed} phone notification(s), ${emailed} email(s)` };
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors(req) });
   if (req.method !== "POST") return json(req, 405, { detail: "POST only" });
   const t0 = Date.now();
   try {
-    let body: { jobs?: string[]; ops?: { kind: string; payload: unknown }[]; seeds?: string[]; geos?: string[]; subscribe?: boolean; test_event_code?: string } = {};
+    let body: { jobs?: string[]; ops?: { kind: string; payload: unknown }[]; seeds?: string[]; geos?: string[]; subscribe?: boolean; test_event_code?: string;
+      strategy_id?: number; creative_key?: string; image_base64?: string; filename?: string } = {};
     try { body = await req.json(); } catch { /* empty body */ }
     const jobs = (body.jobs ?? ["sync"]).filter((j) => ["test", "discover", "sync", "execute", "gcheck", "ideas", "convert",
-      "meta_page", "meta_leads", "meta_leads_reconcile", "meta_convert", "setup", "meta_test_event", "meta_history"].includes(j));
+      "meta_page", "meta_leads", "meta_leads_reconcile", "meta_convert", "setup", "meta_test_event", "meta_history", "meta_build", "meta_image",
+      "lead_alerts"].includes(j));
     if (!jobs.length) return json(req, 422, { detail: "jobs must include test, discover, sync or execute" });
     if (!(await cronOk(req))) {
       const access = await asUser(req, "api_ads_access") as { can_view: boolean; can_approve: boolean; is_admin: boolean };
       if (!access?.can_view) throw new HttpError(403, "You do not have access to the ADS section");
       if ((jobs.includes("test") || jobs.includes("discover") || jobs.includes("gcheck") || jobs.includes("ideas") || jobs.includes("meta_page") || jobs.includes("meta_test_event") || jobs.includes("meta_history")) && !access.is_admin) throw new HttpError(403, "Only Admin can test connections or find accounts");
-      if ((jobs.includes("execute") || jobs.includes("convert") || jobs.some((j) => j.startsWith("meta_") && j !== "meta_page" && j !== "meta_test_event" && j !== "meta_history")) && !access.can_approve) throw new HttpError(403, "Only approvers can run changes");
+      if ((jobs.includes("meta_build") || jobs.includes("meta_image")) && !access.is_admin) throw new HttpError(403, "Only Admin can create campaigns in Meta");
+      if ((jobs.includes("execute") || jobs.includes("convert") || jobs.includes("lead_alerts") || jobs.some((j) => j.startsWith("meta_") && !["meta_page", "meta_test_event", "meta_history", "meta_build", "meta_image"].includes(j))) && !access.can_approve) throw new HttpError(403, "Only approvers can run changes");
     }
     if (jobs.length === 1 && jobs[0] === "setup") return json(req, 200, { results: { setup: await setupCheck() } });   // no keys needed
     const secrets = (await rpc("svc_ads_secrets")) as Record<string, string>;
@@ -544,6 +701,10 @@ Deno.serve(async (req) => {
     if (jobs.includes("meta_leads_reconcile")) results.meta_leads_reconcile = await metaReconcile(secrets, t0);
     if (jobs.includes("meta_leads")) results.meta_leads = await metaLeads(secrets, t0);
     if (jobs.includes("meta_convert")) results.meta_convert = await metaConvert(secrets, t0);
+    if (jobs.includes("meta_image")) results.meta_image = await metaImage(secrets, Number(body.strategy_id), String(body.creative_key ?? ""),
+      String(body.image_base64 ?? ""), String(body.filename ?? "").replace(/[^\w. -]/g, "").slice(0, 100));
+    if (jobs.includes("meta_build")) results.meta_build = await metaBuild(secrets, Number(body.strategy_id), t0);
+    if (jobs.includes("lead_alerts")) results.lead_alerts = await leadAlerts(secrets);
     return json(req, 200, { results });
   } catch (e) {
     if (e instanceof HttpError) return json(req, e.status, { detail: e.message });

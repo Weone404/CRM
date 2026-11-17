@@ -409,6 +409,24 @@ export class MetaAds {
     const b = await this.req("POST", `${datasetId}/events`, { data, test_event_code: testEventCode }, true);
     return { events_received: num(b.events_received), fbtrace_id: b.fbtrace_id ?? null };
   }
+  // Meta Ads > Strategy > Create in Meta (migration 104): one create call (form fields), returns the new object's id.
+  async create(path: string, params: Record<string, string>): Promise<string> {
+    const b = await this.req("POST", path, params, true);
+    if (!b?.id) throw new AdsError("sync_failed", "Meta did not return an id");
+    return String(b.id);
+  }
+  // Targeting search: adgeolocation (cities, regions, countries) and adinterest.
+  async search(params: Record<string, string>): Promise<any[]> {
+    const b = await this.req("GET", "search", { limit: "10", ...params });
+    return Array.isArray(b?.data) ? b.data : [];
+  }
+  // A picture for ad creatives (base64 PNG / JPEG); returns its image hash.
+  async uploadImage(accountId: string, base64: string, name: string): Promise<string> {
+    const b = await this.req("POST", `act_${accountId}/adimages`, { bytes: base64, name: name.slice(0, 100) }, true);
+    const first = b?.images ? Object.values(b.images)[0] as any : null;
+    if (!first?.hash) throw new AdsError("sync_failed", "Meta did not return an image hash");
+    return String(first.hash);
+  }
 }
 
 // Ads: everything except DELETED, which Meta does not list (campaigns and ad sets use the values valid for them).

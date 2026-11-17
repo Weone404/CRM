@@ -47,3 +47,11 @@ BEGIN
   VALUES ('create', 'lead', jsonb_build_object('lead_id', lid, 'source', 'website'));
   RETURN jsonb_build_object('status', 'created', 'lead_id', lid);
 END $$;
+
+-- 104 (Strategy, archive, speed-to-lead) reads these CRM columns and tables, as they are on Supabase.
+ALTER TABLE public.lead ADD COLUMN IF NOT EXISTS assigned_to uuid, ADD COLUMN IF NOT EXISTS first_contacted_at timestamptz;
+ALTER TABLE public.employee ADD COLUMN IF NOT EXISTS email text;
+CREATE TABLE IF NOT EXISTS public.amazon_push_subs (id bigserial PRIMARY KEY, employee_id uuid NOT NULL, endpoint text NOT NULL UNIQUE,
+  p256dh text NOT NULL, auth text NOT NULL, device text, fails int NOT NULL DEFAULT 0, last_ok_at timestamptz, created_at timestamptz NOT NULL DEFAULT now());
+CREATE OR REPLACE FUNCTION crm_private.normalize_phone(p text) RETURNS text
+LANGUAGE sql IMMUTABLE SET search_path = '' AS $$ SELECT nullif(right(regexp_replace(coalesce(p, ''), '\D', '', 'g'), 10), '') $$;

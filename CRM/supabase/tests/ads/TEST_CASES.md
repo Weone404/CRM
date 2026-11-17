@@ -239,6 +239,16 @@ changes, allowed bids and budget inside the spend limits, and has no Mac that st
 | MI18-20 | Agent / Viewer / Admin | Monthly summary, recipients | Due once, exact month, saved with why not emailed; Admin sets valid recipients | A2_ |
 | R06 | Owner | 103 down, then up | Rolls back and re-applies | run.sh |
 | MH | Agent | Graph rows, history calls, patterns, what-if, summary text | Parsed; read-only GETs; proven wins / losses; estimate; safe HTML | meta_insights.test |
+| SG01-03 | Admin / Viewer | Start a strategy | Goal checked (course, budget, https); Admin only; cleaned, titled, Researcher queued | A3_ |
+| SG04-12 | Agents | Research -> plan -> review | Old helpers get no Meta step; context has history, Page, archive; code checks and Reviewer send back; version 1 ready; 3rd failure kept as needs review | A3_ |
+| SG13-14 | Code checks | Broken plans | Banned claims, early QUALITY_LEAD, wrong maths, under 18, missing keys, no phone, budget mismatch / over limit | A3_ |
+| SG15-18 | Admin / Viewer | Change, fail, approve, read | Change uses the latest version; failure restores; approve; viewers read only | A3_ |
+| SG19-21 | Admin / ads-sync | Create in Meta | Approved plan, account, Page handed over; steps saved as they happen; another version never built on top | A3_, meta_strategy.test |
+| SG22-24 | Cron | Plan vs actual | Links checked; weekly verdict; behind -> one drafted revision in 14 days | A3_ |
+| SG25-29 | CRM / Admin | Lead archive | Filed leads copied with answers (not test leads); CSV import, match, no data loss; Admin-only export; 89-day first read | A3_, UI167-168 |
+| SG30-36 | Cron / Admin | Speed to lead | Due after N min; owner first, Admin later with phone and email; once each; stops when called; settings checked | A3_, UI169 |
+| R07 | Owner | 104 down, then up | Rolls back and re-applies | run.sh |
+| UI160-166 | Admin | Strategy tab | List, goal form errors, start, full plan, approve, link, change request, phone width | ui_checks |
 | UI150-158 | Admin | Meta Ads > Insights | Tiles, patterns, leaderboard, gallery, charts, what-if, filters, notes, summaries | ui |
 | UI136c | Admin | Test-event step | No-code button for Meta's Verification Lead; TEST code still accepted | ui |
 | UI134-136b | Admin | Older database; deploy commands; test-lead step | "Update waiting" + only 101 shown; CLI 3 commands; delivered/webhook status | ui |

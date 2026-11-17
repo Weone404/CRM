@@ -184,6 +184,92 @@ ok(/Monthly summaries/.test(await page.getByTestId('insights-reports').innerText
   'UI158 monthly summaries say when CRM email is not set up');
 await page.screenshot({ path: `${SHOTS}/ads_meta_insights.png`, fullPage: true });
 
+// ---- Meta Ads > Strategy (migration 104)
+await page.goto(`${APP}#/metaads/strategy`);
+await page.getByTestId('meta-strategy').waitFor({ timeout: 15000 });
+await page.getByTestId('strategy-card').first().waitFor({ timeout: 15000 });
+t = await page.getByTestId('meta-strategy').innerText();
+ok(/CPL admissions, Delhi NCR/.test(t) && /Ready for you/.test(t) && /₹30,400\/month → about 600 leads, 12 admissions/.test(t) && /The agents (are online|are stopped)/.test(t),
+  'UI160 Strategy lists plans with their status and likely result, and says whether the agents are online');
+await page.getByTestId('new-strategy').click();
+await page.getByTestId('goal-form').waitFor();
+await page.getByLabel('Monthly budget').fill('500');
+await page.getByTestId('goal-submit').click();
+await page.waitForTimeout(800);
+ok(/at least ₹3,000/.test(await body()), 'UI161 the goal form explains what is wrong (budget limit too small)');
+await page.getByLabel('Monthly budget').fill('25000');
+await page.getByRole('button', { name: 'DGCA Ground Classes' }).click();
+await page.getByLabel('Privacy policy').fill('https://weoneaviation.in/privacy-policy');
+await page.getByLabel('Notes').fill('New batch starts 5 January');
+await page.getByTestId('goal-submit').click();
+await page.getByTestId('strategy-detail').waitFor({ timeout: 15000 });
+await page.waitForTimeout(800);
+t = await page.getByTestId('strategy-detail').innerText();
+const created = (await calls()).filter((x) => x.fn === 'api_ads_meta_strategy_create').pop();
+ok(/Agents working/.test(t) && /Waiting for the agents/.test(t) && /Researcher queued/.test(t) && created?.args.p_goal.courses.includes('DGCA Ground Classes')
+  && created.args.p_goal.monthly_budget === '25000' && created.args.p_goal.locations[0] === 'Delhi NCR',
+  'UI161b a new goal starts the agents (Researcher queued) and the page shows they are working');
+await page.getByRole('button', { name: 'All strategies' }).click();
+await page.getByText('CPL admissions, Delhi NCR').first().click();
+await page.getByTestId('plan-forecast').waitFor({ timeout: 15000 });
+t = await page.getByTestId('strategy-detail').innerText();
+ok(/600 leads/.test(t) && /₹50 per lead/.test(t) && /12 admissions/.test(t) && /≈ ₹30,00,000 in admissions/.test(t) && /Your history/.test(t) && /Benchmark/.test(t) && /Your input/.test(t),
+  'UI162 the plan shows low / likely / high outcomes with each assumption\'s source and the value of admissions');
+ok(/₹30,400 a month/.test(t) && /Delhi NCR 18-24/.test(t) && /Delhi \+40 km · age 18-24/.test(t) && /Advantage\+ \(Meta picks\)/.test(t) && /Higher intent/.test(t)
+  && /Finished class 12 with Physics and Maths\? \(Yes \/ Studying now \/ No\)/.test(t) && /Five steps from class 12/.test(t) && /Visual: Infographic/.test(t)
+  && /When an ad set spends ₹150 with no lead → then pause it/.test(t) && /Reviewer approved this plan/.test(t) && /Lead forms with one qualifying question/.test(t),
+  'UI162b budget, structure, audiences, lead form, ad text with visual brief, rules, review and research are all shown');
+await page.getByTestId('approve').click();
+await page.waitForTimeout(1200);
+t = await page.getByTestId('strategy-detail').innerText();
+ok(/Approved/.test(t) && /Version 1 \(approved\)/.test(await page.getByLabel('Version').innerText()) && (await page.getByTestId('plan-build').count()) === 1
+  && /everything PAUSED/.test(await page.getByTestId('plan-build').innerText()) && (await page.getByTestId('plan-tracking').count()) === 1
+  && (await page.getByLabel('Picture for Image: steps to CPL').count()) === 1 && (await page.getByLabel('Picture for Reel: a day at ground classes').count()) === 0,
+  'UI163 approving a version offers Create in Meta (paused), picture uploads for image ads and plan vs actual');
+await page.getByLabel('Meta campaign for WOA Leads CPL').selectOption({ index: 1 });
+await page.getByRole('button', { name: 'Save links' }).click();
+await page.waitForTimeout(800);
+ok((await calls()).some((x) => x.fn === 'api_ads_meta_strategy_link' && Object.keys(x.args.p_links).includes('c1')), 'UI164 plan campaigns can be linked to existing Meta campaigns');
+await page.getByLabel('Change request').fill('Keep it under ₹20,000 and add a Hindi video ad');
+await page.getByTestId('change-send').click();
+await page.waitForTimeout(1200);
+t = await page.getByTestId('strategy-detail').innerText();
+ok(/Agents working/.test(t) && (await calls()).some((x) => x.fn === 'api_ads_meta_strategy_change' && /Hindi video/.test(x.args.p_request))
+  && (await rpc('api_ads_meta_strategy', { p_id: 900 })).strategy.approved_version === 1,
+  'UI165 a change request goes to the agents; the approved version stays until another is approved');
+await page.screenshot({ path: `${SHOTS}/ads_meta_strategy.png`, fullPage: true });
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(600);
+const ovs = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+ok(ovs <= 1, `UI166 the plan fits a phone screen (${ovs}px)`);
+await page.setViewportSize({ width: 1280, height: 900 });
+await page.goto(`${APP}#/metaads`);
+await page.getByTestId('speed-alerts').waitFor({ timeout: 15000 });
+t = await page.getByTestId('speed-alerts').innerText() + await page.getByTestId('lead-archive').innerText();
+ok(/Speed to lead/.test(t) && /Alerts after 5 min \(owner\), 15 min \(Admin\)/.test(t) && /Meta lead archive/.test(t) && /deletes form answers after 90 days/.test(t),
+  'UI167 the Overview shows waiting leads (speed to lead) and the Meta lead archive');
+const csv = 'id,created_time,ad_id,ad_name,campaign_id,campaign_name,form_id,form_name,is_organic,platform,which_course_are_you_interested_in?,full_name,phone_number,email\n'
+  + 'l:4000000000000001,2024-01-05T10:00:00+0530,ag:1,Reel,c:7101,"CPL, Delhi",f:1,Form,false,ig,CPL,Asha Rao,p:+919811477701,asha@example.com\n'
+  + 'l:4000000000000002,2024-01-06T10:00:00+0530,ag:1,Reel,c:7101,"CPL, Delhi",f:1,Form,false,fb,"DGCA ""ground"" classes",Ravi,p:+919811477702,\n';
+await page.getByLabel('Meta leads CSV').setInputFiles({ name: 'leads.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
+await page.waitForTimeout(1500);
+const imp = (await calls()).filter((x) => x.fn === 'api_ads_meta_leads_import').pop();
+ok(/2 added/.test(await body()) && imp?.args.p_rows.length === 2 && imp.args.p_rows[0].campaign_name === 'CPL, Delhi' && imp.args.p_rows[1].answers['which_course_are_you_interested_in?'] === 'DGCA "ground" classes'
+  && imp.args.p_rows[0].name === 'Asha Rao' && imp.args.p_rows[0].phone === 'p:+919811477701' && !('full_name' in imp.args.p_rows[0].answers),
+  'UI168 an old Meta CSV imports (quotes, commas, answers kept; contact fields separate)');
+ok(/^2$/m.test(await page.getByTestId('lead-archive').innerText()) || /2 imported/.test(await page.getByTestId('lead-archive').innerText()), 'UI168b the archive count updates');
+await page.getByText('Alert settings').click();
+await page.getByLabel('First alert minutes').fill('10');
+await page.getByLabel('Admin alert minutes').fill('5');
+await page.getByTestId('speed-alerts').getByRole('button', { name: 'Save' }).click();
+await page.waitForTimeout(800);
+ok(/after the first alert/.test(await body()), 'UI169 alert settings explain a wrong order');
+await page.getByLabel('Admin alert minutes').fill('30');
+await page.getByTestId('speed-alerts').getByRole('button', { name: 'Save' }).click();
+await page.waitForTimeout(800);
+ok(/Alerts after 10 min \(owner\), 30 min \(Admin\)/.test(await page.getByTestId('speed-alerts').innerText()), 'UI169b alert settings are saved');
+await page.screenshot({ path: `${SHOTS}/ads_meta_overview.png`, fullPage: true });
+
 // ---- Two sections: Google Ads and Meta Ads, each with its own Setup checklist and stop
 await page.goto(`${APP}#/metaads`);
 await page.getByTestId('meta-ads').waitFor({ timeout: 15000 });
@@ -211,16 +297,17 @@ await page.getByTestId('step-meta-db').getByRole('button').first().click();
 await page.getByTestId('sql-101').waitFor({ timeout: 15000 });
 await page.waitForTimeout(800);
 t = await page.getByTestId('sql-101').innerText();
-ok(/101: Meta lead forms, part 2/.test(t) && (await page.locator('[data-testid="sql-102"]').count()) === 1 && (await page.locator('[data-testid="sql-103"]').count()) === 1 && /INSERT INTO public\.ads_config \(key, value\) VALUES \('ads_schema', '101'\)/.test(t)
+ok(/101: Meta lead forms, part 2/.test(t) && (await page.locator('[data-testid="sql-102"]').count()) === 1 && (await page.locator('[data-testid="sql-103"]').count()) === 1
+  && (await page.locator('[data-testid="sql-104"]').count()) === 1 && /INSERT INTO public\.ads_config \(key, value\) VALUES \('ads_schema', '101'\)/.test(t)
   && !(await page.locator('[data-testid="sql-100"]').count()) && /supabase\.com\/dashboard\/project\/.+\/sql\/new/.test(await page.getByTestId('step-meta-db').innerHTML()),
-  'UI134b only the missing files (101-103) are shown, complete and ready to copy, with a link to the SQL editor');
-await fetch(`${API}/__schema/103`);
+  'UI134b only the missing files (101-104) are shown, complete and ready to copy, with a link to the SQL editor');
+await fetch(`${API}/__schema/104`);
 await page.getByRole('button', { name: 'Check all now' }).click();
 await page.waitForTimeout(800);
 ok(await page.getByTestId('step-meta-db').getAttribute('data-done') === 'yes', 'UI134c after the update the database step is done again');
 await page.getByTestId('step-meta-fns').getByRole('button').first().click();
 t = await page.getByTestId('deploy-cmds').innerText();
-ok(/^cd ~\/Desktop\/CRM\/CRM\/CRM$/m.test(t) && ['ads-sync', 'ads-intake', 'ads-meta-webhook'].every((f) =>
+ok(/^cd ~\/Desktop\/CRM\/CRM\/CRM$/m.test(t) && ['ads-sync', 'ads-intake', 'ads-meta-webhook', 'ads-agents'].every((f) =>
     new RegExp(`^npx -y supabase@latest functions deploy ${f} --no-verify-jwt --use-api --remote=\\S+ --yes$`, 'm').test(t)),
   'UI135 exact deploy commands for Supabase CLI 3 are shown (--remote, --use-api, --yes; JWT check as deployed)');
 await page.getByTestId('step-meta-hook').getByRole('button').first().click();
