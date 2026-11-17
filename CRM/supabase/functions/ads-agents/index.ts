@@ -33,7 +33,14 @@ Deno.serve(async (req) => {
         return reply(200, { ok: true });
       case "next": {
         const job = await rpc("svc_ads_agent_next2", { p_meta: body.meta === true }) as any;
-        if (!job) return reply(200, { run: null });
+        if (!job) {
+          // an older helper (no Meta roles) while a Meta step waits: tell it to update itself (newer helpers act on this)
+          if (body.meta !== true) {
+            const waiting = await rpc("svc_ads_agents_meta_waiting").catch(() => false);
+            if (waiting === true) return reply(200, { run: null, update: true });
+          }
+          return reply(200, { run: null });
+        }
         job.context = String(job.run?.role ?? "").startsWith("meta_") ? trimMetaContext(job.context) : trimContext(job.context);
         return reply(200, job);
       }

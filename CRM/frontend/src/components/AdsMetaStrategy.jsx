@@ -338,6 +338,13 @@ function Detail({ id, access, edge, onBack }) {
         </div>
         {working && <div className="text-sm" style={{ color: C.blue }} data-testid="strategy-working"><Icon name="clock" size={14} /> {s.working_note || 'Working…'} (refreshes by itself; a plan takes about 10-30 minutes)</div>}
         {!working && s.working_note && <div className="text-xs" style={{ color: C.red }}>{s.working_note}</div>}
+        {working && (d.chain || []).some((r) => r.status === 'queued' && Date.now() - new Date(r.at).getTime() > 5 * 60000) && (
+          <div className="rounded-xl p-3 text-xs space-y-1" style={{ background: 'rgba(178,94,0,0.08)' }} data-testid="strategy-stuck">
+            <b>No agent has picked this up for over 5 minutes.</b> The agents helper may be an older version (it updates itself every 30 minutes),
+            stopped, or the Mac asleep. To restart it now, run in Terminal on the Mac:
+            <pre className="font-mono text-[11px] whitespace-pre-wrap select-all p-2 rounded" style={{ background: 'rgba(0,0,0,0.05)' }}>launchctl kickstart -k gui/$(id -u)/in.weoneaviation.ads-agents</pre>
+            The cloud runner, if set up, also picks it up at the next hour.
+          </div>)}
         <div className="flex flex-wrap gap-1 text-[11px]">{(d.chain || []).slice().reverse().slice(0, 6).reverse().map((r, i) => (
           <Chip key={i} color={r.status === 'done' ? C.green : r.status === 'running' ? C.blue : r.status === 'queued' ? C.ink : C.amber}>
             {ROLE[r.role]} {r.attempt > 1 ? `(try ${r.attempt}) ` : ''}{r.status}</Chip>))}</div>

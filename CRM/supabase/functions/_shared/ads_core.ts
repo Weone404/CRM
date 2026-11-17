@@ -409,6 +409,11 @@ export class MetaAds {
     const b = await this.req("POST", `${datasetId}/events`, { data, test_event_code: testEventCode }, true);
     return { events_received: num(b.events_received), fbtrace_id: b.fbtrace_id ?? null };
   }
+  // Meta Ads > Reports (migration 105): any Insights query on the account, all pages.
+  async insights(accountId: string, q: Record<string, string>): Promise<any[]> { return this.all(`act_${accountId}/insights`, q); }
+  // Meta Ads > Health (migration 105): one read of any object's fields / edge (paged).
+  async read(path: string, q: Record<string, string>): Promise<any> { return this.req("GET", path, q); }
+  async readAll(path: string, q: Record<string, string>): Promise<any[]> { return this.all(path, q); }
   // Meta Ads > Strategy > Create in Meta (migration 104): one create call (form fields), returns the new object's id.
   async create(path: string, params: Record<string, string>): Promise<string> {
     const b = await this.req("POST", path, params, true);

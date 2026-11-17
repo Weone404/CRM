@@ -14,6 +14,34 @@ const send = (res, status, body) => {
     'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' });
   res.end(body === undefined ? '' : JSON.stringify(body));
 };
+
+// Meta Ads > Reports (UI test stub): rows shaped like ads-sync's parsed Insights rows, two per level, split when asked.
+const ENT = { campaign: [['7101', 'CPL Reels Delhi', 800, 4], ['7102', 'Broad India Static', 2200, 2]],
+  adset: [['8101', 'Delhi 18-24', 800, 4], ['8102', 'India 25-45', 2200, 2]], ad: [['9101', 'Pilot banna hai? Reel', 800, 4], ['9102', 'Fees banner', 2200, 2]],
+  account: [[null, 'Whole account', 3000, 6]] };
+const SPLITS = { age: [['age', '18-24', 0.6], ['age', '25-34', 0.4]], gender: [['gender', 'female', 0.3], ['gender', 'male', 0.7]],
+  placement: [['platform', 'instagram', 0.7, 'placement', 'reels'], ['platform', 'facebook', 0.3, 'placement', 'feed']], country: [['country', 'IN', 1]] };
+function fakeRows(p, k) {
+  const ents = (ENT[p.level] || ENT.campaign).filter(([id]) => !(p.campaign_ids || []).length || p.level !== 'campaign' || (p.campaign_ids || []).includes(id));
+  const out = [];
+  for (const [id, name, spend, leads] of ents) for (const sp of (SPLITS[p.breakdown] || [[null, null, 1]])) {
+    const share = sp[2] * k, dims = {};
+    if (sp[0]) dims[sp[0]] = sp[1]; if (sp[3]) dims[sp[3]] = sp[4];
+    out.push({ key: [id ?? 'account', ...Object.values(dims)].join('|'), label: name, id, dims, campaign_id: '7101', campaign_name: 'CPL Reels Delhi',
+      spend: spend * share, impressions: 10000 * share, reach: p.breakdown === 'placement' ? 7000 * share : 6000 * share, frequency: 1.6,
+      clicks: 200 * share, link_clicks: 120 * share, leads: Math.round(leads * share), video_3s: 3000 * share, p25: 2000 * share, p50: 1500 * share,
+      p75: 900 * share, p100: 500 * share, thruplay: 600 * share, ...(p.level === 'ad' && !p.breakdown ? { quality: 'ABOVE_AVERAGE', engagement: 'AVERAGE', conversion: 'BELOW_AVERAGE_35' } : {}) });
+  }
+  return out;
+}
+const sum = (rows) => rows.reduce((t, r) => { for (const k of ['spend', 'impressions', 'reach', 'clicks', 'link_clicks', 'leads', 'video_3s', 'p25', 'p50', 'p75', 'p100', 'thruplay']) t[k] = (t[k] || 0) + r[k]; return t; }, {});
+function fakeReport(p) {
+  const rows = fakeRows(p, 1), cmp = p.compare ? fakeRows(p, 0.8) : null;
+  return { params: p, currency: 'INR', rows, totals: sum(fakeRows({ ...p, breakdown: null, level: 'account' }, 1)), compare_rows: cmp,
+    compare_totals: cmp ? sum(fakeRows({ ...p, breakdown: null, level: 'account' }, 0.8)) : null, truncated: false,
+    disjoint: !['placement', 'platform', 'device', 'platform_device', 'hour'].includes(p.breakdown), notes: [], fetched_at: new Date().toISOString(), cached: false };
+}
+
 http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') return send(res, 204);
   const url = new URL(req.url, 'http://x');
@@ -39,7 +67,9 @@ http.createServer(async (req, res) => {
           { platform: 'meta', external_id: '5554443', name: 'Pilot School Meta', currency: 'INR', timezone: 'Asia/Kolkata', status: 'ACTIVE', active: true, business: 'Test Biz' }] },
         known: [{ platform: 'google', external_id: '1112223333', client: 'Test Client A' }] };
       if (jobs.includes('sync')) results.sync = { job: 'sync', status: 'ok', items: 0, detail: 'UI test stub: platforms not called' };
-      if (jobs.includes('setup')) results.setup = { build: '2026-11-17.meta5', functions: { 'ads-sync': 'current', 'ads-intake': 'current', 'ads-meta-webhook': 'current', 'ads-agents': 'current' } };
+      if (jobs.includes('setup')) results.setup = { build: '2026-11-17.meta6', functions: { 'ads-sync': 'current', 'ads-intake': 'current', 'ads-meta-webhook': 'current', 'ads-agents': 'current' } };
+      if (jobs.includes('meta_report')) results.meta_report = fakeReport(args.report || {});
+      if (jobs.includes('meta_health')) results.meta_health = { job: 'meta_health', status: 'ok', items: 0, detail: 'Score 64; 0 warning(s) (UI test stub)' };
       if (jobs.includes('execute')) results.execute = { job: 'execute', status: 'ok', items: 0, detail: '0 change(s) processed (UI test stub)' };
       return send(res, 200, { results });
     }

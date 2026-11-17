@@ -270,6 +270,73 @@ await page.waitForTimeout(800);
 ok(/Alerts after 10 min \(owner\), 30 min \(Admin\)/.test(await page.getByTestId('speed-alerts').innerText()), 'UI169b alert settings are saved');
 await page.screenshot({ path: `${SHOTS}/ads_meta_overview.png`, fullPage: true });
 
+// ---- Meta Ads > Reports and account health (migration 105)
+await page.goto(`${APP}#/metaads/reports`);
+await page.getByTestId('report-table').waitFor({ timeout: 15000 });
+await page.waitForTimeout(600);
+t = await page.getByTestId('meta-reports').innerText();
+const rep0 = (await calls()).filter((x) => x.fn === 'ads-sync' && (x.args.jobs || []).includes('meta_report')).pop();
+ok(/CPL Reels Delhi/.test(t) && /Broad India Static/.test(t) && /Live from Meta/.test(t) && /Total \(2 rows\)/.test(t) && /₹3,000/.test(t)
+  && rep0?.args.report.level === 'campaign' && /^\d{4}-\d{2}-\d{2}$/.test(rep0.args.report.from),
+  'UI170 Reports reads live from Meta: campaigns, totals and the period');
+await page.getByLabel('Breakdown').selectOption('age');
+await page.waitForTimeout(900);
+t = await page.getByTestId('report-table').innerText();
+ok(/Age/.test(t) && /18-24/.test(t) && /25-34/.test(t) && /Total \(4 rows\)/.test(t), 'UI171 a breakdown splits every row (Age)');
+await page.getByTestId('vf-age').getByRole('button').first().click();
+await page.getByTestId('vf-age').getByLabel('18-24').check();
+await page.getByTestId('vf-age').getByRole('button', { name: 'Done' }).click();
+await page.waitForTimeout(500);
+t = await page.getByTestId('report-table').innerText();
+ok(!/25-34/.test(t) && /Total \(2 rows, filtered\)/.test(t) && /₹1,800/.test(t), 'UI171b filtering an age group narrows rows and totals (₹3,000 × 60%)');
+await page.getByLabel('Breakdown').selectOption('');
+await page.getByLabel('Compare').check();
+await page.waitForTimeout(900);
+ok(/▲ 25% vs previous/.test(await page.getByTestId('report-totals').innerText()) && /▲25%/.test(await page.getByTestId('report-table').innerText()),
+  'UI172 compare shows the change against the previous period for totals and rows');
+await page.getByLabel('Columns').selectOption('video');
+await page.waitForTimeout(400);
+t = await page.getByTestId('report-table').innerText();
+ok(/Hook rate/.test(t) && /ThruPlays/.test(t) && /Hold rate/.test(t) && /30\.00%/.test(t), 'UI173 the Video engagement preset shows hook rate, quartiles, ThruPlays and hold rate');
+await page.getByLabel('Columns').selectOption('leads_crm');
+await page.getByLabel('Select CPL Reels Delhi').check();
+await page.getByTestId('drill').click();
+await page.waitForTimeout(900);
+const rep1 = (await calls()).filter((x) => x.fn === 'ads-sync' && (x.args.jobs || []).includes('meta_report')).pop();
+ok(rep1.args.report.level === 'adset' && rep1.args.report.campaign_ids.join() === '7101' && /Delhi 18-24/.test(await page.getByTestId('report-table').innerText())
+  && /Cost per admission/.test(await page.getByTestId('report-table').innerText()),
+  'UI174 selecting a campaign and "View ad sets" drills down like Ads Manager; CRM columns are shown');
+await page.getByRole('tab', { name: 'Ads', exact: true }).click();
+await page.getByLabel('Columns').selectOption('relevance');
+await page.waitForTimeout(900);
+t = await page.getByTestId('report-table').innerText();
+ok(/Quality ranking/.test(t) && /above avg/.test(t) && /below avg 35/.test(t), 'UI175 ads show Meta\'s quality, engagement and conversion rankings');
+await page.getByRole('button', { name: 'Customize columns' }).click();
+await page.getByTestId('customize').getByLabel('Cost per 1,000 people reached').check();
+ok(/Cost per 1,000 people reached/.test(await page.getByTestId('report-table').innerText()) && await page.getByLabel('Columns').inputValue() === 'custom',
+  'UI176 columns can be added (custom preset)');
+await page.getByLabel('View name').fill('Ads relevance check');
+await page.getByRole('button', { name: 'Save view' }).click();
+await page.waitForTimeout(800);
+ok((await rpc('api_ads_meta_report_options')).views.some((v) => v.name === 'Ads relevance check' && v.params.ui.cols.includes('cpr') && v.params.report.level === 'ad'),
+  'UI177 a view (filters, level, columns) is saved');
+const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 5000 }).catch(() => null), page.getByRole('button', { name: 'Export CSV' }).click()]);
+ok(!!dl && /meta-report-ad-/.test(dl.suggestedFilename()), 'UI178 the table exports as CSV');
+await page.screenshot({ path: `${SHOTS}/ads_meta_reports.png`, fullPage: true });
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(500);
+const ovr = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+ok(ovr <= 1, `UI180 Reports fit a phone screen; the table scrolls inside its box (${ovr}px)`);
+await page.setViewportSize({ width: 1280, height: 900 });
+await page.goto(`${APP}#/metaads`);
+await page.getByTestId('meta-health').waitFor({ timeout: 15000 });
+t = await page.getByTestId('meta-health').innerText();
+ok(/Account health/.test(t) && /64/.test(t) && /Warnings \(2\)/.test(t) && /Ad rejected: Pilot banna hai\? Reel/.test(t) && /₹420 \/ ₹1,000/.test(t)
+  && /Meta's recommendations \(1\)/.test(t), 'UI179 the Overview shows Opportunity Score, pacing, warnings and Meta\'s recommendations');
+await page.getByTestId('meta-warnings').getByRole('button', { name: 'Dismiss' }).first().click();
+await page.waitForTimeout(800);
+ok(/dismissed/.test(await page.getByTestId('meta-warnings').innerText()), 'UI179b Admin can dismiss a warning');
+
 // ---- Two sections: Google Ads and Meta Ads, each with its own Setup checklist and stop
 await page.goto(`${APP}#/metaads`);
 await page.getByTestId('meta-ads').waitFor({ timeout: 15000 });
@@ -298,10 +365,10 @@ await page.getByTestId('sql-101').waitFor({ timeout: 15000 });
 await page.waitForTimeout(800);
 t = await page.getByTestId('sql-101').innerText();
 ok(/101: Meta lead forms, part 2/.test(t) && (await page.locator('[data-testid="sql-102"]').count()) === 1 && (await page.locator('[data-testid="sql-103"]').count()) === 1
-  && (await page.locator('[data-testid="sql-104"]').count()) === 1 && /INSERT INTO public\.ads_config \(key, value\) VALUES \('ads_schema', '101'\)/.test(t)
+  && (await page.locator('[data-testid="sql-104"]').count()) === 1 && (await page.locator('[data-testid="sql-105"]').count()) === 1 && /INSERT INTO public\.ads_config \(key, value\) VALUES \('ads_schema', '101'\)/.test(t)
   && !(await page.locator('[data-testid="sql-100"]').count()) && /supabase\.com\/dashboard\/project\/.+\/sql\/new/.test(await page.getByTestId('step-meta-db').innerHTML()),
-  'UI134b only the missing files (101-104) are shown, complete and ready to copy, with a link to the SQL editor');
-await fetch(`${API}/__schema/104`);
+  'UI134b only the missing files (101-105) are shown, complete and ready to copy, with a link to the SQL editor');
+await fetch(`${API}/__schema/105`);
 await page.getByRole('button', { name: 'Check all now' }).click();
 await page.waitForTimeout(800);
 ok(await page.getByTestId('step-meta-db').getAttribute('data-done') === 'yes', 'UI134c after the update the database step is done again');

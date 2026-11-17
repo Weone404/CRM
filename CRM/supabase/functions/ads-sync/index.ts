@@ -24,6 +24,8 @@
 //                        everything PAUSED (lead forms, campaigns, ad sets, image ads). Resumable: each step is saved at once.
 //   meta_image           Admin. {strategy_id, creative_key, image_base64, filename}: uploads a creative's picture (PNG / JPEG).
 //   lead_alerts          Cron / approver. Speed-to-lead: phone notifications and emails for ad leads still waiting for a first call.
+//   meta_report          Any ADS viewer. {report: {...}}: Meta Ads > Reports, read live from Meta's Insights API (cached 3 h / 7 days).
+//   meta_health          Cron / approver. Opportunity Score, recommendations, account and delivery health, warnings and alerts.
 // Every job takes its own lock (svc_ads_run_begin), so overlapping runs skip instead of doubling up.
 // Keys come from Vault through the service role and never leave this function (responses and logs are scrubbed).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -37,6 +39,8 @@ import { findPatterns, reportText } from "../_shared/meta_patterns.ts";
 import { smtpSend } from "../_shared/smtp.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
 import { alertText, type DueAlert } from "../_shared/lead_alerts.ts";
+import { BREAKDOWNS as REPORT_BREAKDOWNS, cacheHours, cacheKey, cleanParams, insightsQuery, parseRow, previousPeriod, ReportError } from "../_shared/meta_report.ts";
+import { healthWarnings } from "../_shared/meta_health.ts";
 import { adParams, adsetParams, bestMatch, campaignParams, countryCode, creativeParams, formParams, geoQueries, imageKind, MAX_IMAGE_B64,
   planSteps, targeting, type BuildWork, type Geo } from "../_shared/meta_build.ts";
 
@@ -641,24 +645,116 @@ async function leadAlerts(s: Record<string, string>) {
   });
 }
 
+// ------------------------------------------------------------------ Meta Ads > Reports (migration 105)
+async function metaReport(s: Record<string, string>, raw: unknown, force: boolean) {
+  const today = todayIn("Asia/Kolkata");
+  let p;
+  try { p = cleanParams(raw, today); } catch (e) { throw new HttpError(422, e instanceof ReportError ? e.message : "Report settings are not valid"); }
+  if ((raw as any)?.compare === "previous") p.compare = previousPeriod(p.from, p.to);
+  const { p: plat } = platforms(s);
+  if (!plat.meta) throw new HttpError(409, "Meta access token is not set");
+  const acct = await rpc("svc_ads_meta_report_account") as { id: string; currency: string | null } | null;
+  if (!acct?.id) throw new HttpError(409, "Connect the Meta ad account first");
+  const key = await cacheKey(p, acct.id);
+  if (!force) {
+    const hit = await rpc("svc_ads_meta_report_cache_get", { p_key: key });
+    if (hit) return hit;
+  }
+  const get = async (period: { from: string; to: string }, totals: boolean) =>
+    (await plat.meta!.insights(acct.id, insightsQuery(p, period, today, totals))).map((r) => parseRow(r, totals ? { ...p, level: "account", breakdown: null } : p));
+  try {
+    const [rows, totals] = await Promise.all([get(p, false), get(p, true)]);
+    const [crows, ctotals] = p.compare ? await Promise.all([get(p.compare, false), get(p.compare, true)]) : [null, null];
+    const data = { params: p, currency: acct.currency, rows: rows.slice(0, 5000), totals: totals[0] ?? null, compare_rows: crows?.slice(0, 5000) ?? null,
+      compare_totals: ctotals?.[0] ?? null, truncated: rows.length > 5000, disjoint: p.breakdown ? REPORT_BREAKDOWNS[p.breakdown].disjoint : true,
+      notes: [p.from < addDaysIso(today, -396) ? "Reach and frequency are kept by Meta for 13 months, so they are blank for older dates." : null,
+        p.breakdown === "hour" || p.breakdown === "region" ? "Meta gives no off-Meta conversions for this split; instant-form leads still count." : null].filter(Boolean) };
+    await rpc("svc_ads_meta_report_cache_put", { p_key: key, p_params: p, p_data: data, p_hours: cacheHours(p, today) });
+    return { ...data, fetched_at: new Date().toISOString(), cached: false };
+  } catch (e) {
+    if (e instanceof AdsError) throw new HttpError(502, scrubSecrets(e.message, s).slice(0, 300));
+    throw e;
+  }
+}
+const addDaysIso = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86400e3).toISOString().slice(0, 10);
+
+// ------------------------------------------------------------------ Meta Ads > Health (migration 105)
+async function metaHealth(s: Record<string, string>) {
+  return runJob("meta_health", s, async () => {
+    const { p } = platforms(s);
+    if (!p.meta) return { items: 0, status: "error", detail: "Meta access token is not set" };
+    const acct = await rpc("svc_ads_meta_report_account") as { id: string; currency: string | null } | null;
+    if (!acct?.id) return { items: 0, status: "error", detail: "No connected Meta ad account" };
+    const m = p.meta, act = `act_${acct.id}`, today = todayIn("Asia/Kolkata");
+    const errors: string[] = [];
+    const safe = async <T>(label: string, f: () => Promise<T>, dflt: T): Promise<T> => {
+      try { return await f(); } catch (e) { errors.push(`${label}: ${scrubSecrets(e instanceof Error ? e.message : String(e), s).slice(0, 160)}`); return dflt; }
+    };
+    const account = await safe("account", () => m.read(act, { fields: "name,account_status,disable_reason,spend_cap,amount_spent,balance,currency,timezone_name" }), {} as any);
+    const opp = await safe("opportunity score", () => m.read(act, { fields: "opportunity_score" }), {} as any);
+    const recs = await safe("recommendations", () => m.readAll(`${act}/recommendations`, {}), [] as any[]);
+    const LIVE = JSON.stringify(["ACTIVE", "WITH_ISSUES", "DISAPPROVED", "PENDING_REVIEW", "IN_PROCESS", "CAMPAIGN_PAUSED", "ADSET_PAUSED"]);
+    const campaigns = await safe("campaigns", () => m.readAll(`${act}/campaigns`, { fields: "id,name,effective_status,daily_budget,lifetime_budget,issues_info",
+      filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: ["ACTIVE", "WITH_ISSUES", "PENDING_REVIEW", "IN_PROCESS"] }]), limit: "200" }), [] as any[]);
+    const adsets = await safe("ad sets", () => m.readAll(`${act}/adsets`, { fields: "id,name,campaign_id,effective_status,daily_budget,learning_stage_info,issues_info",
+      filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: ["ACTIVE", "WITH_ISSUES", "PENDING_REVIEW", "IN_PROCESS"] }]), limit: "200" }), [] as any[]);
+    const ads = await safe("ads", () => m.readAll(`${act}/ads`, { fields: "id,name,adset_id,campaign_id,effective_status,ad_review_feedback,issues_info",
+      filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: JSON.parse(LIVE) }]), limit: "300" }), [] as any[]);
+    const days = await safe("daily numbers", () => m.insights(acct.id, { level: "account", fields: "spend,impressions,inline_link_clicks,actions",
+      time_range: JSON.stringify({ since: [addDaysIso(today, -17), `${today.slice(0, 8)}01`].sort()[0], until: today }), time_increment: "1", limit: "100" }), [] as any[]);
+    const { data, warnings } = healthWarnings({ today, currency: acct.currency, account, opportunity: opp, recommendations: recs, campaigns, adsets, ads, days, errors });
+    const r = await rpc("svc_ads_meta_health_save", { p_data: data, p_warnings: warnings }) as {
+      notify: { id: number; title: string; detail: string | null }[]; emails: string[]; subs: { endpoint: string; keys: { p256dh: string; auth: string } }[];
+      vapid_keys: string | null; mail: { ready: boolean; smtp?: any; password?: string } };
+    let sent = 0;
+    if (r.notify.length) {
+      const title = r.notify.length === 1 ? `Meta Ads: ${r.notify[0].title}` : `Meta Ads: ${r.notify.length} new warnings`;
+      const body = r.notify.map((w) => w.title).join(" · ").slice(0, 300);
+      const url = "https://crm.weoneaviation.in/#/metaads/overview";
+      if (r.vapid_keys && r.subs.length) {
+        try {
+          const vapidKeys = await webpush.importVapidKeys(JSON.parse(r.vapid_keys), { extractable: false });
+          const server = await webpush.ApplicationServer.new({ contactInformation: "mailto:info@weoneaviation.in", vapidKeys });
+          for (const sub of r.subs) {
+            try { await server.subscribe(sub).pushTextMessage(JSON.stringify({ title, body, url, tag: "meta-health" }), { ttl: 6 * 3600 }); sent++; } catch { /* next device */ }
+          }
+        } catch (e) { errors.push(`phone notifications: ${String(e).slice(0, 120)}`); }
+      }
+      if (r.mail?.ready && r.emails.length) {
+        try {
+          await smtpSend({ host: r.mail.smtp.host, port: Number(r.mail.smtp.port) || 465, username: r.mail.smtp.username, password: r.mail.password!,
+            fromName: r.mail.smtp.from_name ?? "We One CRM" }, { to: r.emails, subject: title,
+            text: `${r.notify.map((w) => `- ${w.title}${w.detail ? `: ${w.detail}` : ""}`).join("\n")}\n\nOpen the CRM: ${url}`,
+            html: `<ul>${r.notify.map((w) => `<li><b>${esc(w.title)}</b>${w.detail ? ` ${esc(w.detail)}` : ""}</li>`).join("")}</ul><p><a href="${url}">Open the CRM</a></p>` });
+          sent++;
+        } catch (e) { errors.push(`email: ${String(e).slice(0, 120)}`); }
+      }
+      await rpc("svc_ads_meta_warnings_notified", { p_ids: r.notify.map((w) => w.id) });
+    }
+    return { items: warnings.length, status: errors.length && !campaigns.length && !days.length ? "error" : "ok",
+      detail: `Score ${data.opportunity?.score ?? "n/a"}; ${warnings.length} warning(s); ${r.notify.length} new sent (${sent} delivered)${errors.length ? `; could not read: ${errors.join("; ").slice(0, 400)}` : ""}` };
+  });
+}
+const esc = (x: string) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors(req) });
   if (req.method !== "POST") return json(req, 405, { detail: "POST only" });
   const t0 = Date.now();
   try {
     let body: { jobs?: string[]; ops?: { kind: string; payload: unknown }[]; seeds?: string[]; geos?: string[]; subscribe?: boolean; test_event_code?: string;
-      strategy_id?: number; creative_key?: string; image_base64?: string; filename?: string } = {};
+      strategy_id?: number; creative_key?: string; image_base64?: string; filename?: string; report?: unknown; force?: boolean } = {};
     try { body = await req.json(); } catch { /* empty body */ }
     const jobs = (body.jobs ?? ["sync"]).filter((j) => ["test", "discover", "sync", "execute", "gcheck", "ideas", "convert",
       "meta_page", "meta_leads", "meta_leads_reconcile", "meta_convert", "setup", "meta_test_event", "meta_history", "meta_build", "meta_image",
-      "lead_alerts"].includes(j));
+      "lead_alerts", "meta_report", "meta_health"].includes(j));
     if (!jobs.length) return json(req, 422, { detail: "jobs must include test, discover, sync or execute" });
     if (!(await cronOk(req))) {
       const access = await asUser(req, "api_ads_access") as { can_view: boolean; can_approve: boolean; is_admin: boolean };
       if (!access?.can_view) throw new HttpError(403, "You do not have access to the ADS section");
       if ((jobs.includes("test") || jobs.includes("discover") || jobs.includes("gcheck") || jobs.includes("ideas") || jobs.includes("meta_page") || jobs.includes("meta_test_event") || jobs.includes("meta_history")) && !access.is_admin) throw new HttpError(403, "Only Admin can test connections or find accounts");
       if ((jobs.includes("meta_build") || jobs.includes("meta_image")) && !access.is_admin) throw new HttpError(403, "Only Admin can create campaigns in Meta");
-      if ((jobs.includes("execute") || jobs.includes("convert") || jobs.includes("lead_alerts") || jobs.some((j) => j.startsWith("meta_") && !["meta_page", "meta_test_event", "meta_history", "meta_build", "meta_image"].includes(j))) && !access.can_approve) throw new HttpError(403, "Only approvers can run changes");
+      if ((jobs.includes("execute") || jobs.includes("convert") || jobs.includes("lead_alerts") || jobs.some((j) => j.startsWith("meta_") && !["meta_page", "meta_test_event", "meta_history", "meta_build", "meta_image", "meta_report"].includes(j))) && !access.can_approve) throw new HttpError(403, "Only approvers can run changes");
     }
     if (jobs.length === 1 && jobs[0] === "setup") return json(req, 200, { results: { setup: await setupCheck() } });   // no keys needed
     const secrets = (await rpc("svc_ads_secrets")) as Record<string, string>;
@@ -705,6 +801,8 @@ Deno.serve(async (req) => {
       String(body.image_base64 ?? ""), String(body.filename ?? "").replace(/[^\w. -]/g, "").slice(0, 100));
     if (jobs.includes("meta_build")) results.meta_build = await metaBuild(secrets, Number(body.strategy_id), t0);
     if (jobs.includes("lead_alerts")) results.lead_alerts = await leadAlerts(secrets);
+    if (jobs.includes("meta_report")) results.meta_report = await metaReport(secrets, body.report, body.force === true);
+    if (jobs.includes("meta_health")) results.meta_health = await metaHealth(secrets);
     return json(req, 200, { results });
   } catch (e) {
     if (e instanceof HttpError) return json(req, e.status, { detail: e.message });

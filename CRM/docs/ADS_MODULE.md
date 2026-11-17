@@ -143,6 +143,34 @@ WhatsApp reporting needs Advanced Access to `whatsapp_business_manage_events` (A
 
 Tests: `run.sh` A0_ (MS01–MS35 + R03 rollback), `ads_meta.test.ts` (25), `ui_checks.mjs` UI09/09c, UI120–UI141.
 
+## Meta Ads > Reports and account health (migration 105, 2026-11-17)
+
+- **Reports tab** (`AdsMetaReports.jsx`): Ads Manager-style table. Levels (campaigns / ad sets / ads / account), date presets
+  (today ... maximum 37 months, custom), compare to the previous period, filters (campaigns, ad sets, ads, delivery status,
+  name contains) sent to Meta, breakdowns by time (day / week / month), demographics (age, gender, age x gender), geography
+  (country, region) and delivery (platform, placement, device, platform x device, hour, frequency) with value filters
+  (for example only 18-24, only Instagram) applied in the browser, column presets (Performance, Leads and CRM results,
+  Delivery, Engagement, Video engagement, Ad relevance) and custom columns with order, sorting, totals (reach summed only
+  across disjoint splits), drill-down (select campaigns -> ad sets -> ads), chart, CSV export, print, saved views (own;
+  Admin can share). Metrics: spend, Meta leads, cost per lead, reach, impressions, frequency, CPM, cost per 1,000 reached,
+  clicks, CTR, CPC, link clicks, link CTR, cost per link click, lead rate, 3-s plays, hook rate, 25/50/75/100% plays,
+  ThruPlays, hold rate, quality / engagement / conversion rankings, and CRM leads, qualified, admissions, cost per
+  qualified lead, cost per admission (per campaign / ad set / ad, not per split).
+- **Data**: ads-sync job `meta_report` (any ADS viewer) reads Meta's Insights API live (`_shared/meta_report.ts`), cached in
+  `ads_meta_report_cache` (3 h for recent days, 7 days for old). Meta's limits: splits 13 months, frequency 6 months,
+  reach / frequency 13 months and not by hour, no off-Meta actions for region / hour.
+- **Account health** (Overview, `AdsMetaHealth.jsx`): ads-sync job `meta_health` (cron `crm-ads-meta-health`, every 3 h at
+  :40) reads Opportunity Score and recommendations, account status and spending limit, live campaigns / ad sets / ads with
+  issues, learning stage and daily budgets, and 17+ days of daily numbers (`_shared/meta_health.ts`). Warnings
+  (`ads_meta_warning`, open until no longer found): account not active, spending limit 90%, ad rejected (with Meta's
+  reason), ad / campaign issues, learning limited, no leads yesterday after 2x the usual cost per lead, cost per lead up
+  30% (3 vs 14 days), spend jump, Meta counted more leads than the CRM received (webhook), leads that failed to file.
+  New high warnings: phone notification and email to Admin and approvers. Admin can dismiss.
+- **Agents helper**: updates itself every 30 minutes, when ads-agents says newer work waits (`svc_ads_agents_meta_waiting`),
+  or when handed a role it does not know (gives the step back first). Strategy shows the restart command when no agent
+  picks a step up for 5 minutes.
+- Undo: `105_ads_meta_reports_down.sql`. Tests: A4_ (RP01-06, HL01-07), R08, `meta_reports.test.ts` (6), UI170-180.
+
 ## Meta Ads > Strategy, lead archive, speed to lead (migration 104, 2026-11-17)
 
 - **Strategy tab** (`AdsMetaStrategy.jsx`). Admin sets a goal (admissions / qualified / leads, target, monthly budget limit or

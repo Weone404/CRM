@@ -116,12 +116,15 @@ const SUMMARY = {
 SUMMARY.meta_reviewer = SUMMARY.reviewer;
 
 async function step() {
-  const job = await call({ action: "next", meta: true });   // meta: this helper knows the Meta strategy roles
+  // meta: this helper knows the Meta strategy roles; roles: every role it can run (the CRM never hands it another one)
+  const job = await call({ action: "next", meta: true, roles: Object.keys(PROMPTS) });
+  if (job.update && !ONCE && (await selfUpdate())) process.exit(0);   // the CRM has work for a newer helper
   if (!job.run) return false;
   const { run, context } = job;
-  if (!PROMPTS[run.role]) {
-    await call({ action: "finish", id: run.id, ok: false, error: `This helper has no ${run.role} role yet; update it` });
-    return true;
+  if (!PROMPTS[run.role]) {   // a role newer than this helper: give the step back, update, restart
+    await call({ action: "release", id: run.id, reason: `helper has no ${run.role} role yet; updating` });
+    if (!ONCE && (await selfUpdate())) process.exit(0);
+    return false;
   }
   log(`step ${run.id}: ${run.role} (${run.job}, try ${run.attempt})`);
   const r = await runClaude(run.role, buildPrompt(run.role, run, context));
@@ -145,7 +148,7 @@ async function step() {
   return true;
 }
 
-// Self-update: on start and every 6 hours, fetch the latest helper and role instructions from the repo. If they changed
+// Self-update: on start, every 30 minutes and when the CRM says newer work is waiting, fetch the latest helper and role instructions from the repo. If they changed
 // and both pass a syntax check, replace the files and exit; launchd starts the new version within 30 seconds.
 const RAW = process.env.ADS_AGENTS_RAW || "https://raw.githubusercontent.com/Weone404/CRM/main/CRM/tools/ads-agents";
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -189,7 +192,7 @@ export async function once() {
 async function main() {
   if (ONCE) return once();
   if (await selfUpdate()) process.exit(0);
-  setInterval(async () => { if (await selfUpdate()) process.exit(0); }, 6 * 3600e3);
+  setInterval(async () => { if (await selfUpdate()) process.exit(0); }, 30 * 60e3);   // two small downloads; restarts only on a change
   log(`ADS agents helper started (${URL_}); models ${JSON.stringify(MODELS)}`);
   let backoff = 0;
   for (;;) {

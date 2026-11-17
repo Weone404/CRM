@@ -5,6 +5,8 @@ import AdsLeads from './AdsLeads';
 import AdsSetup, { SetupBanner, progress } from './AdsSetup';
 import AdsMetaInsights from './AdsMetaInsights';
 import AdsMetaStrategy from './AdsMetaStrategy';
+import AdsMetaReports from './AdsMetaReports';
+import AdsMetaHealth from './AdsMetaHealth';
 import { SpeedAlerts, LeadArchive } from './AdsMetaLeadTools';
 import { Campaigns, Settings, edge, useSetupFor } from './Ads';
 import { rpc, useLoad, WorkingBar, OfflineBar } from './adsKit';
@@ -16,6 +18,7 @@ import { PERIODS, periodRange, todayIn } from '../utils/ads';
 
 const TABS = [
   { id: 'home', label: 'Overview', icon: 'chart' },
+  { id: 'reports', label: 'Reports', icon: 'chart' },
   { id: 'insights', label: 'Insights', icon: 'sparkles' },
   { id: 'strategy', label: 'Strategy', icon: 'zap' },
   { id: 'campaigns', label: 'Campaigns', icon: 'rocket' },
@@ -25,7 +28,7 @@ const TABS = [
 ];
 const ago = (t) => { if (!t) return 'never'; const m = Math.round((Date.now() - new Date(t).getTime()) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
 
-function Overview({ access, st, go }) {
+function Overview({ access, st, go, edge }) {
   const [m] = useLoad(() => (access.is_admin ? rpc('api_ads_meta_settings').catch(() => null) : Promise.resolve(null)), [access.is_admin]);
   const p = st ? progress('meta', st) : null;
   const src = (k) => m?.sources?.find((s) => s.source === k) || {};
@@ -52,6 +55,7 @@ function Overview({ access, st, go }) {
           {card('Last call from Meta', ago(m.config.webhook_last_at), m.config.webhook_last_at ? 'webhook' : 'no lead yet')}
           {card('Sending to Meta', m.config.execution_paused ? 'Stopped' : 'On', m.config.execution_paused ? 'Settings → Resume' : 'emergency stop is off', m.config.execution_paused ? '#C4261D' : '#1E7B34')}
         </div>)}
+      <AdsMetaHealth access={access} edge={edge} />
       <div className="grid md:grid-cols-2 gap-3"><SpeedAlerts access={access} /><LeadArchive access={access} /></div>
       <div className="grid sm:grid-cols-2 gap-2">
         <button type="button" onClick={() => go('leads')} className="glass-card p-3 text-left flex items-center gap-3">
@@ -106,7 +110,8 @@ export default function AdsMeta({ access }) {
             </button>);
         })}
       </div>
-      {view === 'home' && <Overview access={access} st={st} go={go} />}
+      {view === 'home' && <Overview access={access} st={st} go={go} edge={edge} />}
+      {view === 'reports' && <AdsMetaReports access={access} edge={edge} />}
       {view === 'insights' && <AdsMetaInsights access={access} edge={edge} />}
       {view === 'strategy' && <AdsMetaStrategy access={access} edge={edge} />}
       {view === 'campaigns' && <Campaigns ctx={ctx} access={access} platform="meta" />}

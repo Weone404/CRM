@@ -49,3 +49,11 @@ INSERT INTO public.ads_agent_runs (role, job, status, attempt, input, summary, c
   ('meta_reviewer', 'meta_strategy', 'done', 1, '{"strategy_id": 900}', 'Approved', now() - interval '39 minutes', now() - interval '38 minutes');
 INSERT INTO public.ads_config (key, value) VALUES ('agents_last_seen', now()::text), ('meta_page_id', '100521046017357')
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+-- Meta Ads > Overview health (migration 105)
+INSERT INTO public.ads_meta_health (taken_at, data) VALUES (now() - interval '20 minutes', '{"account": {"name": "We One", "status": 1, "status_text": "Active"},
+  "opportunity": {"score": 64, "recommendations": [{"title": "Use Advantage+ placements", "body": "2 ad sets use manual placements.", "lift": "Up to 5% more leads", "score_lift": 9, "url": "https://adsmanager.facebook.com/adsmanager"}]},
+  "delivery": {"campaigns": 1, "adsets": 2, "ads": 3, "learning": {"learning": 1, "limited": 1, "done": 0}, "rejected": 1},
+  "pacing": {"daily_budget": 1000, "today_spend": 420, "cpl_3d": 62, "cpl_14d": 48}, "month": {"spend": 14200, "leads": 260}, "errors": []}');
+INSERT INTO public.ads_meta_warning (kind, entity, severity, title, detail) VALUES
+  ('ad_rejected', '9101', 'high', 'Ad rejected: Pilot banna hai? Reel', 'Personal attributes: ad implies age'),
+  ('learning_limited', '8102', 'medium', 'Learning limited: India 25-45', 'Combine ad sets, widen the audience or raise the budget.');
