@@ -121,3 +121,28 @@ test("FT11 new-people ad sets: seed audiences are hints only with Advantage+ aud
   const hard = targeting({ audience: { advantage_audience: false, include_audiences: ["lal_qualified_1"] } }, geo, [], aud) as any;
   assert.deepEqual([hard.custom_audiences, hard.excluded_custom_audiences], [undefined, [{ id: "7002" }]]);
 });
+
+// 110: Automate helpers.
+import { live as liveObj, plan as actionPlan, studyParams, verified as actionVerified } from "../../functions/_shared/meta_actions.ts";
+
+test("FT12 actions: pause / on are skipped when already there; budgets in minor units within limits; ads have no budget", () => {
+  const now = liveObj({ status: "ACTIVE", effective_status: "ACTIVE", daily_budget: "150000", name: "A" }, "INR");
+  assert.deepEqual(now.daily_budget, 1500);
+  assert.deepEqual(actionPlan("pause", "adset", {}, now, "INR", 100, 50000), { path: "object", send: { status: "PAUSED" } });
+  assert.deepEqual(actionPlan("activate", "adset", {}, now, "INR", 100, 50000).skip, "Already on");
+  assert.deepEqual(actionPlan("budget", "adset", { pct: 15 }, now, "INR", 100, 50000), { path: "object", send: { daily_budget: "172500" }, daily: 1725 });
+  assert.deepEqual(actionPlan("budget", "adset", { daily: 90000 }, now, "INR", 100, 50000).daily, 50000);
+  assert.ok(/no daily budget/.test(actionPlan("budget", "adset", { pct: 10 }, { ...now, daily_budget: null }, "INR", 100, 50000).error!));
+  assert.ok(/no budget/.test(actionPlan("budget", "ad", { pct: 10 }, now, "INR", 100, 50000).error!));
+  assert.ok(/deleted/.test(actionPlan("pause", "ad", {}, { ...now, status: "DELETED" }, "INR", 100, 50000).error!));
+  const dup = actionPlan("duplicate", "adset", {}, now, "INR", 100, 50000);
+  assert.deepEqual([dup.path, dup.send!.status_option, dup.send!.deep_copy], ["copies", "PAUSED", "true"]);
+  assert.ok(actionVerified("budget", { ...now, daily_budget: 1725 }, 1725) && !actionVerified("pause", now));
+});
+
+test("FT13 Meta split test: equal shares, ad sets or campaigns, starts no earlier than now", () => {
+  const p = studyParams({ name: "Hook test", level: "adset", start_date: "2026-11-20", end_date: "2026-12-03",
+    cells: [{ name: "A", ids: ["1"] }, { name: "B", ids: ["2"] }, { name: "C", ids: ["3"] }] }, 1795000000);
+  assert.deepEqual([p.type, JSON.parse(p.cells).map((c: any) => [c.treatment_percentage, c.adsets[0]])], ["SPLIT_TEST", [[33, "1"], [33, "2"], [33, "3"]]]);
+  assert.ok(Number(p.start_time) >= 1795000600 && Number(p.end_time) > Number(p.start_time));
+});

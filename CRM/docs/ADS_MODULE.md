@@ -143,6 +143,25 @@ WhatsApp reporting needs Advanced Access to `whatsapp_business_manage_events` (A
 
 Tests: `run.sh` A0_ (MS01–MS35 + R03 rollback), `ads_meta.test.ts` (25), `ui_checks.mjs` UI09/09c, UI120–UI141.
 
+## Meta Ads > Automate: quick actions, rules with approval, A/B tests (migration 110, 2026-11-18)
+
+- Quick actions (`api_ads_meta_action_request`, approvers): pause, switch on, daily budget (new ₹ or %), duplicate (paused,
+  ad sets / campaigns with their ads). Every request waits in `ads_meta_action` until an approver approves
+  (`api_ads_meta_action_decide`; optional two-person rule `meta_actions_two_person`). ads-sync job `meta_actions` (on approve
+  and every 15 min while something is approved) reads the object, applies the change, reads it back, and records before /
+  after; already-in-state is "done" with a note. Guards: Meta emergency stop, floor / ceiling `meta_action_min_daily` /
+  `meta_action_max_daily`, +100% only by Admin, 20%+ warning (big edits can restart learning), 3-day expiry.
+- Rules (`ads_meta_rule`, 4 templates off by default): metric over 1-30 days (spend, leads, cost per lead, cost per qualified,
+  qualified, CTR, frequency, CPM), minimum spend / leads, action (pause, budget up / down %, warn only), cool-down. A cost
+  with nothing bought counts as above the limit once the spend alone passes it. Rules only create requests or warnings;
+  checked daily 09:10 IST (`crm-ads-meta-rules`) and on "Run now".
+- A/B tests (`ads_meta_test`): 2-5 cells of ad sets, ads or campaigns, one variable, metric (cost per lead / qualified,
+  qualified rate, CTR), dates, minimum results per cell. Cost metrics: binomial test of each cell's results against its
+  spend share vs the control; rates: two-proportion z-test; 95% to call a winner; "too early" until every cell has enough.
+  "Meta split test" also creates an ad study (`/{business}/ad_studies`, SPLIT_TEST, equal shares) when the ad account has a
+  Business.
+- New tab Meta Ads > Automate. Build 2026-11-18.meta10. Rollback: `110_ads_meta_actions_down.sql`.
+
 ## Meta Ads > Funnel plan: lookalikes, personas, budget split, creative-diversity checks (migration 109, 2026-11-18)
 
 - Lookalikes (audience kind `lookalike`, stage `cold`, use `prospect`): 1% of admissions, 1% and 1-3% of qualified leads, 1%

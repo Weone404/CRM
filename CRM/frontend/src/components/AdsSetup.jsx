@@ -14,8 +14,8 @@ import Icon from './icons';
 const REF = (() => { try { return new URL(SUPABASE_URL).hostname.split('.')[0]; } catch { return ''; } })();
 const SQL_EDITOR = `https://supabase.com/dashboard/project/${REF}/sql/new`;
 const HOOK = `${SUPABASE_URL}/functions/v1/ads-meta-webhook`;
-const BUILD = '2026-11-18.meta9';      // must equal ADS_BUILD in supabase/functions/_shared/ads_meta.ts
-const SCHEMA = 109;                     // newest ADS migration this screen needs (ads_config ads_schema)
+const BUILD = '2026-11-18.meta10';      // must equal ADS_BUILD in supabase/functions/_shared/ads_meta.ts
+const SCHEMA = 110;                     // newest ADS migration this screen needs (ads_config ads_schema)
 // Migrations the Setup page can hand out, oldest first; each is safe to run again.
 const MIGRATIONS = [
   { n: 100, file: '100_ads_meta_signals.sql', load: () => import('../../../backend/migrations/100_ads_meta_signals.sql?raw') },
@@ -28,6 +28,7 @@ const MIGRATIONS = [
   { n: 107, file: '107_ads_meta_funnel.sql', load: () => import('../../../backend/migrations/107_ads_meta_funnel.sql?raw') },
   { n: 108, file: '108_ads_site_signals.sql', load: () => import('../../../backend/migrations/108_ads_site_signals.sql?raw') },
   { n: 109, file: '109_ads_meta_funnel_plan.sql', load: () => import('../../../backend/migrations/109_ads_meta_funnel_plan.sql?raw') },
+  { n: 110, file: '110_ads_meta_actions.sql', load: () => import('../../../backend/migrations/110_ads_meta_actions.sql?raw') },
 ];
 const schemaOf = (st) => (st.db ? Number(st.db.schema) || 100 : 0);
 const dbOk = (st) => schemaOf(st) >= SCHEMA;

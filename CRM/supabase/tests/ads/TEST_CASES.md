@@ -280,6 +280,12 @@ changes, allowed bids and budget inside the spend limits, and has no Mac that st
 | R12 | Owner | 109 down, up twice, down | Original goal / plan checks restored | run.sh |
 | FT10-11 | ads-sync | Lookalike helpers | 1-20% steps, bands, India; seed 100+; seeds only hints on new-people ad sets | meta_funnel.test.ts |
 | UI199-203 | Viewer / Admin | Personas and funnel plan UI | Personas with searches; edit; funnel plan; split must add up; Send to Strategy | ui_checks.mjs |
+| AC01-07 | Viewer / approver / ads-sync | Quick actions | Approvers only; numbers per object; learning-phase warning; one open request; no ad budgets; +100% needs Admin; floor / ceiling; two-person rule; emergency stop; only approved run, result kept | A9_ |
+| RU01-07 | Viewer / approver / Admin | Rules | Approvers run; cost rule below limit does nothing; no-qualified spend past limit asks to pause; warn-only; never asks twice; no ad budget rules; add rule | A9_ |
+| AB01-05 | Admin / Viewer | A/B tests | 2-5 cells; no object twice; cost per lead binomial test (99%+); qualified rate z-test; normal CDF accuracy | A9_ |
+| R13 | Owner | 110 down, up twice, down | Rules seeded once | run.sh |
+| FT12-13 | ads-sync | Action helpers | Skip when already there; budget in minor units with limits; no ad budgets; deleted objects; duplicate paused; verify; split test shares and times | meta_funnel.test.ts |
+| UI204-212 | Viewer / approver / Admin | Automate UI | Tab; pause ask and approve-and-run; history; budget left for another approver; reject; rule on; run rules; start A/B test; phone width | ui_checks.mjs |
 | MR | ads-sync | Report settings, Insights query, rows, totals, cache, health rules | Meta's limits; filters; leads / video / rankings; disjoint reach; warnings | meta_reports.test |
 | UI170-180 | Viewer / Admin | Reports and Overview health | Live table, breakdown and value filter, compare, presets, drill-down, rankings, custom columns, saved view, CSV, phone width, health card | ui_checks |
 

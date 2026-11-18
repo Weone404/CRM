@@ -67,7 +67,7 @@ http.createServer(async (req, res) => {
           { platform: 'meta', external_id: '5554443', name: 'Pilot School Meta', currency: 'INR', timezone: 'Asia/Kolkata', status: 'ACTIVE', active: true, business: 'Test Biz' }] },
         known: [{ platform: 'google', external_id: '1112223333', client: 'Test Client A' }] };
       if (jobs.includes('sync')) results.sync = { job: 'sync', status: 'ok', items: 0, detail: 'UI test stub: platforms not called' };
-      if (jobs.includes('setup')) results.setup = { build: '2026-11-18.meta9', functions: { 'ads-sync': 'current', 'ads-intake': 'current', 'ads-meta-webhook': 'current', 'ads-agents': 'current' } };
+      if (jobs.includes('setup')) results.setup = { build: '2026-11-18.meta10', functions: { 'ads-sync': 'current', 'ads-intake': 'current', 'ads-meta-webhook': 'current', 'ads-agents': 'current' } };
       if (jobs.includes('meta_report')) results.meta_report = fakeReport(args.report || {});
       if (jobs.includes('meta_audiences')) {
         await pool.query("UPDATE public.ads_meta_audience SET status = 'ready', meta_id = '23850000000077', size_low = 1500, size_high = 1800, synced_at = now() WHERE key = 'form_dropoff_30'");
@@ -77,6 +77,10 @@ http.createServer(async (req, res) => {
       if (jobs.includes('site_signals')) {
         await pool.query("UPDATE public.ads_config SET value = jsonb_build_object('gsc_rows', 5, 'ga_rows', 4, 'notes', '[]'::jsonb, 'at', now())::text WHERE key = 'site_signals_last'");
         results.site_signals = { job: 'site_signals', status: 'ok', items: 9, detail: 'Search Console 5 rows, GA4 4 rows; Meta Pixel firing (UI test stub)' };
+      }
+      if (jobs.includes('meta_actions')) {
+        await pool.query("UPDATE public.ads_meta_action SET status = 'done', executed_at = now(), after = '{\"note\": \"UI test stub\"}' WHERE status = 'approved'");
+        results.meta_actions = { job: 'meta_actions', status: 'ok', items: 1, detail: '1 change(s) done, 0 failed (UI test stub)' };
       }
       if (jobs.includes('meta_health')) results.meta_health = { job: 'meta_health', status: 'ok', items: 0, detail: 'Score 64; 0 warning(s) (UI test stub)' };
       if (jobs.includes('execute')) results.execute = { job: 'execute', status: 'ok', items: 0, detail: '0 change(s) processed (UI test stub)' };

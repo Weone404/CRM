@@ -25,6 +25,7 @@
 //   meta_image           Admin. {strategy_id, creative_key, image_base64, filename}: uploads a creative's picture (PNG / JPEG).
 //   lead_alerts          Cron / approver. Speed-to-lead: phone notifications and emails for ad leads still waiting for a first call.
 //   meta_report          Any ADS viewer. {report: {...}}: Meta Ads > Reports, read live from Meta's Insights API (cached 3 h / 7 days).
+//   meta_actions         Cron / approver. Runs approved Automate actions (pause, on, budget, duplicate) and creates Meta split tests.
 //   site_signals         Cron / approver. Search Console + GA4 totals (28 days and the 28 before) and the Meta Pixel check.
 //   meta_audiences       Cron / approver. Keeps the Funnel audience library in Meta (engagement audiences, hashed CRM lists).
 //   meta_health          Cron / approver. Opportunity Score, recommendations, account and delivery health, warnings and alerts.
@@ -43,6 +44,7 @@ import * as webpush from "jsr:@negrel/webpush@0.5.0";
 import { alertText, type DueAlert } from "../_shared/lead_alerts.ts";
 import { BREAKDOWNS as REPORT_BREAKDOWNS, cacheHours, cacheKey, cleanParams, insightsQuery, parseRow, previousPeriod, ReportError } from "../_shared/meta_report.ts";
 import { healthWarnings } from "../_shared/meta_health.ts";
+import { FIELDS as ACTION_FIELDS, live as liveObj, plan as actionPlan, studyParams, verified as actionVerified } from "../_shared/meta_actions.ts";
 import { audienceError, engagementRule, lookalikeParams, PREFIX, replaceBatches, seedReady, sizeOf } from "../_shared/meta_audience.ts";
 import { GA_REPORTS, gaBody, googleToken, gscBody, gscSite, parseGa, parseGsc, siteError, windows, type SiteRow } from "../_shared/site_signals.ts";
 import { adParams, adsetParams, bestMatch, campaignParams, countryCode, creativeParams, formParams, geoQueries, imageKind, MAX_IMAGE_B64,
@@ -867,6 +869,63 @@ async function siteSignals(s: Record<string, string>, t0: number) {
   });
 }
 
+// ------------------------------------------------------------------ Meta Ads > Automate (migration 110)
+async function metaActions(s: Record<string, string>, t0: number) {
+  return runJob("meta_actions", s, async () => {
+    const { p } = platforms(s);
+    const w = await rpc("svc_ads_meta_action_work") as { paused: boolean; currency: string | null; account_id: string | null; min_daily: number; max_daily: number;
+      items: { id: number; level: string; object_id: string; kind: string; params: any }[] };
+    if (w.paused) return { items: 0, status: "ok", detail: "Meta emergency stop is on: nothing was changed" };
+    if (!p.meta) {
+      for (const a of w.items) await rpc("svc_ads_meta_action_done", { p_id: a.id, p_status: "failed", p_before: null, p_after: null, p_error: "Meta access token is not set" });
+      return { items: 0, status: "error", detail: "Meta access token is not set" };
+    }
+    const m = p.meta;
+    let done = 0, failed = 0;
+    for (const a of w.items) {
+      const finish = (st: string, before: unknown, after: unknown, err: string | null) =>
+        rpc("svc_ads_meta_action_done", { p_id: a.id, p_status: st, p_before: before, p_after: after, p_error: err });
+      let before: any = null;
+      try {
+        before = liveObj(await m.read(a.object_id, { fields: ACTION_FIELDS[a.level] }), w.currency);
+        const pl = actionPlan(a.kind, a.level, a.params, before, w.currency, w.min_daily, w.max_daily);
+        if (pl.error) { await finish("failed", before, null, pl.error); failed++; continue; }
+        if (pl.skip) { await finish("done", before, { note: pl.skip }, null); done++; continue; }
+        if (pl.path === "copies") {
+          const b = await m.post(`${a.object_id}/copies`, pl.send!);
+          const copy = b?.copied_adset_id ?? b?.copied_campaign_id ?? b?.copied_ad_id ?? b?.id ?? null;
+          await finish("done", before, { copy_id: copy ? String(copy) : null, objects: Array.isArray(b?.ad_object_ids) ? b.ad_object_ids.length : null }, null); done++;
+        } else {
+          await m.post(a.object_id, pl.send!);
+          const after = liveObj(await m.read(a.object_id, { fields: ACTION_FIELDS[a.level] }), w.currency);
+          const ok = actionVerified(a.kind, after, pl.daily);
+          await finish(ok ? "done" : "failed", before, after, ok ? null : "Meta accepted the change but reads back differently; check Ads Manager"); ok ? done++ : failed++;
+        }
+      } catch (e) {
+        await finish("failed", before, null, scrubSecrets((e as Error).message, s).slice(0, 400)); failed++;
+      }
+      if (Date.now() - t0 > 90_000) break;
+    }
+    // Meta split tests (ad studies) for new A/B tests
+    let studies = 0;
+    const tw = await rpc("svc_ads_meta_test_work") as { account_id: string | null; paused: boolean; items: any[] };
+    if (tw.items.length && !tw.paused && tw.account_id) {
+      let business: string | null = null;
+      try { business = (await m.read(`act_${tw.account_id}`, { fields: "business" }))?.business?.id ?? null; } catch { /* no business */ }
+      for (const t of tw.items) {
+        if (!business) { await rpc("svc_ads_meta_test_saved", { p_id: t.id, p_study: null, p_detail: "given up: the ad account belongs to no Business, so Meta split tests cannot be made by API; the CRM still compares the cells" }); continue; }
+        try {
+          const id = await m.create(`${business}/ad_studies`, studyParams(t, Math.floor(Date.now() / 1000)));
+          await rpc("svc_ads_meta_test_saved", { p_id: t.id, p_study: id, p_detail: "Split test created in Meta (Experiments)" }); studies++;
+        } catch (e) {
+          await rpc("svc_ads_meta_test_saved", { p_id: t.id, p_study: null, p_detail: `given up: ${scrubSecrets((e as Error).message, s).slice(0, 300)}` });
+        }
+      }
+    }
+    return { items: done, status: failed && !done ? "error" : "ok", detail: `${done} change(s) done, ${failed} failed${studies ? `; ${studies} split test(s) created` : ""}` };
+  });
+}
+
 const esc = (x: string) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
 Deno.serve(async (req) => {
@@ -879,7 +938,7 @@ Deno.serve(async (req) => {
     try { body = await req.json(); } catch { /* empty body */ }
     const jobs = (body.jobs ?? ["sync"]).filter((j) => ["test", "discover", "sync", "execute", "gcheck", "ideas", "convert",
       "meta_page", "meta_leads", "meta_leads_reconcile", "meta_convert", "setup", "meta_test_event", "meta_history", "meta_build", "meta_image",
-      "lead_alerts", "meta_report", "meta_health", "meta_audiences", "site_signals"].includes(j));
+      "lead_alerts", "meta_report", "meta_health", "meta_audiences", "site_signals", "meta_actions"].includes(j));
     if (!jobs.length) return json(req, 422, { detail: "jobs must include test, discover, sync or execute" });
     if (!(await cronOk(req))) {
       const access = await asUser(req, "api_ads_access") as { can_view: boolean; can_approve: boolean; is_admin: boolean };
@@ -937,6 +996,7 @@ Deno.serve(async (req) => {
     if (jobs.includes("meta_health")) results.meta_health = await metaHealth(secrets);
     if (jobs.includes("meta_audiences")) results.meta_audiences = await metaAudiences(secrets, t0);
     if (jobs.includes("site_signals")) results.site_signals = await siteSignals(secrets, t0);
+    if (jobs.includes("meta_actions")) results.meta_actions = await metaActions(secrets, t0);
     return json(req, 200, { results });
   } catch (e) {
     if (e instanceof HttpError) return json(req, e.status, { detail: e.message });

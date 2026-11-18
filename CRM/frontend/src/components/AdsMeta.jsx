@@ -8,6 +8,7 @@ import AdsMetaStrategy from './AdsMetaStrategy';
 import AdsMetaReports from './AdsMetaReports';
 import AdsMetaQuality from './AdsMetaQuality';
 import AdsMetaFunnel from './AdsMetaFunnel';
+import AdsMetaAutomate from './AdsMetaAutomate';
 import AdsMetaHealth from './AdsMetaHealth';
 import { SpeedAlerts, LeadArchive } from './AdsMetaLeadTools';
 import { Campaigns, Settings, edge, useSetupFor } from './Ads';
@@ -24,6 +25,7 @@ const TABS = [
   { id: 'insights', label: 'Insights', icon: 'sparkles' },
   { id: 'strategy', label: 'Strategy', icon: 'zap' },
   { id: 'funnel', label: 'Funnel', icon: 'funnel' },
+  { id: 'automate', label: 'Automate', icon: 'play' },
   { id: 'campaigns', label: 'Campaigns', icon: 'rocket' },
   { id: 'leads', label: 'Leads', icon: 'leads' },
   { id: 'setup', label: 'Setup', icon: 'checkCircle', admin: true },
@@ -118,6 +120,7 @@ export default function AdsMeta({ access }) {
       {view === 'insights' && <AdsMetaInsights access={access} edge={edge} />}
       {view === 'strategy' && <AdsMetaStrategy access={access} edge={edge} />}
       {view === 'funnel' && <AdsMetaFunnel access={access} edge={edge} />}
+      {view === 'automate' && <AdsMetaAutomate access={access} edge={edge} />}
       {view === 'campaigns' && <Campaigns ctx={ctx} access={access} platform="meta" />}
       {view === 'leads' && <AdsLeads access={access} platform="meta" />}
       {view === 'setup' && access.is_admin && <AdsSetup platform="meta" edge={edge} st={st || {}} check={async () => { const r = await check(); force((n) => n + 1); return r; }} />}

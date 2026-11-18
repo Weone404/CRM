@@ -450,6 +450,58 @@ const ovf = await page.evaluate(() => document.documentElement.scrollWidth - win
 ok(ovf <= 1, `UI194 the Funnel tab fits a phone screen (${ovf}px)`);
 await page.setViewportSize({ width: 1280, height: 900 });
 
+// ---- Meta Ads > Automate: quick actions, approval queue, rules, A/B tests (migration 110)
+await page.goto(`${APP}#/metaads/automate`);
+await page.getByTestId('quick-actions').waitFor({ timeout: 15000 });
+await page.getByTestId('object-table').waitFor({ timeout: 15000 });
+t = await page.getByTestId('meta-automate').innerText();
+ok(/Changes waiting/.test(t) && /Quick actions/.test(t) && /Delhi 18-24/.test(t) && /Rules/.test(t) && /Pause ads that spent ₹1,500 in 7 days without a lead/.test(t) && /A\/B tests/.test(t),
+  'UI204 Meta Ads has an Automate tab: changes waiting, quick actions with numbers, rules and A/B tests');
+await page.getByTestId('object-table').getByRole('row', { name: /Delhi 18-24/ }).getByRole('button', { name: 'Pause' }).click();
+await dlg().getByRole('button', { name: 'Ask' }).click();
+await dlg().getByText(/Approve and run it now/).waitFor();
+await dlg().getByRole('button', { name: 'Approve and run' }).click();
+await page.waitForTimeout(1500);
+let cs = await calls();
+ok(cs.some((c) => c.fn === 'api_ads_meta_action_request' && c.args.p_kind === 'pause' && c.args.p_object_id === '8101') && cs.some((c) => c.fn === 'api_ads_meta_action_decide' && c.args.p_approve === true)
+  && cs.some((c) => c.fn === 'ads-sync' && c.args.jobs?.includes('meta_actions')), 'UI205 Pause asks for approval; an approver can approve and run it at once');
+await page.getByTestId('action-queue').getByText('History').click();
+ok(/Done/.test(await page.getByTestId('action-queue').innerText()), 'UI206 the change shows as done in the history');
+await page.getByTestId('object-table').getByRole('row', { name: /Delhi 18-24/ }).getByRole('button', { name: 'Budget' }).click();
+await dlg().locator('input').fill('1200');
+await dlg().getByRole('button', { name: 'Ask' }).click();
+await dlg().getByText(/Approve and run it now/).waitFor();
+await dlg().getByRole('button', { name: 'Cancel' }).click();
+await page.waitForTimeout(1000);
+cs = await calls();
+ok(cs.some((c) => c.fn === 'api_ads_meta_action_request' && c.args.p_kind === 'budget' && c.args.p_params?.daily === 1200)
+  && /Waiting for approval/.test(await page.getByTestId('action-queue').innerText()), 'UI207 a budget change can be left for another approver');
+await page.getByTestId('action-queue').getByRole('button', { name: 'Reject' }).first().click();
+await dlg().getByRole('button', { name: 'Reject' }).click();
+await page.waitForTimeout(800);
+ok((await calls()).some((c) => c.fn === 'api_ads_meta_action_decide' && c.args.p_approve === false), 'UI208 an approver rejects a request');
+await page.getByLabel(/Rule Warn when frequency passes 3.5/).click();
+await page.waitForTimeout(800);
+ok((await calls()).some((c) => c.fn === 'api_ads_meta_rule_save' && c.args.p?.enabled === true && /frequency/.test(c.args.p?.name)), 'UI209 Admin switches a rule on');
+await page.getByTestId('rules').getByRole('button', { name: 'Run all now' }).click();
+await page.waitForTimeout(1000);
+ok((await calls()).some((c) => c.fn === 'api_ads_meta_rules_run'), 'UI210 rules can be run now (they only ask; nothing changes without approval)');
+await page.getByTestId('ab-tests').getByRole('button', { name: 'New test' }).click();
+await page.getByLabel('Test name').fill('Reel vs static');
+await page.getByLabel('Cell 1 objects').selectOption(['8101']);
+await page.getByLabel('Cell 2 objects').selectOption(['8102']);
+await page.getByRole('button', { name: 'Start test' }).click();
+await page.waitForTimeout(1200);
+const tc = (await calls()).filter((c) => c.fn === 'api_ads_meta_test_save').pop();
+ok(tc && tc.args.p.cells?.[0]?.ids?.[0] === '8101' && tc.args.p.cells?.[1]?.ids?.[0] === '8102' && tc.args.p.metric === 'cost_per_qualified'
+  && /Reel vs static/.test(await page.getByTestId('ab-tests').innerText()) && /Too early|No results|No clear/.test(await page.getByTestId('ab-tests').innerText()),
+  'UI211 Admin starts an A/B test; results say when it is too early to call');
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(600);
+const ova = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+ok(ova <= 1, `UI212 Automate fits a phone screen (${ova}px)`);
+await page.setViewportSize({ width: 1280, height: 900 });
+
 // ---- Two sections: Google Ads and Meta Ads, each with its own Setup checklist and stop
 await page.goto(`${APP}#/metaads`);
 await page.getByTestId('meta-ads').waitFor({ timeout: 15000 });
@@ -482,10 +534,11 @@ ok(/101: Meta lead forms, part 2/.test(t) && (await page.locator('[data-testid="
   && (await page.locator('[data-testid="sql-106"]').count()) === 1
   && (await page.locator('[data-testid="sql-107"]').count()) === 1
   && (await page.locator('[data-testid="sql-108"]').count()) === 1
-  && (await page.locator('[data-testid="sql-109"]').count()) === 1 && /INSERT INTO public\.ads_config \(key, value\) VALUES \('ads_schema', '101'\)/.test(t)
+  && (await page.locator('[data-testid="sql-109"]').count()) === 1
+  && (await page.locator('[data-testid="sql-110"]').count()) === 1 && /INSERT INTO public\.ads_config \(key, value\) VALUES \('ads_schema', '101'\)/.test(t)
   && !(await page.locator('[data-testid="sql-100"]').count()) && /supabase\.com\/dashboard\/project\/.+\/sql\/new/.test(await page.getByTestId('step-meta-db').innerHTML()),
-  'UI134b only the missing files (101-109) are shown, complete and ready to copy, with a link to the SQL editor');
-await fetch(`${API}/__schema/109`);
+  'UI134b only the missing files (101-110) are shown, complete and ready to copy, with a link to the SQL editor');
+await fetch(`${API}/__schema/110`);
 await page.getByRole('button', { name: 'Check all now' }).click();
 await page.waitForTimeout(800);
 ok(await page.getByTestId('step-meta-db').getAttribute('data-done') === 'yes', 'UI134c after the update the database step is done again');
