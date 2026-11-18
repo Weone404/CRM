@@ -5,7 +5,7 @@ export const NAV_GROUPS = [
   { id: 'home', label: '', ids: ['home'] },
   { id: 'people', label: 'People', ids: ['leads', 'students', 'tasks', 'team', 'attendance'] },
   { id: 'growth', label: 'Growth', ids: ['ads', 'metaads', 'amazon', 'partnerships'] },
-  { id: 'setup', label: 'Setup', ids: ['settings', 'policy', 'profile', 'leave', 'account'] },
+  { id: 'setup', label: 'Setup', ids: ['connections', 'settings', 'policy', 'profile', 'leave', 'account'] },
 ];
 
 export function groupTabs(tabs) {

@@ -56,9 +56,44 @@ Connection type and speed come from the browser's Network Information API. Only 
   - the old `#/academy` link;
   - the phone bottom bar and the grouped More sheet.
 
+## Phase 2: Connections & keys (migration 111, 2026-11-18)
+
+Setup > Connections & keys (Admin only, `#/connections`) lists every key, token and account ID the CRM holds, grouped as:
+- Google (Google Ads, Search Console, GA4)
+- Meta
+- Amazon
+- AI models
+- FlightBridge AI
+- Email sending
+- Sending data into the CRM
+
+How each kind of item behaves:
+- **Secrets** are write-only. They show as •••• and the last 4 characters, and offer Replace (typed into a hidden field), Test and Remove. Their value is never sent back to the browser.
+- **Account IDs that are not secret** show in full and offer Copy and Edit. These are the OAuth client IDs, the MCC customer ID, the Meta App ID, the Amazon seller ID and profile ID, the Search Console site and the GA4 property.
+- **Shared inbound tokens** (BookMyCharter, Hikvision, partner apps) offer Copy token and Replace. Both go through `api_connection_token` and `api_connection_rotate`, which audit-log every use. Replace warns that the old token stops working at once.
+
+How the page is built:
+- **Nothing moved.** Each key stays where its readers look: the Vault names `ads_*`, `amz_*`, `crm_*` and `crm_ai_*`, and `flightbridge.integration_secret`.
+- **Saving and removing use the modules' existing functions:** `api_ads_settings_save` and `api_ads_secret_delete`, `api_amz_settings_save`, `api_ads_site_settings_save`, `ai_integration_set`, `ai_integration_toggle` and `ai_integration_delete`, FlightBridge's `/integrations` routes, and `api_amz_smtp`. Their checks and logs are unchanged.
+- **Migration 111 adds only two functions:**
+  - `api_vault_overview()`: read-only, Admin only. It returns statuses, last tests and the merged activity log.
+  - `api_vault_amz_remove(name)`: Amazon keys had no Remove before.
+- **Rollback:** `111_crm_vault_down.sql` drops those functions and touches no key.
+- **Tests per group:**
+  - Google: Test Google Ads and Check website data.
+  - Meta: Test Meta.
+  - Amazon: Test Amazon.
+  - FlightBridge AI: Test per key.
+- **Attention flags:** a group gets an "attention" flag on a failed test, GA4 with no data, a missing Meta Pixel, or the Amazon client secret coming due for its 180-day rotation.
+- **Developer token:** the Google Ads developer token is not listed. Google retired developer tokens on 2026-09-09, and the ADS code no longer sends one.
+- **Settings:** the old Settings > AI Integrations and Settings > Connections cards are replaced by a link to this page. Business email (mail server and sender) stays in Settings.
+
+Tests:
+- `supabase/tests/vault/run.sh` runs 18 SQL checks. They confirm that only Admin can open the page, that IDs come back in full while secrets come back as the last 4 only (no secret value anywhere in the answer), and that every store is covered, the activity log is merged and ordered, Amazon keys can be removed, private helpers stay private, and the rollback works.
+- `supabase/tests/shell/app_checks.mjs` adds 17 checks (V01–V11) for the page, run in the real app.
+
 ## Still to come
 
-- Phase 2: Connections & keys, a single page for all keys, grouped by provider. Secrets are write-only.
 - Phase 3: the Website module.
 - Phases 4–6: the same page layout applied to Ads, People, Amazon and FlightBridge AI.
 

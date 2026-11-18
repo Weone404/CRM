@@ -36,10 +36,9 @@ const AddQuery = lazy(() => import('./components/AddQuery'));
 const StudentDirectory = lazy(() => import('./components/StudentDirectory'));
 const Attendance = lazy(() => import('./components/Attendance'));
 const FlightBridge = lazy(() => import('./components/FlightBridge'));
-const AIIntegrations = lazy(() => import('./components/AIIntegrations'));
 const PhoneApp = lazy(() => import('./components/AppAlerts').then((m) => ({ default: m.PhoneApp })));
 const BusinessEmail = lazy(() => import('./components/AppAlerts').then((m) => ({ default: m.BusinessEmail })));
-const Connections = lazy(() => import('./components/Connections'));
+const Vault = lazy(() => import('./components/Vault'));
 const Amazon = lazy(() => import('./components/Amazon'));
 const Ads = lazy(() => import('./components/Ads'));
 const AdsMeta = lazy(() => import('./components/AdsMeta'));
@@ -292,6 +291,7 @@ export default function App() {
     canAccessAmazon && { id: 'amazon', label: 'Amazon', icon: 'cart' },
     canAccessAds && { id: 'ads', label: 'Google Ads', icon: 'rocket' },
     canAccessAds && { id: 'metaads', label: 'Meta Ads', icon: 'send' },
+    USE_SUPABASE && department === 'Admin' && { id: 'connections', label: 'Connections & keys', icon: 'lock' },
     USE_SUPABASE && department === 'Admin' && { id: 'settings', label: 'Settings', icon: 'settings' },
     isEmployeeSession && { id: 'profile', label: 'My Profile', icon: 'profile' },
     isEmployeeSession && { id: 'leave', label: 'My Leave', icon: 'calendar' },
@@ -406,7 +406,7 @@ export default function App() {
       <ErrorBoundary name={tabs.find((t) => t.id === activeTab)?.label} resetKey={activeTab}>
         {activeTab === 'home' && (
           <Home employee={employee} leads={leads} followups={followups} leadsReady={leadsReady}
-            canAccessLeads={canAccessLeads} canAccessAds={canAccessAds} onOpenTab={(tab, sec, params) => navigate(tab, sec, params)} />
+            canAccessLeads={canAccessLeads} canAccessAds={canAccessAds} canOpenKeys={USE_SUPABASE && department === 'Admin'} onOpenTab={(tab, sec, params) => navigate(tab, sec, params)} />
         )}
         {activeTab === 'leads' && canAccessLeads && staleSince > 0 && !leadsError && (
           <div className="crm-stale mb-4" role="status">
@@ -492,10 +492,15 @@ export default function App() {
           {activeTab === 'amazon' && canAccessAmazon && <Amazon access={amzAccess} />}
           {activeTab === 'ads' && canAccessAds && <Ads access={adsAccess} />}
           {activeTab === 'metaads' && canAccessAds && <AdsMeta access={adsAccess} />}
-          {activeTab === 'settings' && USE_SUPABASE && department === 'Admin' && <div className="space-y-4">{accountCard}<PhoneApp notifications={canAccessAmazon} /><BusinessEmail /><AIIntegrations /><Connections /></div>}
+          {activeTab === 'settings' && USE_SUPABASE && department === 'Admin' && <div className="space-y-4">{accountCard}<PhoneApp notifications={canAccessAmazon} /><BusinessEmail />
+            <button type="button" onClick={() => navigate('connections')} className="glass-card tile-link w-full p-4 flex items-center justify-between gap-3 text-left">
+              <span><span className="block font-semibold text-glass-primary">API keys, tokens and connections</span><span className="block text-sm text-glass-secondary">Now all in one place: Setup &gt; Connections &amp; keys</span></span>
+              <Icon name="lock" size={18} />
+            </button></div>}
           {activeTab === 'profile' && isEmployeeSession && <div className="space-y-4">{accountCard}<MyProfile />{USE_SUPABASE && <PhoneApp notifications={canAccessAmazon} />}</div>}
           {activeTab === 'account' && <div className="space-y-4">{accountCard}{USE_SUPABASE && <PhoneApp notifications={canAccessAmazon} />}</div>}
           {activeTab === 'leave' && isEmployeeSession && <LeaveCalendar employeeId={employee.id} />}
+          {activeTab === 'connections' && USE_SUPABASE && department === 'Admin' && <Vault />}
         </Suspense>
       </ErrorBoundary>
       </div>

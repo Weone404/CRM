@@ -67,7 +67,7 @@ function Fold({ title, hint, children }) {
   );
 }
 
-export default function Home({ employee, leads, followups, leadsReady, canAccessLeads, canAccessAds, onOpenTab }) {
+export default function Home({ employee, leads, followups, leadsReady, canAccessLeads, canAccessAds, canOpenKeys, onOpenTab }) {
   const n = useMemo(() => homeNumbers(leads, followups), [leads, followups]);
   const site = useSiteSignals(canAccessAds);
   const go = onOpenTab || ((tab, section, params) => navigate(tab, section, params));
@@ -82,8 +82,8 @@ export default function Home({ employee, leads, followups, leadsReady, canAccess
   const attention = [
     canAccessLeads && n.notContacted > 0 && { tone: 'bad', text: `${n.notContacted} lead${n.notContacted === 1 ? '' : 's'} not contacted yet`, action: 'Open', to: ['leads', '', { filter: 'pending' }] },
     canAccessLeads && n.followupsDue > 0 && { tone: 'warn', text: `${n.followupsDue} follow-up${n.followupsDue === 1 ? ' is' : 's are'} due`, action: 'Open', to: ['leads'] },
-    gaEmpty && { tone: 'warn', text: 'GA4 is connected but sends no visitor data', action: 'Fix', to: ['metaads', 'funnel'] },
-    noPixel && { tone: 'warn', text: 'The Meta ad account has no Pixel yet', action: 'Set up', to: ['metaads', 'funnel'] },
+    gaEmpty && { tone: 'warn', text: 'GA4 is connected but sends no visitor data', action: 'Fix', to: canOpenKeys ? ['connections'] : ['metaads', 'funnel'] },
+    noPixel && { tone: 'warn', text: 'The Meta ad account has no Pixel yet', action: 'Set up', to: canOpenKeys ? ['connections'] : ['metaads', 'funnel'] },
   ].filter(Boolean);
   const dot = { bad: '#C0271D', warn: '#B26A00', info: '#0A63CE' };
 
