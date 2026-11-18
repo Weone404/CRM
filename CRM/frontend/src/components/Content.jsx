@@ -45,6 +45,7 @@ function Item({ it, canEdit, reload }) {
         <span className="text-[12px] text-glass-secondary">{time(it.slot)}</span>
         <Status s={it.status} />
         {it.source === 'manual' && <Chip>Your idea</Chip>}
+        {String(b.format || '').startsWith('presenter') && <Chip color={C.green} bg="rgba(30,123,52,0.08)">AI presenter</Chip>}
         <div className="flex-1" />
         {canEdit && ['planned', 'queued', 'held', 'failed'].includes(it.status) && <button type="button" className="text-[12px] text-glass-secondary min-h-[28px]" onClick={() => act('skip')}>Skip</button>}
         {canEdit && ['skipped', 'failed', 'held'].includes(it.status) && <button type="button" className="text-[12px] text-[var(--accent)] min-h-[28px]" onClick={() => act('restore')}>Put back</button>}

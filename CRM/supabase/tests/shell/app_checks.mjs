@@ -118,7 +118,7 @@ await page.waitForTimeout(800);
 b = await body();
 ok(/GROWTH\s*Website\s*Content/i.test(await nav.innerText()), 'CN01 Content sits under Growth, after Website');
 ok(/Reel Studio connected/.test(b) && /The plan for this week/.test(b) && /Fees and the path after class 12/.test(b) && /You asked: Push CPL fees/.test(b), 'CN02 the week shows the plan, the owner\'s note and whether Reel Studio is connected');
-ok(/CPL cost, line by line/.test(b) && /Opens with: “Where does ₹45 lakh actually go\?”/.test(b) && /1,200 views · 30 sends · 2 enquiries/.test(b) && /Pilot after 12th: 6 steps/.test(b), 'CN03 each day lists its items: hook, status, and for posts the views, sends and enquiries');
+ok(/CPL cost, line by line/.test(b) && /Opens with: “Where does ₹45 lakh actually go\?”/.test(b) && /1,200 views · 30 sends · 2 enquiries/.test(b) && /Pilot after 12th: 6 steps/.test(b) && /AI presenter/.test(b), 'CN03 each day lists its items: hook, status, AI presenter, and for posts the views, sends and enquiries');
 await page.getByText('Why and how').first().click(); await page.waitForTimeout(200);
 ok(/Because: cpl fees in india, 900 seen/.test(await body()) && /Tracked link: https:\/\/weoneaviation\.in\/\?utm_source=instagram/.test(await body()), 'CN04 an item opens to its evidence and tracked link');
 await page.getByRole('button', { name: 'Skip' }).first().click(); await page.waitForTimeout(500);

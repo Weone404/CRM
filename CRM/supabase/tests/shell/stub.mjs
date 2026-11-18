@@ -31,7 +31,7 @@ const CONTENT = {
       evidence: [{ signal: 'search', detail: 'cpl fees in india, 900 seen' }] }], questions: ['How much does CPL cost?'], objections: ['Is a loan possible?'], gaps: ['Nobody shows the cost breakdown'],
       season: [{ when: '2027-05-15', what: 'CBSE class 12 results', source: 'https://cbse.gov.in' }] } },
   items: [
-    { id: 11, kind: 'reel', source: 'planner', title: 'CPL cost, line by line', slot: at(0, '13:30'), status: 'posted', brief: { hook: 'Where does ₹45 lakh actually go?', persona: 'parent', angle: 'cost',
+    { id: 11, kind: 'reel', source: 'planner', title: 'CPL cost, line by line', slot: at(0, '13:30'), status: 'posted', brief: { hook: 'Where does ₹45 lakh actually go?', persona: 'parent', angle: 'cost', format: 'presenter_studio',
       evidence: [{ signal: 'search', detail: 'cpl fees in india, 900 seen' }], outline: ['Ground classes', 'Flying hours'] }, media: { permalink: 'https://www.instagram.com/reel/abc/' },
       stats: { views: 1200, shares: 30 }, leads: 2, link: 'https://weoneaviation.in/?utm_source=instagram&utm_medium=reel&utm_campaign=content_11' },
     { id: 12, kind: 'carousel', source: 'planner', title: 'Pilot after 12th: 6 steps', slot: at(1, '13:30'), status: 'planned', brief: { hook: 'The whole path on one swipe', evidence: [] }, stats: {}, leads: 0, link: 'x' }],

@@ -297,11 +297,14 @@ one item for parents, one answering a real objection, and at most one trend item
 idea). Carousels suit step-by-step answers, comparisons and costs; reels suit stories, myths and quick explainers.
 For each item give the evidence it rests on (copy it from the brief), a hook for the first 2 seconds or the first slide, a short outline,
 the facts Reel Studio must verify, a soft call to action (comment keyword or visit the link; free career counselling is real), and ideas
-for 3D or on-campus shots where they help. INPUT.fix_these set: your previous answer (INPUT.previous_answer) was sent back for exactly
+for 3D or on-campus shots where they help. For each reel choose "format": "presenter_studio" (an AI presenter speaks the hook and
+the call to action on a calm studio set: costs, DGCA rules, eligibility, parents), "presenter_fast" (the presenter outdoors with fast
+cuts: myths, trends, quick hooks) or "classic" (no presenter). At most 4 presenter reels a week: they use limited free GPU time.
+INPUT.fix_these set: your previous answer (INPUT.previous_answer) was sent back for exactly
 those reasons; fix every one.
 Reply: {"answer": "3-5 lines for the owner: the week in plain words",
  "items": [{"kind": "reel|carousel", "day": "YYYY-MM-DD", "time": "HH:MM", "title": "5-120 chars", "hook": "...", "angle": "...",
    "persona": "persona key or empty", "outline": ["..."], "facts_to_verify": ["..."], "cta": "...", "keywords": ["search words to use in the caption"],
-   "visual_ideas": ["3D shot / campus shot / graphic"], "evidence": [{"signal": "...", "detail": "..."}]}]}`,
+   "visual_ideas": ["3D shot / campus shot / graphic"], "format": "presenter_studio|presenter_fast|classic (reels only)", "evidence": [{"signal": "...", "detail": "..."}]}]}`,
 };
 Object.assign(PROMPTS, CONTENT_PROMPTS);
