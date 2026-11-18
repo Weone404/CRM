@@ -259,6 +259,13 @@ changes, allowed bids and budget inside the spend limits, and has no Mac that st
 | SC01-06 | Viewer / Admin / trigger | Lead score | New leads scored on arrival; neutral with little history; learns (smoothed) with reasons; Admin-only rules, checked; saving rescores; lists | A5_ |
 | R09 | Owner | 106 down, then up | Rolls back and re-applies | run.sh |
 | UI181-187 | Viewer / Admin | Lead quality UI | Score chips on waiting leads, highest first; Lead quality view by any grouping; scored leads; rules editor; phone width | ui_checks.mjs |
+| FN01-02 | Viewer | Funnel map | Six stages with cost each and share moving on; never-called note; periods checked | A6_ |
+| LB01-06 | Viewer / Admin / ads-sync | Audience library | 12 audiences; CRM lists only people whose consent allows sharing; Admin-only on / off and exclusions; job gets hashed people only; saves Meta id, size, problems; warm pools on the funnel map | A6_ |
+| BW01 | ads-sync | Create in Meta | Gets ready audiences by key and default exclusions | A6_ |
+| GEO01 | Viewer | Location focus | Form cities mapped to states; verdict per state | A6_ |
+| R10 | Owner | 107 down, then up | Rolls back and re-applies | run.sh |
+| FT01-05 | ads-sync | Audience helpers | Lead-form / Page / Instagram / messaged rules; missing ids give reasons; hashed Replace batches; plain errors; build exclusions | meta_funnel.test.ts |
+| UI188-194 | Viewer / Admin | Funnel UI | Funnel map; audience library; default exclusions; turn on and update; pick exclusions; location focus; phone width | ui_checks.mjs |
 | MR | ads-sync | Report settings, Insights query, rows, totals, cache, health rules | Meta's limits; filters; leads / video / rankings; disjoint reach; warnings | meta_reports.test |
 | UI170-180 | Viewer / Admin | Reports and Overview health | Live table, breakdown and value filter, compare, presets, drill-down, rankings, custom columns, saved view, CSV, phone width, health card | ui_checks |
 

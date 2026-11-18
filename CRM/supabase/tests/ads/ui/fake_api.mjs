@@ -67,8 +67,13 @@ http.createServer(async (req, res) => {
           { platform: 'meta', external_id: '5554443', name: 'Pilot School Meta', currency: 'INR', timezone: 'Asia/Kolkata', status: 'ACTIVE', active: true, business: 'Test Biz' }] },
         known: [{ platform: 'google', external_id: '1112223333', client: 'Test Client A' }] };
       if (jobs.includes('sync')) results.sync = { job: 'sync', status: 'ok', items: 0, detail: 'UI test stub: platforms not called' };
-      if (jobs.includes('setup')) results.setup = { build: '2026-11-17.meta6', functions: { 'ads-sync': 'current', 'ads-intake': 'current', 'ads-meta-webhook': 'current', 'ads-agents': 'current' } };
+      if (jobs.includes('setup')) results.setup = { build: '2026-11-18.meta7', functions: { 'ads-sync': 'current', 'ads-intake': 'current', 'ads-meta-webhook': 'current', 'ads-agents': 'current' } };
       if (jobs.includes('meta_report')) results.meta_report = fakeReport(args.report || {});
+      if (jobs.includes('meta_audiences')) {
+        await pool.query("UPDATE public.ads_meta_audience SET status = 'ready', meta_id = '23850000000077', size_low = 1500, size_high = 1800, synced_at = now() WHERE key = 'form_dropoff_30'");
+        await pool.query("UPDATE public.ads_config SET value = jsonb_build_object('ok', 1, 'errors', 0, 'at', now())::text WHERE key = 'meta_audiences_last'");
+        results.meta_audiences = { job: 'meta_audiences', status: 'ok', items: 1, detail: '1 audience(s) up to date (UI test stub)' };
+      }
       if (jobs.includes('meta_health')) results.meta_health = { job: 'meta_health', status: 'ok', items: 0, detail: 'Score 64; 0 warning(s) (UI test stub)' };
       if (jobs.includes('execute')) results.execute = { job: 'execute', status: 'ok', items: 0, detail: '0 change(s) processed (UI test stub)' };
       return send(res, 200, { results });

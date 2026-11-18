@@ -420,6 +420,8 @@ export class MetaAds {
     if (!b?.id) throw new AdsError("sync_failed", "Meta did not return an id");
     return String(b.id);
   }
+  // Meta Ads > Funnel > audiences (migration 107): any write that does not answer with a new id (usersreplace).
+  async post(path: string, params: Record<string, string>): Promise<any> { return this.req("POST", path, params, true); }
   // Targeting search: adgeolocation (cities, regions, countries) and adinterest.
   async search(params: Record<string, string>): Promise<any[]> {
     const b = await this.req("GET", "search", { limit: "10", ...params });

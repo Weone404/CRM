@@ -90,7 +90,21 @@ const POS: Record<string, [string, string]> = {
 };
 export interface Geo { countries: string[]; regions: { key: string }[]; cities: { key: string; radius?: number; distance_unit?: string }[] }
 
-export function targeting(a: any, geo: Geo, interests: { id: string; name: string }[]) {
+// Funnel audiences (migration 107): keys from the Funnel audience library -> Meta ids. Exclusions are hard limits in Meta;
+// included custom audiences are a hint under Advantage+ audience. New-people ad sets (funnel "prospecting", the default)
+// also get the default exclusions (admissions, recent leads).
+export interface Aud { map: Record<string, string>; defaults: string[] }
+export function audienceSpec(a: any, aud?: Aud): { include: { id: string }[]; exclude: { id: string }[]; missing: string[] } {
+  const au = a?.audience ?? {}, map = aud?.map ?? {}, missing: string[] = [];
+  const ids = (keys: unknown) => (Array.isArray(keys) ? keys : []).map(String).flatMap((k) => (map[k] ? [map[k]] : (missing.push(k), [])));
+  const include = [...new Set(ids(au.include_audiences))];
+  const funnel = String(au.funnel ?? "prospecting");
+  const ex = new Set([...ids(au.exclude_audiences), ...(funnel === "prospecting" ? (aud?.defaults ?? []) : [])]);
+  for (const i of include) ex.delete(i);
+  return { include: include.slice(0, 50).map((id) => ({ id })), exclude: [...ex].slice(0, 50).map((id) => ({ id })), missing };
+}
+
+export function targeting(a: any, geo: Geo, interests: { id: string; name: string }[], aud?: Aud) {
   const au = a.audience ?? {};
   const geo_locations: Record<string, unknown> = {};
   if (geo.countries.length) geo_locations.countries = geo.countries;
@@ -109,6 +123,9 @@ export function targeting(a: any, geo: Geo, interests: { id: string; name: strin
     t.targeting_automation = { advantage_audience: 0 };
   }
   if (interests.length) t.flexible_spec = [{ interests: interests.slice(0, 25) }];
+  const ca = audienceSpec(a, aud);
+  if (ca.include.length) t.custom_audiences = ca.include;
+  if (ca.exclude.length) t.excluded_custom_audiences = ca.exclude;
   if (Array.isArray(a.placements)) {
     const plat = new Set<string>(), fb: string[] = [], ig: string[] = [];
     for (const p of a.placements) {

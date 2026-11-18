@@ -25,6 +25,7 @@
 //   meta_image           Admin. {strategy_id, creative_key, image_base64, filename}: uploads a creative's picture (PNG / JPEG).
 //   lead_alerts          Cron / approver. Speed-to-lead: phone notifications and emails for ad leads still waiting for a first call.
 //   meta_report          Any ADS viewer. {report: {...}}: Meta Ads > Reports, read live from Meta's Insights API (cached 3 h / 7 days).
+//   meta_audiences       Cron / approver. Keeps the Funnel audience library in Meta (engagement audiences, hashed CRM lists).
 //   meta_health          Cron / approver. Opportunity Score, recommendations, account and delivery health, warnings and alerts.
 // Every job takes its own lock (svc_ads_run_begin), so overlapping runs skip instead of doubling up.
 // Keys come from Vault through the service role and never leave this function (responses and logs are scrubbed).
@@ -41,8 +42,9 @@ import * as webpush from "jsr:@negrel/webpush@0.5.0";
 import { alertText, type DueAlert } from "../_shared/lead_alerts.ts";
 import { BREAKDOWNS as REPORT_BREAKDOWNS, cacheHours, cacheKey, cleanParams, insightsQuery, parseRow, previousPeriod, ReportError } from "../_shared/meta_report.ts";
 import { healthWarnings } from "../_shared/meta_health.ts";
+import { audienceError, engagementRule, PREFIX, replaceBatches, sizeOf } from "../_shared/meta_audience.ts";
 import { adParams, adsetParams, bestMatch, campaignParams, countryCode, creativeParams, formParams, geoQueries, imageKind, MAX_IMAGE_B64,
-  planSteps, targeting, type BuildWork, type Geo } from "../_shared/meta_build.ts";
+  planSteps, targeting, audienceSpec, type BuildWork, type Geo } from "../_shared/meta_build.ts";
 
 const DEADLINE_MS = 120_000;
 
@@ -561,8 +563,10 @@ async function metaBuild(s: Record<string, string>, strategyId: number, t0: numb
             const hit = bestMatch(await meta.search({ type: "adinterest", q: String(name) }), String(name)) as any;
             if (hit?.id) interests.push({ id: String(hit.id), name: String(hit.name) });
           }
-          id = await meta.create(`${act}/adsets`, adsetParams(w, a._c, a, ids[`campaign:${a._c.key}`], targeting(a, geo, interests), today));
-          if (notFound.length) note = `Not found by Meta, left out: ${notFound.join(", ")}`;
+          id = await meta.create(`${act}/adsets`, adsetParams(w, a._c, a, ids[`campaign:${a._c.key}`], targeting(a, geo, interests, { map: (w as any).audiences ?? {}, defaults: (w as any).default_excludes ?? [] }), today));
+          const missingAud = audienceSpec(a, { map: (w as any).audiences ?? {}, defaults: [] }).missing;
+          if (notFound.length || missingAud.length) note = [notFound.length ? `Not found by Meta, left out: ${notFound.join(", ")}` : "",
+            missingAud.length ? `Audiences not ready in Meta yet, left out: ${missingAud.join(", ")}` : ""].filter(Boolean).join("; ");
         } else if (kind === "creative") {
           id = await meta.create(`${act}/adcreatives`, creativeParams(w, find("creative", k1), ids[`form:${k2}`]));
         } else {
@@ -735,6 +739,58 @@ async function metaHealth(s: Record<string, string>) {
       detail: `Score ${data.opportunity?.score ?? "n/a"}; ${warnings.length} warning(s); ${r.notify.length} new sent (${sent} delivered)${errors.length ? `; could not read: ${errors.join("; ").slice(0, 400)}` : ""}` };
   });
 }
+// ------------------------------------------------------------------ Meta Ads > Funnel > audience library (migration 107)
+async function metaAudiences(s: Record<string, string>, t0: number) {
+  return runJob("meta_audiences", s, async () => {
+    const w = await rpc("svc_ads_meta_audience_work") as { on: boolean; account_id: string | null; page_id: string | null; forms: string[];
+      audiences: { key: string; name: string; kind: string; spec: any; meta_id: string | null; why: string | null; people: [string, string | null][] | null }[] };
+    if (!w.on) return { items: 0, status: "ok", detail: "Audiences are off (Meta Ads > Funnel)" };
+    const { p } = platforms(s);
+    if (!p.meta) return { items: 0, status: "error", detail: "Meta access token is not set" };
+    if (!w.account_id) return { items: 0, status: "error", detail: "No connected Meta ad account" };
+    const m = p.meta, act = `act_${w.account_id}`;
+    let ig: string | null = null;
+    if (w.page_id) { try { ig = (await m.read(w.page_id, { fields: "instagram_business_account" }))?.instagram_business_account?.id ?? null; } catch { /* no Instagram */ } }
+    let existing = new Map<string, string>();
+    try {
+      existing = new Map((await m.readAll(`${act}/customaudiences`, { fields: "id,name", limit: "500" })).map((a: any) => [String(a.name), String(a.id)]));
+    } catch (e) {
+      const msg = audienceError(scrubSecrets((e as Error).message, s), w.account_id);
+      await rpc("svc_ads_meta_audiences_done", { p_summary: { ok: 0, errors: 1, detail: msg } });
+      return { items: 0, status: "error", detail: msg };
+    }
+    let ok = 0, bad = 0;
+    for (const a of w.audiences) {
+      if (Date.now() - t0 > 100_000) break;
+      const save = (d: Record<string, unknown>) => rpc("svc_ads_meta_audience_saved", { p_key: a.key, p_data: d });
+      try {
+        const name = `${PREFIX}${a.name}`.slice(0, 200);
+        let id = a.meta_id ?? existing.get(name) ?? null;
+        let members: number | null = null;
+        if (a.kind === "engagement") {
+          const r = engagementRule(a.spec, { page_id: w.page_id, ig_id: ig, forms: w.forms ?? [] });
+          if (!r.rule) { await save({ status: "error", detail: r.missing }); bad++; continue; }
+          if (!id) id = await m.create(`${act}/customaudiences`, { name, description: (a.why ?? "").slice(0, 300), rule: JSON.stringify(r.rule), prefill: "1" });
+        } else {
+          if (!id) id = await m.create(`${act}/customaudiences`, { name, description: (a.why ?? "").slice(0, 300), subtype: "CUSTOM", customer_file_source: "USER_PROVIDED_ONLY" });
+          const { batches, total } = replaceBatches(a.people ?? [], Math.floor(Date.now() / 1000) * 1000 + Math.floor(Math.random() * 1000));
+          for (const b of batches) await m.post(`${id}/usersreplace`, b);
+          members = total;
+        }
+        const info = await m.read(id, { fields: "approximate_count_lower_bound,approximate_count_upper_bound,operation_status,delivery_status" }).catch(() => ({}));
+        const op = (info as any)?.operation_status?.description ?? (info as any)?.delivery_status?.description ?? null;
+        await save({ meta_id: id, status: "ready", ...sizeOf(info), ...(members !== null ? { members } : {}),
+          detail: members === 0 ? "No one to send yet (empty list, or nobody whose consent allows sharing)." : op });
+        ok++;
+      } catch (e) {
+        await save({ status: "error", detail: audienceError(scrubSecrets((e as Error).message, s), w.account_id) }); bad++;
+      }
+    }
+    await rpc("svc_ads_meta_audiences_done", { p_summary: { ok, errors: bad } });
+    return { items: ok, status: bad && !ok ? "error" : "ok", detail: `${ok} audience(s) up to date${bad ? `, ${bad} with a problem` : ""}` };
+  });
+}
+
 const esc = (x: string) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
 Deno.serve(async (req) => {
@@ -747,7 +803,7 @@ Deno.serve(async (req) => {
     try { body = await req.json(); } catch { /* empty body */ }
     const jobs = (body.jobs ?? ["sync"]).filter((j) => ["test", "discover", "sync", "execute", "gcheck", "ideas", "convert",
       "meta_page", "meta_leads", "meta_leads_reconcile", "meta_convert", "setup", "meta_test_event", "meta_history", "meta_build", "meta_image",
-      "lead_alerts", "meta_report", "meta_health"].includes(j));
+      "lead_alerts", "meta_report", "meta_health", "meta_audiences"].includes(j));
     if (!jobs.length) return json(req, 422, { detail: "jobs must include test, discover, sync or execute" });
     if (!(await cronOk(req))) {
       const access = await asUser(req, "api_ads_access") as { can_view: boolean; can_approve: boolean; is_admin: boolean };
@@ -803,6 +859,7 @@ Deno.serve(async (req) => {
     if (jobs.includes("lead_alerts")) results.lead_alerts = await leadAlerts(secrets);
     if (jobs.includes("meta_report")) results.meta_report = await metaReport(secrets, body.report, body.force === true);
     if (jobs.includes("meta_health")) results.meta_health = await metaHealth(secrets);
+    if (jobs.includes("meta_audiences")) results.meta_audiences = await metaAudiences(secrets, t0);
     return json(req, 200, { results });
   } catch (e) {
     if (e instanceof HttpError) return json(req, e.status, { detail: e.message });

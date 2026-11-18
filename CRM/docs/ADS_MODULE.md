@@ -143,6 +143,29 @@ WhatsApp reporting needs Advanced Access to `whatsapp_business_manage_events` (A
 
 Tests: `run.sh` A0_ (MS01–MS35 + R03 rollback), `ads_meta.test.ts` (25), `ui_checks.mjs` UI09/09c, UI120–UI141.
 
+## Meta Ads > Funnel: map, audience library, location focus (migration 107, 2026-11-18)
+
+Why: in 2026 Meta treats only location, minimum age, languages and custom audience exclusions as hard limits; age, gender,
+interests and included custom / lookalike audiences are hints for Advantage+ audience, and interest exclusions are gone.
+So targeting is done with our own audiences, hard exclusions and a message per funnel stage. New tab Meta Ads > Funnel:
+
+- Funnel map (`api_ads_meta_funnel(from, to)`): ad views, clicks (Meta), leads, called, qualified, admissions (CRM, Meta
+  leads only), cost per stage, share moving on, median first call and days to qualify, warm / hot pools waiting in Meta,
+  and plain notes (never-called leads, low qualify rate, leads lost between Meta and the CRM).
+- Audience library (`ads_meta_audience`, 12 to start): engagement audiences made in Meta from rules (lead form opened /
+  dropped off, messaged the Page or Instagram, Instagram profile visit / engagement, Page engagement; no personal data
+  leaves) and CRM lists (leads of 30 days, open 30-180 days, lost, qualified, hot-scored, admissions) sent SHA-256 hashed
+  via the Replace API (does not restart learning) and only for people whose consent rule allows it (the Conversions API
+  rule of their Meta source; anyone else needs ad-data-sharing consent). Admin turns it on (`meta_audiences_on`); ads-sync
+  job `meta_audiences` runs nightly (cron `crm-ads-meta-audiences`, 02:50 IST) or on "Update now", saves the Meta id,
+  size and problems (Custom Audience terms link, missing permission, missing Instagram account).
+- Exclusions in builds: Strategy > Create in Meta now adds `excluded_custom_audiences` to new-people ad sets (funnel
+  "prospecting", the default) from the audiences marked "exclude from new-people ads" (admissions and leads of 30 days by
+  default); an ad set may also name `audience.funnel`, `include_audiences` and `exclude_audiences` by key.
+- Location focus (`api_ads_meta_geo(from, to)`): Meta spend and leads by state next to CRM qualified / admissions by
+  state (form state answer, or city mapped through `ads_geo_in`), with a verdict (focus / keep / reduce / cut / too few).
+- Build 2026-11-18.meta7 (ads-sync changed). Rollback: `107_ads_meta_funnel_down.sql` (audiences already in Meta stay).
+
 ## Meta Ads > Lead quality and lead score (migration 106, 2026-11-17)
 
 Meta counts form fills; the CRM knows which became qualified leads and admissions. Reports now has two views: Meta results
