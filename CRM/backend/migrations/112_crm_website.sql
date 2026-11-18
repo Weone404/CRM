@@ -415,7 +415,7 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE n int;
 BEGIN
   IF jsonb_typeof(p_rows) <> 'array' THEN RAISE EXCEPTION 'bad rows'; END IF;
-  DELETE FROM public.web_page;
+  DELETE FROM public.web_page WHERE true;
   INSERT INTO public.web_page (url, status, ms, title, title_len, description_len, h1_count, canonical, noindex, schema, issues, links, broken)
   SELECT DISTINCT ON (r->>'url') left(r->>'url', 600), (r->>'status')::int, (r->>'ms')::int, left(r->>'title', 300), (r->>'title_len')::int,
          (r->>'description_len')::int, (r->>'h1_count')::int, left(r->>'canonical', 600), coalesce((r->>'noindex')::boolean, false),
