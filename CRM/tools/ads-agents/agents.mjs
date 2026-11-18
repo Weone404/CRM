@@ -28,10 +28,10 @@ const CFG = existsSync(join(CONF, "config.json")) ? JSON.parse(readFileSync(join
 const URL_ = process.env.ADS_AGENTS_URL || CFG.url || "https://syytqcadmtgowckdnbqh.supabase.co/functions/v1/ads-agents";
 const CLAUDE = process.env.CLAUDE_BIN || (existsSync(join(CONF, "claude-path")) ? readFileSync(join(CONF, "claude-path"), "utf8").trim() : "claude");
 const MODELS = { researcher: "sonnet", builder: "opus", reviewer: "opus", learner: "opus",
-  meta_researcher: "sonnet", meta_strategist: "opus", meta_reviewer: "opus", ...(CFG.models || {}) };
+  meta_researcher: "sonnet", meta_strategist: "opus", meta_reviewer: "opus", meta_content_analyst: "sonnet", meta_content_planner: "opus", ...(CFG.models || {}) };
 const TIMEOUT = { researcher: 15 * 60e3, builder: 8 * 60e3, reviewer: 6 * 60e3, learner: 8 * 60e3,
-  meta_researcher: 15 * 60e3, meta_strategist: 12 * 60e3, meta_reviewer: 8 * 60e3 };
-export const WEB_ROLES = new Set(["researcher", "meta_researcher"]);
+  meta_researcher: 15 * 60e3, meta_strategist: 12 * 60e3, meta_reviewer: 8 * 60e3, meta_content_analyst: 12 * 60e3, meta_content_planner: 10 * 60e3 };
+export const WEB_ROLES = new Set(["researcher", "meta_researcher", "meta_content_analyst"]);
 const ONCE = process.env.ADS_AGENTS_ONCE === "1";
 let STOP = false;                  // one-pass mode: a usage limit ends the pass instead of waiting
 const IDLE_MS = 60e3;              // ask for work once a minute when idle
@@ -112,6 +112,8 @@ const SUMMARY = {
     : `Rejected: ${(o.problems || []).slice(0, 2).join("; ").slice(0, 300)}`),
   meta_researcher: (o) => String(o.summary || "").split("\n")[0].slice(0, 300),
   meta_strategist: (o) => `Plan: ${String(o.plan?.title || "").slice(0, 120)}${o.answer ? ` - ${String(o.answer).slice(0, 200)}` : ""}`,
+  meta_content_analyst: (o) => String(o.summary || "").split("\n")[0].slice(0, 300),
+  meta_content_planner: (o) => `${(o.items || []).length} item(s)${o.answer ? `: ${String(o.answer).slice(0, 200)}` : ""}`,
 };
 SUMMARY.meta_reviewer = SUMMARY.reviewer;
 

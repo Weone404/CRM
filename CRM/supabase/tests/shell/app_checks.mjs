@@ -111,6 +111,34 @@ await nav.getByRole('button', { name: /^Settings/ }).click(); await page.waitFor
 ok(/Now all in one place: Setup > Connections & keys/.test(await body()), 'V11 Settings points to Connections & keys');
 
 
+// Content (116)
+await page.goto(`${APP}#/content`);
+await page.getByRole('heading', { name: 'Content' }).waitFor({ timeout: 15000 });
+await page.waitForTimeout(800);
+b = await body();
+ok(/GROWTH\s*Website\s*Content/i.test(await nav.innerText()), 'CN01 Content sits under Growth, after Website');
+ok(/Reel Studio connected/.test(b) && /The plan for this week/.test(b) && /Fees and the path after class 12/.test(b) && /You asked: Push CPL fees/.test(b), 'CN02 the week shows the plan, the owner\'s note and whether Reel Studio is connected');
+ok(/CPL cost, line by line/.test(b) && /Opens with: “Where does ₹45 lakh actually go\?”/.test(b) && /1,200 views · 30 sends · 2 enquiries/.test(b) && /Pilot after 12th: 6 steps/.test(b), 'CN03 each day lists its items: hook, status, and for posts the views, sends and enquiries');
+await page.getByText('Why and how').first().click(); await page.waitForTimeout(200);
+ok(/Because: cpl fees in india, 900 seen/.test(await body()) && /Tracked link: https:\/\/weoneaviation\.in\/\?utm_source=instagram/.test(await body()), 'CN04 an item opens to its evidence and tracked link');
+await page.getByRole('button', { name: 'Skip' }).first().click(); await page.waitForTimeout(500);
+let cw2 = await calls();
+ok(cw2.some((x) => x.fn === 'api_content_item_save' && x.args.p.action === 'skip' && x.args.p.id === 12), 'CN05 an approver skips a planned item');
+await page.getByLabel('Anything to focus on').fill('More parents'); await page.getByTestId('content-plan-btn').click(); await page.waitForTimeout(500);
+cw2 = await calls();
+ok(cw2.some((x) => x.fn === 'api_content_plan' && x.args.p_note === 'More parents' && /^\d{4}-\d{2}-\d{2}$/.test(x.args.p_week)), 'CN06 Plan again sends the week and the focus note to the agents');
+await page.screenshot({ path: '/tmp/content_week.png', fullPage: true });
+await page.getByRole('tab', { name: 'Ideas' }).click(); await page.waitForTimeout(400);
+ok(/What people want to know/.test(await body()) && /900 searches for cpl fees in india/.test(await body()) && /Nobody shows the cost breakdown/.test(await body()), 'CN07 Ideas shows the Demand Analyst\'s brief with evidence and gaps');
+await page.getByRole('tab', { name: 'Ad creatives' }).click(); await page.waitForTimeout(400);
+ok(/Cost card/.test(await body()) && /Use in Meta/.test(await body()) && /CPL admissions, Delhi NCR \(v1\)/.test(await body()), 'CN08 Ad creatives lists approved strategies and finished pictures to use in Meta');
+await page.getByRole('tab', { name: 'Results' }).click(); await page.waitForTimeout(400);
+ok(/1,200 views and 2 website enquiries/.test(await body()), 'CN09 Results add up views and enquiries');
+await page.setViewportSize({ width: 390, height: 844 }); await page.getByRole('tab', { name: 'This week' }).click(); await page.waitForTimeout(400);
+ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'CN10 fits a phone screen');
+await page.screenshot({ path: '/tmp/content_phone.png', fullPage: true });
+await page.setViewportSize({ width: 1440, height: 900 });
+
 // Website (Phase 3)
 await page.goto(`${APP}#/website`);
 await page.getByRole('heading', { name: 'Website' }).waitFor({ timeout: 15000 });

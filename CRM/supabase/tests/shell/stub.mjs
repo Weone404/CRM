@@ -20,6 +20,26 @@ const MORE_Q = Array.from({ length: 60 }, (_, i) => {
   return { query: `${['cpl', 'dgca', 'pilot', 'egca', 'atpl', 'ppl'][i % 6]} ${['fees', 'exam', 'course delhi', 'medical', 'syllabus', 'salary', 'eligibility', 'books', 'login', 'result'][i % 10]} ${i}`,
     clicks, impressions: im, ctr: clicks / im, pos, prev_pos: i % 5 ? +(pos + ((i % 3) - 1) * 1.5).toFixed(1) : null, brand: i % 13 === 0, pages: 1, page_list: [] };
 });
+
+// Growth > Content (migration 116): one planned week, the analyst's brief, an ad picture and results.
+const wk = (() => { const d = new Date(); const w = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - w); return d.toISOString().slice(0, 10); })();
+const at = (n, hm) => `${new Date(Date.parse(`${wk}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10)}T${hm}:00+05:30`;
+const CONTENT = {
+  week_start: wk, can_edit: true,
+  plan: { id: 1, status: 'ready', summary: 'Fees and the path after class 12 lead this week; one post for parents.', note: 'Push CPL fees',
+    demand: { summary: 'People search fees and the path after 12th most.', demand: [{ topic: 'CPL cost, line by line', why: '900 searches for cpl fees in india', persona: 'parent', priority: 1,
+      evidence: [{ signal: 'search', detail: 'cpl fees in india, 900 seen' }] }], questions: ['How much does CPL cost?'], objections: ['Is a loan possible?'], gaps: ['Nobody shows the cost breakdown'],
+      season: [{ when: '2027-05-15', what: 'CBSE class 12 results', source: 'https://cbse.gov.in' }] } },
+  items: [
+    { id: 11, kind: 'reel', source: 'planner', title: 'CPL cost, line by line', slot: at(0, '13:30'), status: 'posted', brief: { hook: 'Where does ₹45 lakh actually go?', persona: 'parent', angle: 'cost',
+      evidence: [{ signal: 'search', detail: 'cpl fees in india, 900 seen' }], outline: ['Ground classes', 'Flying hours'] }, media: { permalink: 'https://www.instagram.com/reel/abc/' },
+      stats: { views: 1200, shares: 30 }, leads: 2, link: 'https://weoneaviation.in/?utm_source=instagram&utm_medium=reel&utm_campaign=content_11' },
+    { id: 12, kind: 'carousel', source: 'planner', title: 'Pilot after 12th: 6 steps', slot: at(1, '13:30'), status: 'planned', brief: { hook: 'The whole path on one swipe', evidence: [] }, stats: {}, leads: 0, link: 'x' }],
+  ad_creatives: [{ id: 21, kind: 'ad_image', title: 'Cost card', status: 'ready', strategy_id: 900, creative_key: 'i1', has_picture: true, paths: {}, brief: { visual_brief: 'Clean card with the 5 cost blocks' } }],
+  strategies: [{ id: 900, title: 'CPL admissions, Delhi NCR', approved_version: 1 }],
+  results: [{ id: 11, kind: 'reel', title: 'CPL cost, line by line', slot: at(0, '13:30'), stats: { views: 1200, shares: 30, saves: 12 }, leads: 2, permalink: 'https://www.instagram.com/reel/abc/' }],
+  studio: { last_seen: new Date().toISOString(), autoplan: 'on' },
+};
 const WEB = {
   site: 'https://weoneaviation.in/', configured: { gsc: true, ga4: true },
   runs: { search: { status: 'ok', at: new Date().toISOString() }, visitors: { status: 'ok', detail: 'GA4 answered with no visits', at: new Date().toISOString() } },
@@ -121,6 +141,9 @@ http.createServer((req, res) => {
     if (fn === 'api_vault_overview') return send(res, 200, VAULT);
     if (fn === 'api_web_access') return send(res, 200, { can_view: true, can_run: true, is_admin: true });
     if (fn === 'api_web_overview') return send(res, 200, WEB);
+    if (fn === 'api_content_overview') return send(res, 200, CONTENT);
+    if (fn === 'api_content_plan') return send(res, 200, { plan_id: 1 });
+    if (fn === 'api_content_item_save') return send(res, 200, { id: 12 });
     if (fn === 'api_web_trend') return send(res, 200, TREND);
     if (fn === 'api_web_settings') return send(res, 200, { site_url: 'https://weoneaviation.in/', key_pages: '', psi_key: null });
     if (fn === 'api_web_queries') return send(res, 200, { total: 2, rows: [

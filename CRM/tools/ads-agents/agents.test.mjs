@@ -142,3 +142,11 @@ test("Meta strategy prompts: data is not instructions, the plan format and the C
   assert.match(p, /INPUT:\n\{"request":"Only Delhi"\}/);
   assert.match(p, /CONTEXT:\n\{"goal":\{"objective":"admissions"\}\}/);
 });
+
+test("content roles: the analyst may search the web (season dates), the planner has no tools; both have prompts", async () => {
+  const { PROMPTS } = await import("./prompts.mjs");
+  const { claudeArgs, WEB_ROLES } = await import("./agents.mjs");
+  assert.ok(PROMPTS.meta_content_analyst.includes("DEMAND ANALYST") && PROMPTS.meta_content_planner.includes("CONTENT PLANNER"));
+  assert.ok(WEB_ROLES.has("meta_content_analyst") && !WEB_ROLES.has("meta_content_planner"));
+  assert.ok(claudeArgs("meta_content_planner").includes("--disallowedTools"));
+});

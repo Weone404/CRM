@@ -71,6 +71,7 @@ const INBOUND = [
   { id: 'charter', label: 'BookMyCharter', where: 'bookmycharter.in settings (Vercel): CRM address and token', url: `${FN}/crm-leads/charter`, token: true },
   { id: 'hikvision', label: 'Hikvision attendance machine', where: 'Machine web page > Network > HTTP Listening; the token goes at the end of the address', url: `${FN}/crm-attendance/hikvision?token=`, token: true },
   { id: 'partner', label: 'Partner apps (DGCA prep)', where: 'DGCA prep (Vercel): CRM_PARTNER_TOKEN = the token', url: `${FN}/crm-attendance/partner/attendance/by-mobile`, token: true },
+  { id: 'reelstudio', label: 'Reel Studio (Content)', where: 'Mac mini: ~/ReelStudio/.env CRM_CONTENT_TOKEN = the token', url: `${FN}/crm-content`, token: true },
 ];
 
 function buildGroups(o) {

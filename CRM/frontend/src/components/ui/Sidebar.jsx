@@ -4,7 +4,7 @@ import Icon from '../icons';
 export const NAV_GROUPS = [
   { id: 'home', label: '', ids: ['home'] },
   { id: 'people', label: 'People', ids: ['leads', 'students', 'tasks', 'team', 'attendance'] },
-  { id: 'growth', label: 'Growth', ids: ['website', 'ads', 'metaads', 'amazon', 'partnerships'] },
+  { id: 'growth', label: 'Growth', ids: ['website', 'content', 'ads', 'metaads', 'amazon', 'partnerships'] },
   { id: 'setup', label: 'Setup', ids: ['connections', 'settings', 'policy', 'profile', 'leave', 'account'] },
 ];
 
