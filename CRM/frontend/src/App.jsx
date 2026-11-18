@@ -341,7 +341,7 @@ export default function App() {
       <nav className="px-3 sm:px-6 py-2.5 flex justify-between items-center gap-2 relative">
         <h1 className="text-base sm:text-xl font-bold tracking-tight flex items-center gap-2 min-w-0 text-glass-primary">
           <img src="/icons/crm-mark.png" alt="" width={32} height={32} className="rounded-[9px] shrink-0" style={{ width: 32, height: 32, boxShadow: '0 1px 3px rgba(0,0,0,0.12), 0 0 0 0.5px rgba(0,0,0,0.06)' }} />
-          <span className="truncate">We One CRM</span>
+          <span className="truncate">CRM</span>
         </h1>
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <SignalPill />
