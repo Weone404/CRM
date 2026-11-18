@@ -67,7 +67,7 @@ http.createServer(async (req, res) => {
           { platform: 'meta', external_id: '5554443', name: 'Pilot School Meta', currency: 'INR', timezone: 'Asia/Kolkata', status: 'ACTIVE', active: true, business: 'Test Biz' }] },
         known: [{ platform: 'google', external_id: '1112223333', client: 'Test Client A' }] };
       if (jobs.includes('sync')) results.sync = { job: 'sync', status: 'ok', items: 0, detail: 'UI test stub: platforms not called' };
-      if (jobs.includes('setup')) results.setup = { build: '2026-11-18.meta8', functions: { 'ads-sync': 'current', 'ads-intake': 'current', 'ads-meta-webhook': 'current', 'ads-agents': 'current' } };
+      if (jobs.includes('setup')) results.setup = { build: '2026-11-18.meta9', functions: { 'ads-sync': 'current', 'ads-intake': 'current', 'ads-meta-webhook': 'current', 'ads-agents': 'current' } };
       if (jobs.includes('meta_report')) results.meta_report = fakeReport(args.report || {});
       if (jobs.includes('meta_audiences')) {
         await pool.query("UPDATE public.ads_meta_audience SET status = 'ready', meta_id = '23850000000077', size_low = 1500, size_high = 1800, synced_at = now() WHERE key = 'form_dropoff_30'");

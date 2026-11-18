@@ -143,6 +143,27 @@ WhatsApp reporting needs Advanced Access to `whatsapp_business_manage_events` (A
 
 Tests: `run.sh` A0_ (MS01–MS35 + R03 rollback), `ads_meta.test.ts` (25), `ui_checks.mjs` UI09/09c, UI120–UI141.
 
+## Meta Ads > Funnel plan: lookalikes, personas, budget split, creative-diversity checks (migration 109, 2026-11-18)
+
+- Lookalikes (audience kind `lookalike`, stage `cold`, use `prospect`): 1% of admissions, 1% and 1-3% of qualified leads, 1%
+  of hot-scored leads, India. The nightly audience job makes them after their seeds (`lookalike_spec` similarity, ratio,
+  starting_ratio, country) once the seed has the 100 people Meta requires; until then they wait as "planned" with the reason.
+  In builds, audiences included in a new-people ad set are used only with Advantage+ audience (hints); without it they are
+  left out so they never become the whole audience.
+- Personas (`ads_meta_persona`, Admin edits in Funnel > Personas): who, Search Console topics they ask, objections, proof
+  needed, angles, best stages, form questions. Seeded with six from public facts only (no fees, salaries or tie-ups).
+- Funnel plan (`api_ads_meta_funnel_blueprint(monthly, split)`): budget per stage (new people / retarget / re-engage),
+  retarget and re-engage capped by ready pool sizes at the account CPM (about 3 ads a week per person) with the rest moved to
+  new people; audiences to include / exclude, form, message, personas, KPI, expected leads a week and a learning-phase note
+  (about 50 optimisation events per ad set in 7 days). "Send to Strategy" creates a strategy whose goal carries
+  `funnel.split` and `personas` (goal cleaning wraps the 104 version: `ads_meta_goal_clean_base`).
+- Plan checks wrap the 104 checks (`ads_meta_plan_check_base`) and send back: creatives sharing 70%+ of their words, 4+
+  creatives with fewer than 3 angles, unknown persona keys, goal personas not covered, unknown audience keys, retarget /
+  reengage ad sets with no audience, seeds included on new-people ad sets without Advantage+ audience, and a funnel split
+  more than 10 points from the goal (a stage with no ready audience may be 0). The new problems come first (up to 40 in all).
+- Agents get `personas` in their context; prompts ask for a persona and concept on every creative. Build 2026-11-18.meta9.
+  Rollback: `109_ads_meta_funnel_plan_down.sql` (renames the 104 functions back).
+
 ## Meta Ads > Funnel > Website signals and agent funnel context (migration 108, 2026-11-18)
 
 - Search Console (`searchAnalytics.query`, by query and page) and GA4 (Data API `runReport`: landing pages, channels,

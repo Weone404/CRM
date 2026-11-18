@@ -43,7 +43,7 @@ import * as webpush from "jsr:@negrel/webpush@0.5.0";
 import { alertText, type DueAlert } from "../_shared/lead_alerts.ts";
 import { BREAKDOWNS as REPORT_BREAKDOWNS, cacheHours, cacheKey, cleanParams, insightsQuery, parseRow, previousPeriod, ReportError } from "../_shared/meta_report.ts";
 import { healthWarnings } from "../_shared/meta_health.ts";
-import { audienceError, engagementRule, PREFIX, replaceBatches, sizeOf } from "../_shared/meta_audience.ts";
+import { audienceError, engagementRule, lookalikeParams, PREFIX, replaceBatches, seedReady, sizeOf } from "../_shared/meta_audience.ts";
 import { GA_REPORTS, gaBody, googleToken, gscBody, gscSite, parseGa, parseGsc, siteError, windows, type SiteRow } from "../_shared/site_signals.ts";
 import { adParams, adsetParams, bestMatch, campaignParams, countryCode, creativeParams, formParams, geoQueries, imageKind, MAX_IMAGE_B64,
   planSteps, targeting, audienceSpec, type BuildWork, type Geo } from "../_shared/meta_build.ts";
@@ -745,7 +745,7 @@ async function metaHealth(s: Record<string, string>) {
 async function metaAudiences(s: Record<string, string>, t0: number) {
   return runJob("meta_audiences", s, async () => {
     const w = await rpc("svc_ads_meta_audience_work") as { on: boolean; account_id: string | null; page_id: string | null; pixel_id?: string | null; forms: string[];
-      audiences: { key: string; name: string; kind: string; spec: any; meta_id: string | null; why: string | null; people: [string, string | null][] | null }[] };
+      audiences: { key: string; name: string; kind: string; spec: any; meta_id: string | null; why: string | null; people: [string, string | null][] | null; seed?: any }[] };
     if (!w.on) return { items: 0, status: "ok", detail: "Audiences are off (Meta Ads > Funnel)" };
     const { p } = platforms(s);
     if (!p.meta) return { items: 0, status: "error", detail: "Meta access token is not set" };
@@ -762,6 +762,7 @@ async function metaAudiences(s: Record<string, string>, t0: number) {
       return { items: 0, status: "error", detail: msg };
     }
     let ok = 0, bad = 0;
+    const fresh: Record<string, Record<string, unknown>> = {};   // seeds updated in this run, for the lookalikes after them
     for (const a of w.audiences) {
       if (Date.now() - t0 > 100_000) break;
       const save = (d: Record<string, unknown>) => rpc("svc_ads_meta_audience_saved", { p_key: a.key, p_data: d });
@@ -769,7 +770,16 @@ async function metaAudiences(s: Record<string, string>, t0: number) {
         const name = `${PREFIX}${a.name}`.slice(0, 200);
         let id = a.meta_id ?? existing.get(name) ?? null;
         let members: number | null = null;
-        if (a.kind === "engagement" || a.kind === "website") {
+        if (a.kind === "lookalike") {
+          if (!id) {
+            if (a.seed && fresh[a.seed.key]) a.seed = { ...a.seed, ...fresh[a.seed.key] };
+            const sr = seedReady(a.seed);
+            if (!sr.ok) { await save({ status: "planned", detail: sr.why }); continue; }
+            const lp = lookalikeParams(a.spec, String(a.seed.meta_id), name, a.why ?? "");
+            if (!lp.params) { await save({ status: "error", detail: lp.problem }); bad++; continue; }
+            id = await m.create(`${act}/customaudiences`, lp.params);
+          }
+        } else if (a.kind === "engagement" || a.kind === "website") {
           const r = engagementRule(a.spec, { page_id: w.page_id, ig_id: ig, forms: w.forms ?? [], pixel_id: w.pixel_id ?? null });
           if (!r.rule) { await save({ status: "error", detail: r.missing }); bad++; continue; }
           if (!id) id = await m.create(`${act}/customaudiences`, { name, description: (a.why ?? "").slice(0, 300), rule: JSON.stringify(r.rule), prefill: "1" });
@@ -781,6 +791,7 @@ async function metaAudiences(s: Record<string, string>, t0: number) {
         }
         const info = await m.read(id, { fields: "approximate_count_lower_bound,approximate_count_upper_bound,operation_status,delivery_status" }).catch(() => ({}));
         const op = (info as any)?.operation_status?.description ?? (info as any)?.delivery_status?.description ?? null;
+        fresh[a.key] = { meta_id: id, status: "ready", ...sizeOf(info), ...(members !== null ? { members } : {}) };
         await save({ meta_id: id, status: "ready", ...sizeOf(info), ...(members !== null ? { members } : {}),
           detail: members === 0 ? "No one to send yet (empty list, or nobody whose consent allows sharing)." : op });
         ok++;

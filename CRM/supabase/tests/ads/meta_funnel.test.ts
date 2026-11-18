@@ -1,7 +1,7 @@
 // 107: Funnel audience helpers (engagement rules, Replace batches, errors) and audience targeting in builds.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { audienceError, engagementRule, replaceBatches, sizeOf } from "../../functions/_shared/meta_audience.ts";
+import { audienceError, engagementRule, lookalikeParams, replaceBatches, seedReady, sizeOf } from "../../functions/_shared/meta_audience.ts";
 import { audienceSpec, targeting } from "../../functions/_shared/meta_build.ts";
 
 const ids = { page_id: "111222333", ig_id: "444555666", forms: ["900000001", "bad", "900000002"] };
@@ -55,7 +55,7 @@ test("FT05 builds: new-people ad sets get the default exclusions; retargeting in
   const ret = targeting({ audience: { funnel: "retarget", include_audiences: ["form_dropoff_30"], exclude_audiences: ["crm_leads_30", "form_dropoff_30"] } }, geo, [], aud) as any;
   assert.deepEqual(ret.custom_audiences, [{ id: "7001" }]);
   assert.deepEqual(ret.excluded_custom_audiences, [{ id: "7003" }]);
-  assert.deepEqual(audienceSpec({ audience: { include_audiences: ["ig_visit_30"] } }, aud).missing, ["ig_visit_30"]);
+  assert.deepEqual(audienceSpec({ audience: { funnel: "retarget", include_audiences: ["ig_visit_30"] } }, aud).missing, ["ig_visit_30"]);
   assert.deepEqual((targeting({ audience: {} }, geo, []) as any).excluded_custom_audiences, undefined);
 });
 
@@ -100,4 +100,24 @@ test("FT09 website audiences use the Pixel: URL rules, the Lead event, all visit
   assert.deepEqual((engagementRule({ source: "pixel", event: "Lead", days: 30 }, ids).rule as any).inclusions.rules[0].filter.filters[0], { field: "event", operator: "i_contains", value: "Lead" });
   assert.deepEqual((engagementRule({ source: "pixel", days: 30 }, ids).rule as any).inclusions.rules[0].filter.filters[0].value, "");
   assert.ok(/Pixel/.test(engagementRule({ source: "pixel", days: 30 }, { ...ids, pixel_id: null }).missing!));
+});
+
+test("FT10 lookalikes: 1-20% in 1% steps, bands, India by default; seeds need 100+ people in Meta", () => {
+  const p = lookalikeParams({ seed: "crm_qualified_365", starting_ratio: 0.01, ratio: 0.03 }, "2385", "CRM · LAL", "why")!.params!;
+  assert.deepEqual([p.subtype, p.origin_audience_id, JSON.parse(p.lookalike_spec)], ["LOOKALIKE", "2385", { type: "similarity", ratio: 0.03, country: "IN", starting_ratio: 0.01 }]);
+  assert.ok(/1% to 20%/.test(lookalikeParams({ ratio: 0.25 }, "1", "n", "").problem!));
+  assert.ok(/1% to 20%/.test(lookalikeParams({ ratio: 0.015 }, "1", "n", "").problem!));
+  assert.ok(/start below/.test(lookalikeParams({ ratio: 0.02, starting_ratio: 0.02 }, "1", "n", "").problem!));
+  assert.deepEqual(seedReady({ key: "s", enabled: true, meta_id: "1", status: "ready", size_low: 1200 }), { ok: true });
+  assert.ok(/needs at least 100/.test(seedReady({ key: "s", enabled: true, meta_id: "1", status: "ready", size_low: null, members: 40 }).why!));
+  assert.ok(/not in Meta yet/.test(seedReady({ key: "s", enabled: true, meta_id: null, status: "planned" }).why!));
+});
+
+test("FT11 new-people ad sets: seed audiences are hints only with Advantage+ audience, never hard limits", () => {
+  const aud = { map: { lal_qualified_1: "8001", crm_customers: "7002" }, defaults: ["7002"] };
+  const geo = { countries: ["IN"], regions: [], cities: [] };
+  const hint = targeting({ audience: { advantage_audience: true, include_audiences: ["lal_qualified_1"] } }, geo, [], aud) as any;
+  assert.deepEqual(hint.custom_audiences, [{ id: "8001" }]);
+  const hard = targeting({ audience: { advantage_audience: false, include_audiences: ["lal_qualified_1"] } }, geo, [], aud) as any;
+  assert.deepEqual([hard.custom_audiences, hard.excluded_custom_audiences], [undefined, [{ id: "7002" }]]);
 });

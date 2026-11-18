@@ -12,9 +12,9 @@ const pct = (v) => (v === null || v === undefined ? '–' : `${Number(v) < 1 ? N
 const iso = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 const back = (n) => iso(new Date(Date.now() - n * 86400000));
 const PERIODS = [[30, 'Last 30 days'], [90, 'Last 90 days'], [180, 'Last 6 months'], [365, 'Last 12 months']];
-const KIND = { engagement: 'Meta', crm: 'CRM list', website: 'Website' };
-const STAGE = { hot: ['Hot', C.red], engaged: ['Warm', C.amber], lead: ['Lead', C.blue], qualified: ['Qualified', C.green], customer: ['Admission', '#6B21A8'] };
-const USE = { retarget: 'Retarget', exclude: 'Exclude', seed: 'Lookalike seed', reengage: 'Re-engage' };
+const KIND = { engagement: 'Meta', crm: 'CRM list', website: 'Website', lookalike: 'Lookalike' };
+const STAGE = { cold: ['Cold', '#6B7280'], hot: ['Hot', C.red], engaged: ['Warm', C.amber], lead: ['Lead', C.blue], qualified: ['Qualified', C.green], customer: ['Admission', '#6B21A8'] };
+const USE = { prospect: 'New people (hint)', retarget: 'Retarget', exclude: 'Exclude', seed: 'Lookalike seed', reengage: 'Re-engage' };
 const VERDICT = { focus: [C.green, 'Focus'], keep: ['#6B7280', 'Keep'], reduce: [C.amber, 'Reduce'], cut: [C.red, 'Cut'], 'too few leads': ['#9CA3AF', 'Too few leads'] };
 const size = (a) => (a.size_high ? (a.size_low && a.size_low !== a.size_high ? `${fmt(a.size_low)}-${fmt(a.size_high)}` : fmt(a.size_high)) : '–');
 
@@ -182,8 +182,111 @@ function WebsiteSignals({ access, edge }) {
     </section>);
 }
 
+const SPLIT_KEYS = [['prospecting', 'New people'], ['retarget', 'Retarget'], ['reengage', 'Re-engage']];
+const lines = (t) => String(t || '').split('\n').map((x) => x.trim()).filter(Boolean).slice(0, 12);
+
+function FunnelPlan({ access, personas }) {
+  const [monthly, setMonthly] = useState('60000');
+  const [split, setSplit] = useState({ prospecting: 70, retarget: 20, reengage: 10 });
+  const [objective, setObjective] = useState('admissions');
+  const [course, setCourse] = useState('CPL');
+  const [picked, setPicked] = useState([]);
+  const [bp, setBp] = useState(null);
+  const [err, setErr] = useState('');
+  const sum = SPLIT_KEYS.reduce((a, [k]) => a + (Number(split[k]) || 0), 0);
+  const work = async () => {
+    setErr('');
+    try { setBp(await rpc('api_ads_meta_funnel_blueprint', { p_monthly: Number(monthly), p_split: Object.fromEntries(SPLIT_KEYS.map(([k]) => [k, Number(split[k]) || 0])) })); }
+    catch (e) { setErr(e.message); setBp(null); }
+  };
+  const send = () => run(rpc('api_ads_meta_strategy_create', { p_goal: { objective, monthly_budget: String(Number(monthly)), courses: [course],
+    funnel: { split: Object.fromEntries(SPLIT_KEYS.map(([k]) => [k, Number(split[k]) || 0])) }, personas: picked } })
+    .then((r) => { window.location.hash = '#/metaads/strategy'; return r; }), 'Sent: the agents are planning it in Strategy');
+  const name = (k) => (personas || []).find((p) => p.key === k)?.name || k;
+  return (
+    <section className="glass-card p-4 space-y-3" data-testid="funnel-plan">
+      <div><h3 className="font-bold">Funnel plan</h3>
+        <p className="text-xs text-glass-muted">Split a monthly budget across the funnel. Retarget and re-engage shares are capped by the real pool sizes at your cost per 1,000 views; whatever a pool cannot take goes to new people. Meta needs about 50 leads a week per ad set to finish learning, so small stages stay one ad set.</p></div>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-xs">Monthly budget (₹)<input aria-label="Monthly budget" type="number" min="3000" className="glass-input px-2 py-1 text-sm w-28 block" value={monthly} onChange={(e) => setMonthly(e.target.value)} /></label>
+        {SPLIT_KEYS.map(([k, l]) => <label key={k} className="text-xs">{l} %<input aria-label={`${l} share`} type="number" min="0" max="100" className="glass-input px-2 py-1 text-sm w-20 block" value={split[k]} onChange={(e) => setSplit({ ...split, [k]: e.target.value })} /></label>)}
+        <span className="text-xs" style={{ color: sum === 100 ? C.green : C.red }}>{sum}%</span>
+        <Btn ghost disabled={sum !== 100 || Number(monthly) < 3000} onClick={work}>Work it out</Btn>
+      </div>
+      {err && <div className="text-sm" style={{ color: C.red }}>{err}</div>}
+      {bp && <div className="space-y-2" data-testid="blueprint">
+        <div className="text-xs text-glass-muted">₹{fmt(bp.daily)} a day · CPM {bp.cpm ? inr(bp.cpm) : 'unknown'} · cost per lead {bp.cpl ? inr(bp.cpl) : 'unknown'} · qualified rate {bp.q_rate !== null ? pct(100 * bp.q_rate) : 'unknown'}
+          {bp.qualified_per_month !== null ? ` · about ${fmt(bp.qualified_per_month)} qualified a month at past rates` : ''}</div>
+        <div className="grid md:grid-cols-3 gap-2">{bp.stages.map((st) => (
+          <div key={st.stage} className="rounded-xl p-3 text-sm space-y-1" style={{ background: C.grey }} data-testid={`bp-${st.stage}`}>
+            <div className="font-bold">{st.label}</div>
+            <div>{inr(st.daily)} a day · {inr(st.monthly)} a month · {st.share}%</div>
+            {st.include.length > 0 && <div className="text-xs"><b>Include</b> ({st.include_is}): {st.include.join(', ')}</div>}
+            {st.exclude.length > 0 && <div className="text-xs"><b>Exclude</b>: {st.exclude.join(', ')}</div>}
+            <div className="text-xs"><b>Form</b>: {st.form}</div>
+            <div className="text-xs"><b>Message</b>: {st.message}</div>
+            {st.personas.length > 0 && <div className="text-xs"><b>Personas</b>: {st.personas.map(name).join(', ')}</div>}
+            <div className="text-xs"><b>Judge by</b>: {st.kpi}</div>
+            <div className="text-xs text-glass-muted">{st.leads_per_week !== null ? `~${st.leads_per_week} leads a week; ` : ''}{st.learning}</div>
+          </div>))}</div>
+        {bp.notes.length > 0 && <ul className="text-sm space-y-1">{bp.notes.map((n) => <li key={n} className="flex gap-2"><span style={{ color: C.amber }}>●</span><span>{n}</span></li>)}</ul>}
+        {access?.is_admin && <div className="flex flex-wrap items-end gap-2 pt-1 border-t border-black/5">
+          <label className="text-xs">Aim for<select aria-label="Aim for" className="glass-input px-2 py-1 text-sm block" value={objective} onChange={(e) => setObjective(e.target.value)}>
+            <option value="admissions">Admissions</option><option value="qualified">Qualified leads</option><option value="leads">Leads</option></select></label>
+          <label className="text-xs">Course<input aria-label="Course" className="glass-input px-2 py-1 text-sm w-32 block" value={course} onChange={(e) => setCourse(e.target.value)} /></label>
+          <div className="text-xs"><div>Personas to cover</div><div className="flex flex-wrap gap-1 mt-0.5">{(personas || []).filter((p) => p.enabled).map((p) => (
+            <button key={p.key} aria-pressed={picked.includes(p.key)} onClick={() => setPicked(picked.includes(p.key) ? picked.filter((x) => x !== p.key) : [...picked, p.key].slice(0, 6))}
+              className="px-2 py-1 rounded-lg" style={picked.includes(p.key) ? { background: C.blue, color: '#fff' } : { background: C.grey }}>{p.name}</button>))}</div></div>
+          <Btn disabled={!course.trim()} onClick={send}>Send to Strategy</Btn>
+        </div>}
+      </div>}
+    </section>);
+}
+
+function Personas({ access, list, reload }) {
+  const [edit, setEdit] = useState(null);
+  if (!list) return null;
+  const admin = access?.is_admin;
+  const save = () => run(rpc('api_ads_meta_persona_save', { p: { key: edit.key, name: edit.name, who: edit.who, enabled: edit.enabled,
+    objections: lines(edit.objections), proof: lines(edit.proof), angles: lines(edit.angles), form_questions: lines(edit.form_questions), stages: edit.stages } })
+    .then(() => { setEdit(null); reload(); }), 'Saved');
+  const open = (p) => setEdit(p ? { ...p, objections: p.objections.join('\n'), proof: p.proof.join('\n'), angles: p.angles.join('\n'), form_questions: p.form_questions.join('\n') }
+    : { key: '', name: '', who: '', objections: '', proof: '', angles: '', form_questions: '', stages: ['prospecting'], enabled: true, isNew: true });
+  return (
+    <section className="glass-card p-4 space-y-3" data-testid="personas">
+      <div className="flex items-start gap-2"><div className="flex-1"><h3 className="font-bold">Personas</h3>
+        <p className="text-xs text-glass-muted">Who the ads speak to. Meta now finds the audience largely from the ad itself, so each concept should be written for one of these people. The Strategy agents use them, and Google searches show what each one asks.</p></div>
+        {admin && <Btn ghost onClick={() => open(null)}>Add persona</Btn>}</div>
+      <div className="grid md:grid-cols-2 gap-2">{list.map((p) => (
+        <div key={p.key} className="rounded-xl p-3 text-sm space-y-1" style={{ background: C.grey, opacity: p.enabled ? 1 : 0.5 }} data-testid={`persona-${p.key}`}>
+          <div className="flex items-start gap-2"><b className="flex-1">{p.name}</b>{admin && <button className="text-xs font-semibold" style={{ color: C.blue }} onClick={() => open(p)}>Edit</button>}</div>
+          <div className="text-xs text-glass-muted">{p.who}</div>
+          {p.search.length > 0 && <div className="text-xs"><b>Searches</b>: {p.search.map((x) => `${x.topic} (${fmt(x.impressions)}${x.change !== null ? `, ${x.change > 0 ? '+' : ''}${x.change}%` : ''})`).join(' · ')}</div>}
+          <div className="text-xs"><b>Objections</b>: {p.objections.join(' · ')}</div>
+          <div className="text-xs"><b>Proof they need</b>: {p.proof.join(' · ')}</div>
+          <div className="text-xs"><b>Angles</b>: {p.angles.join(' · ')}</div>
+          <div className="text-xs text-glass-muted">Best for: {p.stages.join(', ')}</div>
+        </div>))}</div>
+      {edit && <div className="rounded-xl p-3 space-y-2 border border-black/10" data-testid="persona-edit">
+        <div className="flex flex-wrap gap-2">
+          <label className="text-xs">Key<input aria-label="Persona key" disabled={!edit.isNew} className="glass-input px-2 py-1 text-sm w-36 block" value={edit.key} onChange={(e) => setEdit({ ...edit, key: e.target.value })} /></label>
+          <label className="text-xs flex-1">Name<input aria-label="Persona name" className="glass-input px-2 py-1 text-sm w-full block" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></label>
+          <label className="text-xs flex items-center gap-1 mt-4"><input type="checkbox" aria-label="Persona on" checked={edit.enabled} onChange={(e) => setEdit({ ...edit, enabled: e.target.checked })} />On</label>
+        </div>
+        <label className="text-xs block">Who<textarea aria-label="Persona who" rows="2" className="glass-input px-2 py-1 text-sm w-full block" value={edit.who} onChange={(e) => setEdit({ ...edit, who: e.target.value })} /></label>
+        <div className="grid md:grid-cols-2 gap-2">{[['objections', 'Objections'], ['proof', 'Proof they need'], ['angles', 'Angles'], ['form_questions', 'Form questions']].map(([k, l]) => (
+          <label key={k} className="text-xs block">{l} (one per line)<textarea aria-label={`Persona ${l}`} rows="3" className="glass-input px-2 py-1 text-sm w-full block" value={edit[k]} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} /></label>))}</div>
+        <div className="flex flex-wrap items-center gap-3 text-xs">{SPLIT_KEYS.map(([k, l]) => (
+          <label key={k} className="flex items-center gap-1"><input type="checkbox" aria-label={`Persona stage ${l}`} checked={edit.stages.includes(k)}
+            onChange={(e) => setEdit({ ...edit, stages: e.target.checked ? [...edit.stages, k] : edit.stages.filter((x) => x !== k) })} />{l}</label>))}
+          <div className="flex-1" /><Btn ghost onClick={() => setEdit(null)}>Cancel</Btn><Btn onClick={save}>Save persona</Btn></div>
+      </div>}
+    </section>);
+}
+
 export default function AdsMetaFunnel({ access, edge }) {
   const [days, setDays] = useState(90);
+  const [personas, reloadPersonas] = useLoad(() => rpc('api_ads_meta_personas'), []);
   return (
     <div className="space-y-3" data-testid="meta-funnel">
       <div className="flex items-center gap-2">
@@ -192,8 +295,10 @@ export default function AdsMetaFunnel({ access, edge }) {
         <span className="text-xs text-glass-muted">Funnel targeting: find new people broadly, bring warm and hot people back with their own message, keep paying customers and fresh leads out.</span>
       </div>
       <FunnelMap days={days} />
+      <FunnelPlan access={access} personas={personas} />
       <Audiences access={access} edge={edge} />
       <Locations days={days} />
       <WebsiteSignals access={access} edge={edge} />
+      <Personas access={access} list={personas} reload={reloadPersonas} />
     </div>);
 }

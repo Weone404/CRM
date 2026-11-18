@@ -79,3 +79,24 @@ export const sizeOf = (b: any) => ({
   size_low: Number.isFinite(Number(b?.approximate_count_lower_bound)) && Number(b.approximate_count_lower_bound) >= 0 ? Number(b.approximate_count_lower_bound) : null,
   size_high: Number.isFinite(Number(b?.approximate_count_upper_bound)) && Number(b.approximate_count_upper_bound) >= 0 ? Number(b.approximate_count_upper_bound) : null,
 });
+
+// Lookalikes (migration 109): Meta needs at least 100 people in the seed (1,000+ gives steadier results). Ratio 1-20% in
+// 1% steps; starting_ratio makes a band (1-3%). Country is where the lookalike is found.
+export const SEED_MIN = 100;
+export function lookalikeParams(spec: any, seedId: string, name: string, why: string): { params?: Record<string, string>; problem?: string } {
+  const ratio = Number(spec?.ratio), start = spec?.starting_ratio === undefined ? null : Number(spec.starting_ratio);
+  const okR = (r: number) => Number.isFinite(r) && r >= 0.01 && r <= 0.2 && Math.abs(r * 100 - Math.round(r * 100)) < 1e-9;
+  if (!okR(ratio)) return { problem: "Lookalike size must be 1% to 20% in 1% steps" };
+  if (start !== null && (!okR(start) && start !== 0 || start >= ratio)) return { problem: "The band must start below its end (for example 1% to 3%)" };
+  const country = /^[A-Z]{2}$/.test(String(spec?.country ?? "")) ? String(spec.country) : "IN";
+  const ls: Record<string, unknown> = { type: "similarity", ratio, country };
+  if (start) ls.starting_ratio = start;
+  return { params: { name, description: why.slice(0, 300), subtype: "LOOKALIKE", origin_audience_id: seedId, lookalike_spec: JSON.stringify(ls) } };
+}
+export function seedReady(seed: any): { ok: boolean; why?: string } {
+  if (!seed || !seed.enabled) return { ok: false, why: "The seed audience is switched off" };
+  if (!seed.meta_id || seed.status !== "ready") return { ok: false, why: `The seed (${seed.key}) is not in Meta yet` };
+  const n = Number(seed.size_low ?? seed.members ?? 0);
+  if (!(n >= SEED_MIN)) return { ok: false, why: `The seed has about ${Number.isFinite(n) ? n : 0} matched people; Meta needs at least ${SEED_MIN} (1,000+ gives steadier lookalikes)` };
+  return { ok: true };
+}

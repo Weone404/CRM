@@ -383,7 +383,7 @@ t = await page.getByTestId('funnel-map').innerText();
 ok(['Saw an ad', 'Clicked', 'Became a lead', 'Called', 'Qualified', 'Admission'].every((x) => t.includes(x)) && /Spend ₹/.test(t)
   && (await page.locator('[data-testid^="stage-"]').count()) === 6, 'UI188 Meta Ads has a Funnel tab with the six-stage funnel map, spend and costs');
 t = await page.getByTestId('audience-library').innerText();
-ok((await page.getByTestId('audience-table').locator('tbody tr').count()) === 16 && /Website: viewed fees or cost pages/.test(t) && /Opened a lead form, did not send it/.test(t) && /CRM: admissions/.test(t)
+ok((await page.getByTestId('audience-table').locator('tbody tr').count()) === 20 && /Lookalike 1%: like our admissions/.test(t) && /Website: viewed fees or cost pages/.test(t) && /Opened a lead form, did not send it/.test(t) && /CRM: admissions/.test(t)
   && /not in Meta yet/.test(t) && /people can be sent/.test(t), 'UI189 the audience library lists warm, hot, lead, qualified and admission audiences with what can be sent');
 ok(await page.getByLabel('Exclude CRM: admissions (all time) from new-people ads').isChecked() && !(await page.getByLabel('Keep audiences in Meta').isChecked()),
   'UI190 admissions are excluded from new-people ads by default; audiences start switched off');
@@ -417,6 +417,33 @@ await page.getByTestId('website-signals').getByRole('button', { name: 'Check now
 await page.waitForTimeout(1200);
 ok((await calls()).some((c) => c.fn === 'ads-sync' && c.args.jobs?.includes('site_signals')) && /Last check/.test(await page.getByTestId('pixel-status').innerText()),
   'UI198 Check now reads Search Console, GA4 and the Pixel');
+await page.getByTestId('personas').waitFor({ timeout: 15000 });
+t = await page.getByTestId('personas').innerText();
+ok((await page.locator('[data-testid^="persona-"]').count()) >= 6 && /Parent funding the decision/.test(t) && /Searches/.test(t) && /Fees and cost/.test(t) && /Proof they need/.test(t),
+  'UI199 personas show who the ads speak to, their objections, the proof they need and what they search on Google');
+await page.getByTestId('persona-career_switcher').getByRole('button', { name: 'Edit' }).click();
+await page.getByLabel('Persona Angles').fill('Not too late: the path for graduates\nWeekend batches explained');
+await page.getByRole('button', { name: 'Save persona' }).click();
+await page.waitForTimeout(800);
+const pv = (await calls()).filter((c) => c.fn === 'api_ads_meta_persona_save').pop();
+ok(pv && pv.args.p.key === 'career_switcher' && pv.args.p.angles?.length === 2 && pv.args.p.stages?.includes('prospecting'), 'UI200 Admin edits a persona (one line per item)');
+await page.getByLabel('Monthly budget').fill('60000');
+await page.getByTestId('funnel-plan').getByRole('button', { name: 'Work it out' }).click();
+await page.getByTestId('blueprint').waitFor({ timeout: 15000 });
+t = await page.getByTestId('blueprint').innerText();
+ok(/Find new people/.test(t) && /Judge by/.test(t) && /learning|leads a week/.test(t) && /a day/.test(t), 'UI201 the funnel plan splits the budget by stage with audiences, form, message, KPI and a learning check');
+await page.getByLabel('Retarget share').fill('40');
+ok(await page.getByTestId('funnel-plan').getByRole('button', { name: 'Work it out' }).isDisabled(), 'UI202 a split that does not add up to 100 cannot be worked out');
+await page.getByLabel('Retarget share').fill('20');
+await page.getByTestId('funnel-plan').getByRole('button', { name: 'Class 12 PCM finisher (18+)' }).click();
+await page.getByTestId('funnel-plan').getByRole('button', { name: 'Send to Strategy' }).click();
+await page.waitForTimeout(1500);
+const sc = (await calls()).filter((c) => c.fn === 'api_ads_meta_strategy_create').pop();
+ok(sc && sc.args.p_goal.funnel?.split?.prospecting === 70 && sc.args.p_goal.personas?.[0] === 'pcm_finisher' && sc.args.p_goal.monthly_budget === '60000'
+  && /#\/metaads\/strategy/.test(page.url()), 'UI203 Send to Strategy starts a strategy with the funnel split and personas, and opens Strategy');
+await page.goto(`${APP}#/metaads/funnel`);
+await page.getByTestId('funnel-map').waitFor({ timeout: 15000 });
+await page.waitForTimeout(800);
 await page.setViewportSize({ width: 390, height: 844 });
 await page.waitForTimeout(600);
 const ovf = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -454,10 +481,11 @@ ok(/101: Meta lead forms, part 2/.test(t) && (await page.locator('[data-testid="
   && (await page.locator('[data-testid="sql-104"]').count()) === 1 && (await page.locator('[data-testid="sql-105"]').count()) === 1
   && (await page.locator('[data-testid="sql-106"]').count()) === 1
   && (await page.locator('[data-testid="sql-107"]').count()) === 1
-  && (await page.locator('[data-testid="sql-108"]').count()) === 1 && /INSERT INTO public\.ads_config \(key, value\) VALUES \('ads_schema', '101'\)/.test(t)
+  && (await page.locator('[data-testid="sql-108"]').count()) === 1
+  && (await page.locator('[data-testid="sql-109"]').count()) === 1 && /INSERT INTO public\.ads_config \(key, value\) VALUES \('ads_schema', '101'\)/.test(t)
   && !(await page.locator('[data-testid="sql-100"]').count()) && /supabase\.com\/dashboard\/project\/.+\/sql\/new/.test(await page.getByTestId('step-meta-db').innerHTML()),
-  'UI134b only the missing files (101-108) are shown, complete and ready to copy, with a link to the SQL editor');
-await fetch(`${API}/__schema/108`);
+  'UI134b only the missing files (101-109) are shown, complete and ready to copy, with a link to the SQL editor');
+await fetch(`${API}/__schema/109`);
 await page.getByRole('button', { name: 'Check all now' }).click();
 await page.waitForTimeout(800);
 ok(await page.getByTestId('step-meta-db').getAttribute('data-done') === 'yes', 'UI134c after the update the database step is done again');

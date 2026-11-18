@@ -135,6 +135,11 @@ Build a full-funnel plan when the warm pools exist: a "prospecting" ad set (broa
 verdicts) plus "retarget" ad sets for ready hot / warm audiences (proof, fees and process answers) and "reengage" for open or
 lost leads (a new offer). Use only audience keys from CONTEXT.audiences; an audience that is not ready_in_meta can be named
 but say so in the reason. Turn the search topics into angles in the searchers' own words.
+CONTEXT.personas are the people the ads speak to (who, what they ask, objections, proof they need, angles, best stage):
+give every creative a "persona" key and write it for that person; when CONTEXT.goal.personas is set, cover each of them.
+When CONTEXT.goal.funnel.split is set, split the daily budget across prospecting / retarget / reengage ad sets within 10
+points of it (a stage whose audiences are not ready_in_meta may get 0; say so). Lookalikes (kind "lookalike") and seed lists
+go in include_audiences of prospecting ad sets ONLY with advantage_audience true: they are hints, not limits.
 Reply with ONE JSON object and nothing else (no markdown fences).`;
 
 const META_PLAN = `Plan format (numbers are plain numbers in INR, never strings; keys are short ids you choose):
@@ -153,7 +158,8 @@ const META_PLAN = `Plan format (numbers are plain numbers in INR, never strings;
    "thank_you": {"title": "...", "body": "...", "button_text": "..."}}],
  "creatives": [{"key": "v1", "name": "...", "format": "image"|"video"|"carousel", "angle": "...", "primary_text": "20-600 chars, the point in the first 125",
    "headline": "3-60 chars (40 is better)", "description": "up to 60 chars", "cta": "APPLY_NOW|DOWNLOAD|GET_QUOTE|LEARN_MORE|SIGN_UP|SUBSCRIBE",
-   "visual_brief": "what to shoot or design, frame by frame for video", "why": "the evidence behind it"}],
+   "visual_brief": "what to shoot or design, frame by frame for video", "why": "the evidence behind it",
+   "persona": "a CONTEXT.personas key", "concept": "the one idea of this ad in a line"}],
  "forecast": {"horizon_days": 30, "assumptions": [{"name": "...", "value": "...", "source": "history|benchmark|owner|research", "note": "where exactly"}],
    "scenarios": {"low": {"spend": n, "leads": n, "cpl": n, "qualified": n, "admissions": n}, "likely": {...}, "high": {...}}, "math": "the arithmetic in one line per step"},
  "rules": [{"when": "measurable condition", "then": "action"}], "timeline": [{"when": "Week 1", "what": "..."}],
@@ -163,7 +169,9 @@ and 1-6 creatives by key and every form and creative is used; ad set (or campaig
 30.4 equal budget.monthly_total within 10%; budget.monthly_total within CONTEXT.goal.monthly_budget when set; every form asks
 FULL_NAME and PHONE; ages 18-65; forecast low ≤ likely ≤ high leads, cpl = spend ÷ leads (within 15%), qualified ≤ leads,
 admissions ≤ qualified, spend within the budget for horizon_days; 3+ assumptions with a source; 2+ rules; 2+ timeline steps;
-QUALITY_LEAD only when CONTEXT.meta_leads_last_30d is 200 or more; no banned claims.`;
+QUALITY_LEAD only when CONTEXT.meta_leads_last_30d is 200 or more; no banned claims; no two creatives sharing 70% or more of
+their words (Meta treats look-alike ads as one); 4+ creatives need 3+ distinct angles; persona and audience keys must exist;
+retarget / reengage ad sets name an audience; the goal's funnel split within 10 points.`;
 
 export const META_PROMPTS = {
   meta_researcher: `${META_COMMON}

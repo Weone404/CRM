@@ -97,8 +97,10 @@ export interface Aud { map: Record<string, string>; defaults: string[] }
 export function audienceSpec(a: any, aud?: Aud): { include: { id: string }[]; exclude: { id: string }[]; missing: string[] } {
   const au = a?.audience ?? {}, map = aud?.map ?? {}, missing: string[] = [];
   const ids = (keys: unknown) => (Array.isArray(keys) ? keys : []).map(String).flatMap((k) => (map[k] ? [map[k]] : (missing.push(k), [])));
-  const include = [...new Set(ids(au.include_audiences))];
   const funnel = String(au.funnel ?? "prospecting");
+  // new-people ad sets: included audiences are hints only under Advantage+ audience; without it they would become the
+  // whole audience, so they are left out (migration 109)
+  const include = funnel === "prospecting" && au.advantage_audience !== true ? [] : [...new Set(ids(au.include_audiences))];
   const ex = new Set([...ids(au.exclude_audiences), ...(funnel === "prospecting" ? (aud?.defaults ?? []) : [])]);
   for (const i of include) ex.delete(i);
   return { include: include.slice(0, 50).map((id) => ({ id })), exclude: [...ex].slice(0, 50).map((id) => ({ id })), missing };

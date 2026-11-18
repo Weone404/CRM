@@ -272,6 +272,14 @@ changes, allowed bids and budget inside the spend limits, and has no Mac that st
 | R11 | Owner | 108 down, then up | Rolls back and re-applies | run.sh |
 | FT06-09 | ads-sync | Website helpers | Windows; Search Console / GA4 requests and rows; settings and errors; Pixel audience rules | meta_funnel.test.ts |
 | UI195-198 | Viewer / Admin | Website signals UI | Intent topics; rising, website funnel, Pixel; connect; Check now | ui_checks.mjs |
+| LK01-02 | ads-sync | Lookalikes | Sent after seeds with seed id / size; wait (planned) until the seed has 100+; ready as new-people hint | A8_ |
+| PS01-03 | Viewer / Admin | Personas | Six with their Google searches; Admin-only; stages checked; add and switch off | A8_ |
+| BP01-02 | Viewer | Funnel plan | Split, pool caps moved to new people, audiences, exclusions, learning check; split and minimum checked | A8_ |
+| GC01-02 | Admin | Goal | Keeps funnel split and known personas; bad split refused | A8_ |
+| PC01-03 | Strategy | Plan checks | Near copies, angles, personas; seeds as hard limits, unknown audiences, retarget without audience, stages; split within 10 points; original checks still run | A8_ |
+| R12 | Owner | 109 down, up twice, down | Original goal / plan checks restored | run.sh |
+| FT10-11 | ads-sync | Lookalike helpers | 1-20% steps, bands, India; seed 100+; seeds only hints on new-people ad sets | meta_funnel.test.ts |
+| UI199-203 | Viewer / Admin | Personas and funnel plan UI | Personas with searches; edit; funnel plan; split must add up; Send to Strategy | ui_checks.mjs |
 | MR | ads-sync | Report settings, Insights query, rows, totals, cache, health rules | Meta's limits; filters; leads / video / rankings; disjoint reach; warnings | meta_reports.test |
 | UI170-180 | Viewer / Admin | Reports and Overview health | Live table, breakdown and value filter, compare, presets, drill-down, rankings, custom columns, saved view, CSV, phone width, health card | ui_checks |
 
