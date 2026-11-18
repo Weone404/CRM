@@ -140,6 +140,18 @@ give every creative a "persona" key and write it for that person; when CONTEXT.g
 When CONTEXT.goal.funnel.split is set, split the daily budget across prospecting / retarget / reengage ad sets within 10
 points of it (a stage whose audiences are not ready_in_meta may get 0; say so). Lookalikes (kind "lookalike") and seed lists
 go in include_audiences of prospecting ad sets ONLY with advantage_audience true: they are hints, not limits.
+PREMIUM AUDIENCE (CONTEXT.goal.premium true unless false; rules in CONTEXT.premium): pilot training costs tens of lakhs, so the
+plan must reach families who can fund it. Meta no longer lets anyone exclude people by interest or behaviour, so the filtering
+is done by (1) the offer: at least one creative states the published fee range in ₹ lakh (only from the website or brand facts,
+with its URL), as a fact about the course, never as a remark about the reader's money; (2) the form: every form asks how the
+training will be funded (for example "How do you plan to fund the training?" with "Family funded", "Education loan", "Still
+exploring"); (3) the people: students 18+ and parents (persona "parent", the decision makers; ad sets showing only parent ads
+keep a minimum age of 35, usually 38-55), with MBA / graduate career switchers where the goal wants them; under-18s are reached
+only through their parents; (4) the place: CONTEXT.premium.metros by default; PIN codes (type "zip", 6 digits) and household
+income (audience.income = option ids) only when CONTEXT.premium.targeting_support says Meta offers them, and only as a separate
+test ad set when the daily budget is ₹300 or more; (5) the signal: the CRM sends "qualified" leads back to Meta, so plan the
+switch to the quality goal as soon as the volume allows. A funnel share under ₹100 a day cannot be its own ad set: put it into
+the new-people ad set and say so.
 Reply with ONE JSON object and nothing else (no markdown fences).`;
 
 const META_PLAN = `Plan format (numbers are plain numbers in INR, never strings; keys are short ids you choose):
@@ -148,7 +160,8 @@ const META_PLAN = `Plan format (numbers are plain numbers in INR, never strings;
  "budget": {"monthly_total": number, "daily_total": number, "phases": [{"name": "Test", "days": "1-14", "daily": number, "focus": "..."}]},
  "campaigns": [{"key": "c1", "name": "...", "objective": "OUTCOME_LEADS", "budget_level": "adset"|"campaign", "daily_budget": number|null,
    "reason": "...", "adsets": [{"key": "a1", "name": "...", "daily_budget": number|null, "optimization": "LEAD_GENERATION"|"QUALITY_LEAD",
-     "audience": {"locations": [{"name": "Delhi", "type": "city", "radius_km": 40} | {"name": "India", "type": "country"} | {"name": "Haryana", "type": "region"}],
+     "audience": {"locations": [{"name": "Delhi", "type": "city", "radius_km": 40} | {"name": "India", "type": "country"} | {"name": "Haryana", "type": "region"} | {"name": "110021", "type": "zip"}],
+       "income": ["option ids from CONTEXT.premium.targeting_support.income.options, only when offered"],
        "age_min": 18+, "age_max": up to 65, "genders": "all"|"male"|"female", "interests": ["Meta interest names"], "advantage_audience": true|false,
        "funnel": "prospecting"|"retarget"|"reengage", "include_audiences": ["CONTEXT.audiences keys"], "exclude_audiences": ["CONTEXT.audiences keys"]},
      "placements": "advantage" | ["facebook_feed", "facebook_reels", "facebook_stories", "instagram_feed", "instagram_reels", "instagram_stories", "instagram_explore"],
@@ -188,11 +201,15 @@ do not research that again; research what the history cannot tell.
    festivals and other periods that raise costs or change intent in India.
 4. Website facts: fetch https://weoneaviation.in (and its course, fees, contact pages) and collect exact facts with their URL, and the
    privacy-policy URL if one exists.
-5. Competitors: search for pilot training / DGCA ground classes in Delhi NCR; list who advertises and their public angle and offer.
+5. Competitors: start from CONTEXT.competitors (the CRM's Competitor watch: their captured ads, how long each has run, angles, offers
+   and the gaps already found) and add what is public now: search for pilot training / DGCA ground classes in Delhi NCR and the metros,
+   their websites and Google's Ads Transparency Center pages. Ads running for many weeks are the ones that work for them: say which.
    The Meta Ad Library usually needs a browser; if it does not load, say so in "gaps" instead of guessing.
+6. Premium: the published fee range on weoneaviation.in (exact figures and URL) for the creatives that state the investment.
 Reply: {"summary": "8-12 lines", "facts": [{"fact": "...", "url": "...", "date": "..."}],
  "benchmarks": [{"metric": "...", "value": "...", "source": "url", "note": "sample, year, reliability"}],
- "timing": [{"when": "...", "what": "...", "source": "url"}], "competitors": [{"name": "...", "domain": "...", "angle": "..."}],
+ "timing": [{"when": "...", "what": "...", "source": "url"}], "competitors": [{"name": "...", "domain": "...", "angle": "...", "strongest": "their best-running idea", "gap": "what they miss that we can own"}],
+ "fees": [{"course": "...", "range": "₹... lakh", "url": "..."}],
  "guidance": [{"topic": "...", "rule": "...", "url": "..."}], "sources": [{"title": "...", "url": "https://..."}],
  "gaps": ["what you could not verify"]}`,
 
@@ -211,7 +228,8 @@ and patterns first) and INPUT.research (current Meta guidance, benchmarks, timin
 - Forms: higher intent when lead quality matters; 1-2 short qualifying questions (for example class 12 subjects, when they want to
   start, city) that a counsellor needs; never more than needed. Use CONTEXT.lead_archive answers to see what people say.
 - Creatives: finished ad text ready to paste, in CONTEXT.goal.languages; a visual brief a designer or editor can follow; build on
-  what won before (CONTEXT.patterns, CONTEXT.insights.ads text), and drop what lost.
+  what won before (CONTEXT.patterns, CONTEXT.insights.ads text), and drop what lost. Take the competitors' strongest ideas only where
+  they fit our facts, and aim at least one creative at a gap they leave (INPUT.research.competitors).
 - Rules: measurable when/then rules for pausing, scaling (about +20% at a time) and creative refresh (use the fatigue curve).
 - Include speed to lead (call within 5 minutes) and the CRM stages Meta receives in "measurement"; plan the switch to
   QUALITY_LEAD once the account has about 200 Meta leads a month.
@@ -231,6 +249,9 @@ CONTEXT, INPUT.research and INPUT.request with fresh eyes:
 - Goal: it aims at CONTEXT.goal and stays inside the budget limit; if the target is out of reach, the answer says so honestly.
 - Truth and policy: every claim is supported by CONTEXT.brand_facts or a research fact with a URL; nothing in CONTEXT.banned_claims;
   no personal-attribute wording, no job or salary promises, no fake urgency; under-18s are never targeted or addressed.
+- Premium (CONTEXT.goal.premium): the fee stated in a creative matches INPUT.research.fees or brand facts exactly; it is written as a
+  fact about the course, not about the reader's money; the funding question reads politely; parents are spoken to with what they
+  weigh (cost, safety, approvals, what is provided); PIN codes or income are used only if Meta offers them and the budget allows.
 - Practical: forms ask what a counsellor needs and not more; creatives are ready to use with clear visual briefs; rules are
   measurable; nothing contradicts the history's proven patterns without a stated reason.
 - For a change request (INPUT.request), it does what the owner asked and does not quietly change other things.

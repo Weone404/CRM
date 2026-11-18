@@ -3,6 +3,7 @@ import Icon from './icons';
 import { rpc, run, useLoad, Btn } from './adsKit';
 import { inr } from '../../../supabase/functions/_shared/meta_patterns.ts';
 import { showToast } from '../utils/toast';
+import AdsMetaCompetitors from './AdsMetaCompetitors';
 
 // CRM > Meta Ads > Strategy (migration 104). The owner sets a goal; the ADS agents (Researcher -> Strategist -> Reviewer)
 // write a full plan from the account's 37-month history, the CRM's results and current research. Every change is a new
@@ -431,5 +432,6 @@ export default function AdsMetaStrategy({ access, edge }) {
               {s.last_check && <div className="text-xs">Last week: {s.last_check.verdict.replace('_', ' ')}</div>}
             </button>);
         })}</div>}
+      <AdsMetaCompetitors />
     </div>);
 }

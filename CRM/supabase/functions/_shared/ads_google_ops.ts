@@ -201,11 +201,27 @@ export function conversionRow(cid: string, actionId: string | undefined, it: Con
   return { conversionAction: `customers/${cid}/conversionActions/${actionId}`, conversionDateTime: it.at, orderId: it.order_id,
     consent: { adUserData: "GRANTED" }, ...click };
 }
+// The same conversion for Google's Data Manager API (events:ingest). Since 15 June 2026 Google blocks offline conversion
+// uploads in the Google Ads API; this is the replacement. One event per request, so the answer is unambiguous.
+export function dmRequest(cid: string, loginId: string | null | undefined, actionId: string | undefined, it: ConvItem): Record<string, unknown> | null {
+  if (!actionId || !/^\d+$/.test(actionId) || !/^\d{10}$/.test(cid)) return null;
+  const click = it.gclid ? { gclid: it.gclid } : it.gbraid ? { gbraid: it.gbraid } : it.wbraid ? { wbraid: it.wbraid } : null;
+  const m = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})([+-]\d{2}:\d{2})$/.exec(it.at ?? "");
+  if (!click || !m) return null;
+  const login = loginId && /^\d{10}$/.test(loginId) ? loginId : cid;
+  return {
+    destinations: [{ operatingAccount: { accountType: "GOOGLE_ADS", accountId: cid }, loginAccount: { accountType: "GOOGLE_ADS", accountId: login },
+      productDestinationId: actionId }],
+    consent: { adUserData: "CONSENT_GRANTED" },
+    events: [{ adIdentifiers: click, eventTimestamp: `${m[1]}T${m[2]}${m[3]}`, transactionId: it.order_id, eventSource: "WEB" }],
+  };
+}
 // Google's answer -> what the CRM does next. Already-there counts as sent; "too recent" is tried again later; the rest is final.
 export function convertOutcome(err: string | null): { status: "sent" | "retry" | "failed"; error?: string } {
   if (!err) return { status: "sent" };
   const code = err.split(":")[0];
-  if (["CLICK_CONVERSION_ALREADY_EXISTS", "ORDER_ID_ALREADY_IN_USE"].includes(code)) return { status: "sent" };
+  if (["CLICK_CONVERSION_ALREADY_EXISTS", "ORDER_ID_ALREADY_IN_USE"].includes(code) || /already (exists|been (uploaded|received))|duplicate/i.test(err)) return { status: "sent" };
+  if (["UNAVAILABLE", "RESOURCE_EXHAUSTED", "DEADLINE_EXCEEDED", "INTERNAL", "ABORTED"].includes(code)) return { status: "retry", error: err };
   if (["TOO_RECENT_CONVERSION_ACTION", "TOO_RECENT_EVENT", "EVENT_NOT_FOUND", "CLICK_NOT_FOUND", "TOO_RECENT_CALL"].includes(code)) return { status: "retry", error: err };
   return { status: "failed", error: err };
 }

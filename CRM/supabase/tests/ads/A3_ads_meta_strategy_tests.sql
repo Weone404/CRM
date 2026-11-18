@@ -4,7 +4,7 @@
 RESET ROLE;
 CREATE OR REPLACE FUNCTION pg_temp.goal() RETURNS jsonb LANGUAGE sql AS $$
   SELECT '{"objective": "admissions", "target_per_month": 10, "monthly_budget": 31000, "courses": ["CPL", "DGCA Ground Classes"],
-           "locations": ["Delhi NCR"], "months": 1, "lead_to_admission_pct": 2, "privacy_url": "https://weoneaviation.in/privacy-policy"}'::jsonb $$;
+           "locations": ["Delhi NCR"], "months": 1, "lead_to_admission_pct": 2, "privacy_url": "https://weoneaviation.in/privacy-policy", "premium": false}'::jsonb $$;
 CREATE OR REPLACE FUNCTION pg_temp.plan(p_daily numeric DEFAULT 500) RETURNS jsonb LANGUAGE sql AS $$
   SELECT jsonb_build_object(
     'title', 'CPL admissions, Delhi NCR', 'summary', 'Two lead-form ad sets, higher-intent form, test then scale.',

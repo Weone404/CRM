@@ -88,7 +88,7 @@ const POS: Record<string, [string, string]> = {
   instagram_feed: ["instagram", "stream"], instagram_reels: ["instagram", "reels"], instagram_stories: ["instagram", "story"],
   instagram_explore: ["instagram", "explore"],
 };
-export interface Geo { countries: string[]; regions: { key: string }[]; cities: { key: string; radius?: number; distance_unit?: string }[] }
+export interface Geo { countries: string[]; regions: { key: string }[]; cities: { key: string; radius?: number; distance_unit?: string }[]; zips?: { key: string }[] }
 
 // Funnel audiences (migration 107): keys from the Funnel audience library -> Meta ids. Exclusions are hard limits in Meta;
 // included custom audiences are a hint under Advantage+ audience. New-people ad sets (funnel "prospecting", the default)
@@ -106,12 +106,15 @@ export function audienceSpec(a: any, aud?: Aud): { include: { id: string }[]; ex
   return { include: include.slice(0, 50).map((id) => ({ id })), exclude: [...ex].slice(0, 50).map((id) => ({ id })), missing };
 }
 
-export function targeting(a: any, geo: Geo, interests: { id: string; name: string }[], aud?: Aud) {
+// income: options Meta's targeting search returned for this account (migration 114), each with its own targeting field
+// ("type", e.g. "income"); they form their own flexible_spec entry, so they narrow the interests (AND), not widen them.
+export function targeting(a: any, geo: Geo, interests: { id: string; name: string }[], aud?: Aud, income: { id: string; name: string; type: string }[] = []) {
   const au = a.audience ?? {};
   const geo_locations: Record<string, unknown> = {};
   if (geo.countries.length) geo_locations.countries = geo.countries;
   if (geo.regions.length) geo_locations.regions = geo.regions;
   if (geo.cities.length) geo_locations.cities = geo.cities;
+  if (geo.zips?.length) geo_locations.zips = geo.zips;
   const t: Record<string, unknown> = { geo_locations };
   const amin = Math.max(18, Number(au.age_min) || 18), amax = Math.min(65, Math.max(amin, Number(au.age_max) || 65));
   if (au.advantage_audience === true) {
@@ -124,7 +127,12 @@ export function targeting(a: any, geo: Geo, interests: { id: string; name: strin
     if (au.genders === "female") t.genders = [2];
     t.targeting_automation = { advantage_audience: 0 };
   }
-  if (interests.length) t.flexible_spec = [{ interests: interests.slice(0, 25) }];
+  const flex: Record<string, unknown>[] = [];
+  if (interests.length) flex.push({ interests: interests.slice(0, 25) });
+  const inc: Record<string, { id: string; name: string }[]> = {};
+  for (const o of income) if (/^[a-z_]{3,40}$/.test(o.type) && o.id) (inc[o.type] ??= []).push({ id: o.id, name: o.name });
+  if (Object.keys(inc).length) flex.push(inc);
+  if (flex.length) t.flexible_spec = flex;
   const ca = audienceSpec(a, aud);
   if (ca.include.length) t.custom_audiences = ca.include;
   if (ca.exclude.length) t.excluded_custom_audiences = ca.exclude;
@@ -174,8 +182,9 @@ export const adParams = (w: BuildWork, label: string, adsetId: string, creativeI
   ({ name: nm(w, label).slice(0, 120), adset_id: adsetId, creative: J({ creative_id: creativeId }), status: "PAUSED" });
 
 // What to search for each plan location (Meta needs its own location keys).
-export function geoQueries(a: any): { name: string; type: "country" | "region" | "city"; radius_km?: number }[] {
-  return ((a.audience?.locations ?? []) as any[]).filter((l) => l?.name && ["country", "region", "city"].includes(l.type))
+export function geoQueries(a: any): { name: string; type: "country" | "region" | "city" | "zip"; radius_km?: number }[] {
+  return ((a.audience?.locations ?? []) as any[]).filter((l) => l?.name && ["country", "region", "city", "zip"].includes(l.type)
+      && (l.type !== "zip" || /^[1-9][0-9]{5}$/.test(String(l.name))))
     .map((l) => ({ name: String(l.name).slice(0, 80), type: l.type, ...(l.type === "city" && Number(l.radius_km) > 0 ? { radius_km: Math.min(80, Math.max(10, Number(l.radius_km))) } : {}) }));
 }
 const COUNTRY: Record<string, string> = { india: "IN", "united arab emirates": "AE", uae: "AE", nepal: "NP" };

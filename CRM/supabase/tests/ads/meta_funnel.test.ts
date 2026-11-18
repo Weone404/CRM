@@ -2,23 +2,27 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { audienceError, engagementRule, lookalikeParams, replaceBatches, seedReady, sizeOf } from "../../functions/_shared/meta_audience.ts";
-import { audienceSpec, targeting } from "../../functions/_shared/meta_build.ts";
+import { audienceSpec, geoQueries, targeting } from "../../functions/_shared/meta_build.ts";
 
 const ids = { page_id: "111222333", ig_id: "444555666", forms: ["900000001", "bad", "900000002"] };
 const h = (c: string) => c.repeat(64);
 
-test("FT01 lead-form audiences: one rule per form and per Facebook / Instagram source, 90 days at most", () => {
+test("FT01 lead-form audiences: one rule, one source type, every form (Meta: 5 rules max), 90 days at most", () => {
   const r = engagementRule({ source: "lead", event: "lead_generation_dropoff", days: 400 }, ids).rule as any;
   const rules = r.inclusions.rules;
-  assert.deepEqual(rules.length, 4);
-  assert.deepEqual(rules.map((x: any) => x.event_sources[0].type).sort(), ["ig_lead_generation", "ig_lead_generation", "lead", "lead"]);
-  assert.ok(rules.every((x: any) => x.retention_seconds === 90 * 86400 && x.filter.filters[0].value === "lead_generation_dropoff"));
+  assert.deepEqual(rules.length, 1);
+  assert.deepEqual(rules[0].event_sources, [{ id: "900000001", type: "lead" }, { id: "900000002", type: "lead" }]);
+  assert.ok(rules[0].retention_seconds === 90 * 86400 && rules[0].filter.filters[0].value === "lead_generation_dropoff");
+  const many = engagementRule({ source: "lead", event: "lead_generation_opened" }, { ...ids, forms: Array.from({ length: 36 }, (_, i) => String(900000100 + i)) }).rule as any;
+  assert.ok(many.inclusions.rules.length <= 5 && new Set(many.inclusions.rules.flatMap((x: any) => x.event_sources.map((e: any) => e.type))).size === 1);
 });
 
 test("FT02 Page, Instagram and messaged audiences; missing ids give a reason instead of a call", () => {
   assert.deepEqual((engagementRule({ source: "page", event: "page_engaged", days: 365 }, ids).rule as any).inclusions.rules[0].event_sources[0], { id: "111222333", type: "page" });
   const m = (engagementRule({ source: "page+ig", event: "messaged", days: 365 }, ids).rule as any).inclusions.rules;
-  assert.deepEqual(m.map((x: any) => x.filter.filters[0].value), ["page_messaged", "ig_user_messaged_business"]);
+  assert.deepEqual(m.map((x: any) => [x.event_sources[0].type, x.filter.filters[0].value]), [["ig_business", "ig_user_messaged_business"]]);
+  const pm = (engagementRule({ source: "page+ig", event: "messaged", days: 365 }, { ...ids, ig_id: null }).rule as any).inclusions.rules;
+  assert.deepEqual(pm.map((x: any) => x.filter.filters[0].value), ["page_messaged"]);
   assert.ok(/Instagram/.test(engagementRule({ source: "ig", event: "ig_business_profile_engaged" }, { ...ids, ig_id: null }).missing!));
   assert.ok(/lead forms/.test(engagementRule({ source: "lead", event: "lead_generation_opened" }, { ...ids, forms: [] }).missing!));
   assert.ok(/Unknown/.test(engagementRule({ source: "tiktok" }, ids).missing!));
@@ -102,9 +106,9 @@ test("FT09 website audiences use the Pixel: URL rules, the Lead event, all visit
   assert.ok(/Pixel/.test(engagementRule({ source: "pixel", days: 30 }, { ...ids, pixel_id: null }).missing!));
 });
 
-test("FT10 lookalikes: 1-20% in 1% steps, bands, India by default; seeds need 100+ people in Meta", () => {
+test("FT10 lookalikes: 1-20% in 1% steps, bands, no country (Meta 2026: ad set locations); seeds need 100+ people in Meta", () => {
   const p = lookalikeParams({ seed: "crm_qualified_365", starting_ratio: 0.01, ratio: 0.03 }, "2385", "CRM · LAL", "why")!.params!;
-  assert.deepEqual([p.subtype, p.origin_audience_id, JSON.parse(p.lookalike_spec)], ["LOOKALIKE", "2385", { type: "similarity", ratio: 0.03, country: "IN", starting_ratio: 0.01 }]);
+  assert.deepEqual([p.subtype, p.origin_audience_id, JSON.parse(p.lookalike_spec)], ["LOOKALIKE", "2385", { type: "similarity", ratio: 0.03, starting_ratio: 0.01 }]);
   assert.ok(/1% to 20%/.test(lookalikeParams({ ratio: 0.25 }, "1", "n", "").problem!));
   assert.ok(/1% to 20%/.test(lookalikeParams({ ratio: 0.015 }, "1", "n", "").problem!));
   assert.ok(/start below/.test(lookalikeParams({ ratio: 0.02, starting_ratio: 0.02 }, "1", "n", "").problem!));
@@ -145,4 +149,13 @@ test("FT13 Meta split test: equal shares, ad sets or campaigns, starts no earlie
     cells: [{ name: "A", ids: ["1"] }, { name: "B", ids: ["2"] }, { name: "C", ids: ["3"] }] }, 1795000000);
   assert.deepEqual([p.type, JSON.parse(p.cells).map((c: any) => [c.treatment_percentage, c.adsets[0]])], ["SPLIT_TEST", [[33, "1"], [33, "2"], [33, "3"]]]);
   assert.ok(Number(p.start_time) >= 1795000600 && Number(p.end_time) > Number(p.start_time));
+});
+
+test("FT14 premium: PIN codes go to geo_locations.zips; offered income options narrow the interests (own flexible_spec entry)", () => {
+  assert.deepEqual(geoQueries({ audience: { locations: [{ type: "zip", name: "110021" }, { type: "zip", name: "11002" }, { type: "city", name: "Delhi" }] } }).map((q) => q.type), ["zip", "city"]);
+  const t = targeting({ audience: { age_min: 18, advantage_audience: false } }, { countries: [], regions: [], cities: [], zips: [{ key: "IN:110021" }] },
+    [{ id: "6003", name: "Aviation" }], undefined, [{ id: "6002714898572", name: "Top 10%", type: "income" }, { id: "x", name: "bad", type: "Bad Type!" }]) as any;
+  assert.deepEqual(t.geo_locations, { zips: [{ key: "IN:110021" }] });
+  assert.deepEqual(t.flexible_spec, [{ interests: [{ id: "6003", name: "Aviation" }] }, { income: [{ id: "6002714898572", name: "Top 10%" }] }]);
+  assert.equal((targeting({ audience: {} }, { countries: ["IN"], regions: [], cities: [] }, []) as any).flexible_spec, undefined);
 });

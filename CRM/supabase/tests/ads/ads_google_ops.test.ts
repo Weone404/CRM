@@ -208,3 +208,28 @@ Deno.test("snapshot: places get names, and one failing query does not lose the o
   eq([s.by_city_30d[0].place, s.locations[0].place], ["New Delhi,Delhi,India", "New Delhi,Delhi,India"], "names");
   eq(["by_hour_30d", "by_weekday_30d", "by_device_30d", "by_city_30d"].every((k) => Array.isArray(s[k])), true, "new views are present");
 });
+
+import { dmRequest } from "../../functions/_shared/ads_google_ops.ts";
+Deno.test("Data Manager: one event per request, RFC 3339 time, the manager as login account, refused without click id or action", () => {
+  const it = { id: 1, event: "enquiry", at: "2026-11-13 14:49:49+05:30", order_id: "L1:enquiry", gclid: "Cj0abc", gbraid: "0AAA" };
+  eq(dmRequest(CID, "9998887776", "777", it), {
+    destinations: [{ operatingAccount: { accountType: "GOOGLE_ADS", accountId: CID }, loginAccount: { accountType: "GOOGLE_ADS", accountId: "9998887776" }, productDestinationId: "777" }],
+    consent: { adUserData: "CONSENT_GRANTED" },
+    events: [{ adIdentifiers: { gclid: "Cj0abc" }, eventTimestamp: "2026-11-13T14:49:49+05:30", transactionId: "L1:enquiry", eventSource: "WEB" }] }, "full request");
+  eq((dmRequest(CID, null, "777", { ...it, gclid: null }) as any).destinations[0].loginAccount.accountId, CID, "no manager: the account itself");
+  eq((dmRequest(CID, null, "777", { ...it, gclid: null }) as any).events[0].adIdentifiers, { gbraid: "0AAA" }, "gbraid");
+  eq([dmRequest(CID, null, "777", { ...it, gclid: null, gbraid: null }), dmRequest(CID, null, undefined, it), dmRequest(CID, null, "777", { ...it, at: "13 Nov" })], [null, null, null], "refused");
+});
+
+Deno.test("ingestEvents: accepted, rejected with Google's status, a missing scope stops the run with the fix", async () => {
+  const mk = (resp: () => Response) => new GoogleAds({ clientId: "c", clientSecret: "s", refreshToken: "r", version: "v26" },
+    (async (url: string) => url.includes("oauth2") ? new Response(JSON.stringify({ access_token: "t" })) : resp()) as any);
+  eq(await mk(() => new Response("{}")).ingestEvents({}), null, "accepted");
+  eq(await mk(() => new Response(JSON.stringify({ error: { status: "INVALID_ARGUMENT", message: "bad gclid" } }), { status: 400 })).ingestEvents({}), "INVALID_ARGUMENT: bad gclid", "rejected");
+  let msg = "";
+  try { await mk(() => new Response(JSON.stringify({ error: { status: "PERMISSION_DENIED", message: "Request had insufficient authentication scopes." } }), { status: 403 })).ingestEvents({}); }
+  catch (e) { msg = (e as Error).message; }
+  eq(/datamanager/.test(msg), true, "scope message");
+  eq(convertOutcome("UNAVAILABLE: try later").status, "retry", "transient");
+  eq(convertOutcome("INVALID_ARGUMENT: duplicate transaction").status, "sent", "duplicate is sent");
+});

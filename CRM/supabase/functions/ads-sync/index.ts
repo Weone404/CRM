@@ -34,7 +34,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { asUser, cors, cronOk, json, HttpError, rpc } from "../_shared/ads_deno.ts";
 import { AdsError, GoogleAds, MetaAds, dateRange, discover, executeOne, scrubSecrets, todayIn, verify, type Platforms, type WorkItem } from "../_shared/ads_core.ts";
-import { buildOps, conversionRow, convertOutcome, executeGoogleOp, googleSnapshot, resultNames, type ConvItem, type GoogleOp } from "../_shared/ads_google_ops.ts";
+import { buildOps, convertOutcome, dmRequest, executeGoogleOp, googleSnapshot, resultNames, type ConvItem, type GoogleOp } from "../_shared/ads_google_ops.ts";
 import { ADS_BUILD, buildEvent, crmEvent, ctwaPayload, deployState, EventError, isTestLead, metaLeadPayload, organicPayload, serializeEvents, type CapiItem } from "../_shared/ads_meta.ts";
 import { URL_ } from "../_shared/ads_deno.ts";
 import { BREAKDOWNS, monthChunks, namesFromDays, parseAd, parseAdDay, parseAdset, parseBreakdown, parseCampaign, monthsBack, type DayRow } from "../_shared/meta_history.ts";
@@ -224,11 +224,14 @@ async function convert(s: Record<string, string>, t0: number) {
     let sent = 0, later = 0, failed = 0;
     for (const it of w.items ?? []) {
       if (Date.now() - t0 > DEADLINE_MS) break;
-      const row = conversionRow(cid, actions[it.event], it);
+      const row = dmRequest(cid, w.account.login_customer_id, actions[it.event], it);   // Data Manager API (Google Ads API uploads blocked since 15 June 2026)
       if (!row) continue;
       let out: { status: "sent" | "retry" | "failed"; error?: string };
-      try { out = convertOutcome(await g.uploadClickConversion(cid, row)); }
-      catch (e) { out = { status: "retry", error: (e as Error).message }; }
+      try { out = convertOutcome(await g.ingestEvents(row)); }
+      catch (e) {
+        if (e instanceof AdsError && e.status === "auth_required") return { items: sent, status: "error", detail: scrubSecrets(e.message, s) };
+        out = { status: "retry", error: (e as Error).message };
+      }
       await rpc("svc_ads_conversion_finish", { p_id: it.id, p_status: out.status, p_error: out.error ? scrubSecrets(out.error, s).slice(0, 400) : null });
       if (out.status === "sent") sent++; else if (out.status === "retry") later++; else failed++;
     }
@@ -512,6 +515,7 @@ async function metaBuild(s: Record<string, string>, strategyId: number, t0: numb
     const { p } = platforms(s);
     if (!p.meta) return { items: 0, status: "error", detail: "Meta access token is not set" };
     const w = await rpc("svc_ads_meta_build_work", { p_id: strategyId }) as BuildWork | null;
+    if (w) (w as any).targeting_support = await rpc("svc_ads_meta_targeting_get").catch(() => ({}));
     if (!w) return { items: 0, status: "error", detail: "Nothing to create: approve the plan and press Create in Meta first." };
     if (!w.goal?.privacy_url && (w.plan?.forms ?? []).some((f: any) => !w.steps[`form:${f.key}`]?.id)) {
       await rpc("svc_ads_meta_build_end", { p_id: strategyId, p_status: "error", p_detail: "Add the privacy policy link to the goal (Meta requires it on lead forms)." });
@@ -551,23 +555,29 @@ async function metaBuild(s: Record<string, string>, strategyId: number, t0: numb
           id = await meta.create(`${act}/campaigns`, campaignParams(w, find("campaign", k1)));
         } else if (kind === "adset") {
           const a = find("adset", k1);
-          const geo: Geo = { countries: [], regions: [], cities: [] };
+          const geo: Geo = { countries: [], regions: [], cities: [], zips: [] };
           const notFound: string[] = [];
           for (const q of geoQueries(a)) {
             if (q.type === "country" && countryCode(q.name)) { geo.countries.push(countryCode(q.name)!); continue; }
-            const hit = bestMatch(await meta.search({ type: "adgeolocation", q: q.name, location_types: JSON.stringify([q.type]) }), q.name) as any;
+            const hit = q.type === "zip"
+              ? ((await meta.search({ type: "adgeolocation", q: q.name, location_types: JSON.stringify(["zip"]), country_code: "IN" })) as any[]).find((r) => String(r.key ?? "").endsWith(q.name)) ?? null
+              : bestMatch(await meta.search({ type: "adgeolocation", q: q.name, location_types: JSON.stringify([q.type]) }), q.name) as any;
             if (!hit?.key) { notFound.push(q.name); continue; }
+            if (q.type === "zip") { geo.zips!.push({ key: String(hit.key) }); continue; }
             if (q.type === "country") geo.countries.push(String(hit.country_code ?? hit.key));
             else if (q.type === "region") geo.regions.push({ key: String(hit.key) });
             else geo.cities.push({ key: String(hit.key), ...(q.radius_km ? { radius: q.radius_km, distance_unit: "kilometer" } : {}) });
           }
-          if (!geo.countries.length && !geo.regions.length && !geo.cities.length) throw new AdsError("sync_failed", `Meta did not find the locations: ${notFound.join(", ")}`);
+          if (!geo.countries.length && !geo.regions.length && !geo.cities.length && !geo.zips!.length) throw new AdsError("sync_failed", `Meta did not find the locations: ${notFound.join(", ")}`);
           const interests: { id: string; name: string }[] = [];
           for (const name of (a.audience?.interests ?? []).slice(0, 15)) {
             const hit = bestMatch(await meta.search({ type: "adinterest", q: String(name) }), String(name)) as any;
             if (hit?.id) interests.push({ id: String(hit.id), name: String(hit.name) });
           }
-          id = await meta.create(`${act}/adsets`, adsetParams(w, a._c, a, ids[`campaign:${a._c.key}`], targeting(a, geo, interests, { map: (w as any).audiences ?? {}, defaults: (w as any).default_excludes ?? [] }), today));
+          // household income: only the options Meta offered this account (saved by the targeting check)
+          const offered = ((w as any).targeting_support?.income?.options ?? []) as { id: string; name: string; type: string }[];
+          const income = ((a.audience?.income ?? []) as string[]).map((k) => offered.find((o) => o.id === String(k))).filter(Boolean) as { id: string; name: string; type: string }[];
+          id = await meta.create(`${act}/adsets`, adsetParams(w, a._c, a, ids[`campaign:${a._c.key}`], targeting(a, geo, interests, { map: (w as any).audiences ?? {}, defaults: (w as any).default_excludes ?? [] }, income), today));
           const missingAud = audienceSpec(a, { map: (w as any).audiences ?? {}, defaults: [] }).missing;
           if (notFound.length || missingAud.length) note = [notFound.length ? `Not found by Meta, left out: ${notFound.join(", ")}` : "",
             missingAud.length ? `Audiences not ready in Meta yet, left out: ${missingAud.join(", ")}` : ""].filter(Boolean).join("; ");
@@ -802,8 +812,24 @@ async function metaAudiences(s: Record<string, string>, t0: number) {
       }
     }
     await rpc("svc_ads_meta_audiences_done", { p_summary: { ok, errors: bad } });
+    const support = await targetingSupport(m).catch((e) => ({ error: scrubSecrets((e as Error).message, s).slice(0, 200) }));
+    await rpc("svc_ads_meta_targeting_save", { p: support }).catch(() => null);
     return { items: ok, status: bad && !ok ? "error" : "ok", detail: `${ok} audience(s) up to date${bad ? `, ${bad} with a problem` : ""}` };
   });
+}
+
+// What Meta's own targeting search offers this account for India (migration 114): PIN codes and household income.
+// The plan checks allow PIN codes and income only when this answered yes, and only the exact options listed here.
+async function targetingSupport(m: MetaAds) {
+  const pin = "110021";
+  const zipRows = await m.search({ type: "adgeolocation", q: pin, location_types: JSON.stringify(["zip"]), country_code: "IN" }) as any[];
+  const zipHit = zipRows.find((r) => String(r.key ?? "").endsWith(pin) && (!r.country_code || r.country_code === "IN"));
+  const cats = await m.search({ type: "adTargetingCategory", class: "income", limit: "50" }).catch(() => []) as any[];
+  const options = cats.filter((r) => r?.id && r?.name).slice(0, 20)
+    .map((r) => ({ id: String(r.id), name: String(r.name).slice(0, 80), type: String(r.type ?? "income"), path: Array.isArray(r.path) ? r.path.slice(0, 4).map(String) : [],
+      audience: Number(r.audience_size_upper_bound ?? r.audience_size ?? 0) || null }));
+  return { zip: { ok: !!zipHit, sample: zipHit ? String(zipHit.key) : null, detail: zipHit ? `Meta found PIN ${pin} (${zipHit.name ?? ""})` : `Meta's location search found no Indian PIN code for ${pin}` },
+           income: { ok: options.length > 0, options, detail: options.length ? `${options.length} income option(s) offered; Meta does not say which countries they cover` : "No household-income options offered to this account" } };
 }
 
 // ------------------------------------------------------------------ Meta Ads > Funnel > Website signals (migration 108)

@@ -179,6 +179,26 @@ export class GoogleAds {
     const e = (pf.details ?? []).flatMap((d: any) => d.errors ?? [])[0];
     return `${e ? Object.values(e.errorCode ?? {})[0] ?? "ERROR" : "ERROR"}: ${e?.message ?? pf.message ?? "not accepted"}`.slice(0, 400);
   }
+  // Data Manager API (offline conversions since Google blocked them in the Google Ads API on 15 June 2026). Same sign-in,
+  // but the refresh token needs the datamanager scope. Returns null when Google took it, otherwise "STATUS: message".
+  async ingestEvents(body: unknown): Promise<string | null> {
+    let r: Response;
+    try {
+      r = await this.fetchFn("https://datamanager.googleapis.com/v1/events:ingest", { method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${await this.accessToken()}` }, body: JSON.stringify(body) });
+    } catch (e) {
+      throw new AdsError("unavailable", `Network error talking to Google Data Manager: ${String(e).slice(0, 200)}`, 0, true);
+    }
+    const b = await readJson(r);
+    if (r.ok) return null;
+    const msg = String(b?.error?.message ?? r.status);
+    if (r.status === 401 || (r.status === 403 && /scope|insufficient|has not been used|disabled/i.test(msg))) {
+      throw new AdsError("auth_required", /has not been used|disabled/i.test(msg)
+        ? "Turn on the Data Manager API in the Google Cloud project of the OAuth client, then try again."
+        : "The Google sign-in cannot send conversions yet: re-create the Google Ads refresh token with the extra scope https://www.googleapis.com/auth/datamanager (ADS > Settings).", r.status);
+    }
+    return `${b?.error?.status ?? `HTTP_${r.status}`}: ${msg}`.slice(0, 400);
+  }
   // Keyword Planner ideas (needs Basic access).
   async keywordIdeas(customerId: string, seeds: string[], geoIds: string[], languageId = "1000"): Promise<any[]> {
     const b = await this.call(`customers/${customerId}:generateKeywordIdeas`, {

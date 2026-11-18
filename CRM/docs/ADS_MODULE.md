@@ -94,7 +94,7 @@ Nothing talks to Google or Meta until these are done. Until then the UI shows "N
    in Google Cloud, enable the Google Ads API on a project and check its access level on the Google Ads API page
    (a new project has Test access, which cannot open live accounts; Explorer or Basic can; Basic needs brand
    verification). Create an OAuth client in that project, then a refresh token (scope
-   `https://www.googleapis.com/auth/adwords`) signed in as a Google user who can open the ad accounts.
+   `https://www.googleapis.com/auth/adwords` and, for sending conversions through the Data Manager API since 15 June 2026, `https://www.googleapis.com/auth/datamanager`) signed in as a Google user who can open the ad accounts.
    Add the manager ID if accounts sit under an MCC.
 5. **Meta**: a System User access token (Business Settings) with `ads_read`; add `ads_management` to change budgets/status.
    The app secret is optional (enables `appsecret_proof`).

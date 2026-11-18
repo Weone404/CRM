@@ -20,10 +20,11 @@ export function engagementRule(spec: any, ids: Ids): { rule?: unknown; missing?:
   const days = Math.max(1, Math.min(MAX_DAYS[source] ?? 365, Number(spec?.days) || 30));
   const event = String(spec?.event ?? "");
   if (source === "lead") {
-    const forms = ids.forms.filter((f) => /^\d{5,25}$/.test(f)).slice(0, 25);
+    // Meta allows 5 rules per audience and one type of event source per rule: one rule listing every form
+    // (type "lead" covers lead forms opened on Facebook and Instagram).
+    const forms = ids.forms.filter((f) => /^\d{5,25}$/.test(f)).slice(0, 50);
     if (!forms.length) return { missing: "No lead forms found on the Page yet (Setup > lead forms)" };
-    const sources = forms.flatMap((f) => [{ id: f, type: "lead" }, { id: f, type: "ig_lead_generation" }]);
-    return { rule: { inclusions: { operator: "or", rules: sources.map((s) => rule([s], event, days)) } } };
+    return { rule: { inclusions: { operator: "or", rules: [rule(forms.map((f) => ({ id: f, type: "lead" })), event, days)] } } };
   }
   if (source === "page") {
     if (!ids.page_id) return { missing: "The Facebook Page is not set (Setup > Page)" };
@@ -43,11 +44,10 @@ export function engagementRule(spec: any, ids: Ids): { rule?: unknown; missing?:
     return { rule: { inclusions: { operator: "or", rules } } };
   }
   if (source === "page+ig" && event === "messaged") {
-    const rules = [];
-    if (ids.page_id) rules.push(rule([{ id: ids.page_id, type: "page" }], "page_messaged", days));
-    if (ids.ig_id) rules.push(rule([{ id: ids.ig_id, type: "ig_business" }], "ig_user_messaged_business", days));
-    if (!rules.length) return { missing: "The Facebook Page is not set (Setup > Page)" };
-    return { rule: { inclusions: { operator: "or", rules } } };
+    // one type of event source per audience: Instagram DMs (the main channel) when linked, otherwise Page messages
+    if (ids.ig_id) return { rule: { inclusions: { operator: "or", rules: [rule([{ id: ids.ig_id, type: "ig_business" }], "ig_user_messaged_business", days)] } } };
+    if (ids.page_id) return { rule: { inclusions: { operator: "or", rules: [rule([{ id: ids.page_id, type: "page" }], "page_messaged", days)] } } };
+    return { missing: "The Facebook Page is not set (Setup > Page)" };
   }
   return { missing: `Unknown audience source ${source}` };
 }
@@ -81,15 +81,15 @@ export const sizeOf = (b: any) => ({
 });
 
 // Lookalikes (migration 109): Meta needs at least 100 people in the seed (1,000+ gives steadier results). Ratio 1-20% in
-// 1% steps; starting_ratio makes a band (1-3%). Country is where the lookalike is found.
+// 1% steps; starting_ratio makes a band (1-3%). Meta no longer takes country / location_spec (2026): a lookalike
+// delivers to the locations of the ad set that uses it.
 export const SEED_MIN = 100;
 export function lookalikeParams(spec: any, seedId: string, name: string, why: string): { params?: Record<string, string>; problem?: string } {
   const ratio = Number(spec?.ratio), start = spec?.starting_ratio === undefined ? null : Number(spec.starting_ratio);
   const okR = (r: number) => Number.isFinite(r) && r >= 0.01 && r <= 0.2 && Math.abs(r * 100 - Math.round(r * 100)) < 1e-9;
   if (!okR(ratio)) return { problem: "Lookalike size must be 1% to 20% in 1% steps" };
   if (start !== null && (!okR(start) && start !== 0 || start >= ratio)) return { problem: "The band must start below its end (for example 1% to 3%)" };
-  const country = /^[A-Z]{2}$/.test(String(spec?.country ?? "")) ? String(spec.country) : "IN";
-  const ls: Record<string, unknown> = { type: "similarity", ratio, country };
+  const ls: Record<string, unknown> = { type: "similarity", ratio };
   if (start) ls.starting_ratio = start;
   return { params: { name, description: why.slice(0, 300), subtype: "LOOKALIKE", origin_audience_id: seedId, lookalike_spec: JSON.stringify(ls) } };
 }
