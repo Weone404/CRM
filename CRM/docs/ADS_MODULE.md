@@ -143,6 +143,24 @@ WhatsApp reporting needs Advanced Access to `whatsapp_business_manage_events` (A
 
 Tests: `run.sh` A0_ (MS01–MS35 + R03 rollback), `ads_meta.test.ts` (25), `ui_checks.mjs` UI09/09c, UI120–UI141.
 
+## Meta Ads > Funnel > Website signals and agent funnel context (migration 108, 2026-11-18)
+
+- Search Console (`searchAnalytics.query`, by query and page) and GA4 (Data API `runReport`: landing pages, channels,
+  source / medium, cities, events) read by ads-sync job `site_signals` (nightly 03:20 IST, cron `crm-ads-site-signals`, or
+  "Check now"). Totals only: 28 days and the 28 before (Search Console ends 3 days back for its lag). Stored in
+  `ads_site_row`. Sign-in: Vault secret `GOOGLE_SITE_REFRESH_TOKEN` (scopes webmasters.readonly + analytics.readonly) with
+  the Google Ads OAuth client; Admin sets `site_gsc_url` (sc-domain:... or https://.../) and `site_ga4_property` (digits).
+- Search intent topics (`ads_site_topic`, editable regex per topic), rising searches (1.5x impressions, 20+), landing pages
+  joined across both tools, channels, cities, website funnel (sessions, form_start, form_submit / generate_lead, key events).
+- The job also finds the Meta Pixel on the ad account (`meta_pixel`: id, last fired, firing in 7 days). Website audiences
+  (kind `website`): fees / cost page viewers 30 days, course pages 60 days, any visit 30 days, Lead event 180 days
+  (excluded from new-people ads by default). Rules use the Pixel, url / event `i_contains`, 180 days at most.
+- Strategy agents: ads-agents adds `svc_ads_meta_strategy_extra()` to the Meta context (funnel 90 days, audience library
+  with ready / size, location verdicts, website signals); the prompts now ask for a full-funnel plan (prospecting, retarget,
+  reengage) using audience keys, exclusions and search-intent angles. Funnel and location bodies moved to
+  `crm_private.ads_meta_funnel_data` / `ads_meta_geo_data` (the APIs wrap them).
+- Build 2026-11-18.meta8. Rollback: `108_ads_site_signals_down.sql`.
+
 ## Meta Ads > Funnel: map, audience library, location focus (migration 107, 2026-11-18)
 
 Why: in 2026 Meta treats only location, minimum age, languages and custom audience exclusions as hard limits; age, gender,

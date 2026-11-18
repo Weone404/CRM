@@ -57,7 +57,7 @@ Deno.serve(async (req) => {
   const path = new URL(req.url).pathname.replace(/^.*\/ads-intake/, "").replace(/\/+$/, "");
   try {
     if (req.method === "POST" && path === "/enquiry") return await enquiry(req);
-    if (req.method === "GET" && path === "/version") return new Response(JSON.stringify({ build: "2026-11-18.meta7" }), { status: 200, headers: { "Content-Type": "application/json" } });
+    if (req.method === "GET" && path === "/version") return new Response(JSON.stringify({ build: "2026-11-18.meta8" }), { status: 200, headers: { "Content-Type": "application/json" } });
     return json(req, 404, { detail: "Not found" });
   } catch (e) {
     console.error("ads-intake error", String(e));

@@ -383,7 +383,7 @@ t = await page.getByTestId('funnel-map').innerText();
 ok(['Saw an ad', 'Clicked', 'Became a lead', 'Called', 'Qualified', 'Admission'].every((x) => t.includes(x)) && /Spend ₹/.test(t)
   && (await page.locator('[data-testid^="stage-"]').count()) === 6, 'UI188 Meta Ads has a Funnel tab with the six-stage funnel map, spend and costs');
 t = await page.getByTestId('audience-library').innerText();
-ok((await page.getByTestId('audience-table').locator('tbody tr').count()) === 12 && /Opened a lead form, did not send it/.test(t) && /CRM: admissions/.test(t)
+ok((await page.getByTestId('audience-table').locator('tbody tr').count()) === 16 && /Website: viewed fees or cost pages/.test(t) && /Opened a lead form, did not send it/.test(t) && /CRM: admissions/.test(t)
   && /not in Meta yet/.test(t) && /people can be sent/.test(t), 'UI189 the audience library lists warm, hot, lead, qualified and admission audiences with what can be sent');
 ok(await page.getByLabel('Exclude CRM: admissions (all time) from new-people ads').isChecked() && !(await page.getByLabel('Keep audiences in Meta').isChecked()),
   'UI190 admissions are excluded from new-people ads by default; audiences start switched off');
@@ -401,6 +401,22 @@ ok(ex && ex.args.p_key === 'crm_hot_90' && ex.args.p_exclude_default === true, '
 await page.getByTestId('region-table').waitFor({ timeout: 15000 });
 t = await page.getByTestId('location-focus').innerText();
 ok(/Delhi/.test(t) && /Rajasthan/.test(t) && /(Focus|Keep|Reduce|Cut|Too few leads)/.test(t) && /hard limit/.test(t), 'UI193 location focus ranks states by qualified leads with a verdict');
+await page.getByTestId('website-signals').waitFor({ timeout: 15000 });
+t = await page.getByTestId('website-signals').innerText();
+ok(/Fees and cost/.test(t) && /After 12th/.test(t) && /DGCA exams/.test(t) && /\+50%/.test(t) && /pilot training fees delhi/.test(t),
+  'UI195 Website signals turn Google searches into intent topics with change and top searches');
+ok(/how to become pilot after 12th/.test(await page.getByTestId('rising').innerText()) && /firing/.test(await page.getByTestId('pixel-status').innerText())
+  && /Site sessions/.test(t) && /Form starts/.test(t), 'UI196 rising searches, the website funnel and whether the Meta Pixel fires');
+await page.getByTestId('site-settings').locator('summary').click();
+await page.getByLabel('GA4 property ID').fill('987654321');
+await page.getByTestId('site-settings').getByRole('button', { name: 'Save' }).click();
+await page.waitForTimeout(800);
+const ss = (await calls()).filter((c) => c.fn === 'api_ads_site_settings_save').pop();
+ok(ss && ss.args.p_ga4_property === '987654321' && ss.args.p_gsc_url === 'sc-domain:weoneaviation.in', 'UI197 Admin connects Search Console and GA4');
+await page.getByTestId('website-signals').getByRole('button', { name: 'Check now' }).click();
+await page.waitForTimeout(1200);
+ok((await calls()).some((c) => c.fn === 'ads-sync' && c.args.jobs?.includes('site_signals')) && /Last check/.test(await page.getByTestId('pixel-status').innerText()),
+  'UI198 Check now reads Search Console, GA4 and the Pixel');
 await page.setViewportSize({ width: 390, height: 844 });
 await page.waitForTimeout(600);
 const ovf = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -437,10 +453,11 @@ t = await page.getByTestId('sql-101').innerText();
 ok(/101: Meta lead forms, part 2/.test(t) && (await page.locator('[data-testid="sql-102"]').count()) === 1 && (await page.locator('[data-testid="sql-103"]').count()) === 1
   && (await page.locator('[data-testid="sql-104"]').count()) === 1 && (await page.locator('[data-testid="sql-105"]').count()) === 1
   && (await page.locator('[data-testid="sql-106"]').count()) === 1
-  && (await page.locator('[data-testid="sql-107"]').count()) === 1 && /INSERT INTO public\.ads_config \(key, value\) VALUES \('ads_schema', '101'\)/.test(t)
+  && (await page.locator('[data-testid="sql-107"]').count()) === 1
+  && (await page.locator('[data-testid="sql-108"]').count()) === 1 && /INSERT INTO public\.ads_config \(key, value\) VALUES \('ads_schema', '101'\)/.test(t)
   && !(await page.locator('[data-testid="sql-100"]').count()) && /supabase\.com\/dashboard\/project\/.+\/sql\/new/.test(await page.getByTestId('step-meta-db').innerHTML()),
-  'UI134b only the missing files (101-107) are shown, complete and ready to copy, with a link to the SQL editor');
-await fetch(`${API}/__schema/107`);
+  'UI134b only the missing files (101-108) are shown, complete and ready to copy, with a link to the SQL editor');
+await fetch(`${API}/__schema/108`);
 await page.getByRole('button', { name: 'Check all now' }).click();
 await page.waitForTimeout(800);
 ok(await page.getByTestId('step-meta-db').getAttribute('data-done') === 'yes', 'UI134c after the update the database step is done again');

@@ -3,11 +3,11 @@
 // "event"); lead-ad audiences keep 90 days at most, Page and Instagram 730. CRM lists are customer-file audiences
 // (subtype CUSTOM, customer_file_source USER_PROVIDED_ONLY) filled with the Replace API in batches.
 
-export const MAX_DAYS: Record<string, number> = { lead: 90, ig: 730, page: 730, "page+ig": 730 };
+export const MAX_DAYS: Record<string, number> = { lead: 90, ig: 730, page: 730, "page+ig": 730, pixel: 180 };
 export const BATCH = 10000;
 export const PREFIX = "CRM · ";
 
-export interface Ids { page_id: string | null; ig_id: string | null; forms: string[] }
+export interface Ids { page_id: string | null; ig_id: string | null; forms: string[]; pixel_id?: string | null }
 type Src = { id: string; type: string };
 const rule = (sources: Src[], event: string, days: number) => ({
   event_sources: sources, retention_seconds: days * 86400,
@@ -32,6 +32,15 @@ export function engagementRule(spec: any, ids: Ids): { rule?: unknown; missing?:
   if (source === "ig") {
     if (!ids.ig_id) return { missing: "No Instagram professional account is linked to the Page" };
     return { rule: { inclusions: { operator: "or", rules: [rule([{ id: ids.ig_id, type: "ig_business" }], event, days)] } } };
+  }
+  if (source === "pixel") {   // website visitors (migration 108): needs the Meta Pixel on the site
+    if (!ids.pixel_id) return { missing: "No Meta Pixel is firing on the website yet (Funnel > Website signals)" };
+    const src = [{ id: ids.pixel_id, type: "pixel" }];
+    const f = (field: string, value: string) => ({ event_sources: src, retention_seconds: days * 86400,
+      filter: { operator: "and", filters: [{ field, operator: "i_contains", value }] } });
+    const urls = (Array.isArray(spec?.url_any) ? spec.url_any : []).map(String).filter((u: string) => u.length > 0 && u.length <= 100).slice(0, 10);
+    const rules = event ? [f("event", event)] : urls.length ? urls.map((u: string) => f("url", u)) : [f("url", "")];
+    return { rule: { inclusions: { operator: "or", rules } } };
   }
   if (source === "page+ig" && event === "messaged") {
     const rules = [];

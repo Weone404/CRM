@@ -42,6 +42,11 @@ Deno.serve(async (req) => {
           return reply(200, { run: null });
         }
         job.context = String(job.run?.role ?? "").startsWith("meta_") ? trimMetaContext(job.context) : trimContext(job.context);
+        // Meta roles also get the funnel, audience library, location verdicts and website signals (migration 108)
+        if (String(job.run?.role ?? "").startsWith("meta_") && job.context && typeof job.context === "object") {
+          const extra = await rpc("svc_ads_meta_strategy_extra").catch(() => null);
+          if (extra && typeof extra === "object") job.context = { ...job.context, ...extra };
+        }
         return reply(200, job);
       }
       case "finish": {

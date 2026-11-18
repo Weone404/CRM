@@ -266,6 +266,12 @@ changes, allowed bids and budget inside the spend limits, and has no Mac that st
 | R10 | Owner | 107 down, then up | Rolls back and re-applies | run.sh |
 | FT01-05 | ads-sync | Audience helpers | Lead-form / Page / Instagram / messaged rules; missing ids give reasons; hashed Replace batches; plain errors; build exclusions | meta_funnel.test.ts |
 | UI188-194 | Viewer / Admin | Funnel UI | Funnel map; audience library; default exclusions; turn on and update; pick exclusions; location focus; phone width | ui_checks.mjs |
+| WS01-06 | Viewer / Admin / ads-sync | Website signals | Not connected at first; Admin-only, checked settings; token in Vault; job input; rows replaced; topics, rising, pages, website funnel, Pixel | A7_ |
+| WA01 | ads-sync | Website audiences | Sent with the Pixel id, rules only | A7_ |
+| AX01-02 | ads-agents / Viewer | Agents' funnel context | Funnel, audiences, locations, website signals (small); screens still work | A7_ |
+| R11 | Owner | 108 down, then up | Rolls back and re-applies | run.sh |
+| FT06-09 | ads-sync | Website helpers | Windows; Search Console / GA4 requests and rows; settings and errors; Pixel audience rules | meta_funnel.test.ts |
+| UI195-198 | Viewer / Admin | Website signals UI | Intent topics; rising, website funnel, Pixel; connect; Check now | ui_checks.mjs |
 | MR | ads-sync | Report settings, Insights query, rows, totals, cache, health rules | Meta's limits; filters; leads / video / rankings; disjoint reach; warnings | meta_reports.test |
 | UI170-180 | Viewer / Admin | Reports and Overview health | Live table, breakdown and value filter, compare, presets, drill-down, rankings, custom columns, saved view, CSV, phone width, health card | ui_checks |
 

@@ -25,6 +25,7 @@
 //   meta_image           Admin. {strategy_id, creative_key, image_base64, filename}: uploads a creative's picture (PNG / JPEG).
 //   lead_alerts          Cron / approver. Speed-to-lead: phone notifications and emails for ad leads still waiting for a first call.
 //   meta_report          Any ADS viewer. {report: {...}}: Meta Ads > Reports, read live from Meta's Insights API (cached 3 h / 7 days).
+//   site_signals         Cron / approver. Search Console + GA4 totals (28 days and the 28 before) and the Meta Pixel check.
 //   meta_audiences       Cron / approver. Keeps the Funnel audience library in Meta (engagement audiences, hashed CRM lists).
 //   meta_health          Cron / approver. Opportunity Score, recommendations, account and delivery health, warnings and alerts.
 // Every job takes its own lock (svc_ads_run_begin), so overlapping runs skip instead of doubling up.
@@ -43,6 +44,7 @@ import { alertText, type DueAlert } from "../_shared/lead_alerts.ts";
 import { BREAKDOWNS as REPORT_BREAKDOWNS, cacheHours, cacheKey, cleanParams, insightsQuery, parseRow, previousPeriod, ReportError } from "../_shared/meta_report.ts";
 import { healthWarnings } from "../_shared/meta_health.ts";
 import { audienceError, engagementRule, PREFIX, replaceBatches, sizeOf } from "../_shared/meta_audience.ts";
+import { GA_REPORTS, gaBody, googleToken, gscBody, gscSite, parseGa, parseGsc, siteError, windows, type SiteRow } from "../_shared/site_signals.ts";
 import { adParams, adsetParams, bestMatch, campaignParams, countryCode, creativeParams, formParams, geoQueries, imageKind, MAX_IMAGE_B64,
   planSteps, targeting, audienceSpec, type BuildWork, type Geo } from "../_shared/meta_build.ts";
 
@@ -742,7 +744,7 @@ async function metaHealth(s: Record<string, string>) {
 // ------------------------------------------------------------------ Meta Ads > Funnel > audience library (migration 107)
 async function metaAudiences(s: Record<string, string>, t0: number) {
   return runJob("meta_audiences", s, async () => {
-    const w = await rpc("svc_ads_meta_audience_work") as { on: boolean; account_id: string | null; page_id: string | null; forms: string[];
+    const w = await rpc("svc_ads_meta_audience_work") as { on: boolean; account_id: string | null; page_id: string | null; pixel_id?: string | null; forms: string[];
       audiences: { key: string; name: string; kind: string; spec: any; meta_id: string | null; why: string | null; people: [string, string | null][] | null }[] };
     if (!w.on) return { items: 0, status: "ok", detail: "Audiences are off (Meta Ads > Funnel)" };
     const { p } = platforms(s);
@@ -767,8 +769,8 @@ async function metaAudiences(s: Record<string, string>, t0: number) {
         const name = `${PREFIX}${a.name}`.slice(0, 200);
         let id = a.meta_id ?? existing.get(name) ?? null;
         let members: number | null = null;
-        if (a.kind === "engagement") {
-          const r = engagementRule(a.spec, { page_id: w.page_id, ig_id: ig, forms: w.forms ?? [] });
+        if (a.kind === "engagement" || a.kind === "website") {
+          const r = engagementRule(a.spec, { page_id: w.page_id, ig_id: ig, forms: w.forms ?? [], pixel_id: w.pixel_id ?? null });
           if (!r.rule) { await save({ status: "error", detail: r.missing }); bad++; continue; }
           if (!id) id = await m.create(`${act}/customaudiences`, { name, description: (a.why ?? "").slice(0, 300), rule: JSON.stringify(r.rule), prefill: "1" });
         } else {
@@ -791,6 +793,69 @@ async function metaAudiences(s: Record<string, string>, t0: number) {
   });
 }
 
+// ------------------------------------------------------------------ Meta Ads > Funnel > Website signals (migration 108)
+async function siteSignals(s: Record<string, string>, t0: number) {
+  return runJob("site_signals", s, async () => {
+    const w = await rpc("svc_ads_site_work") as { gsc_url: string | null; ga4_property: string | null; account_id: string | null };
+    const notes: string[] = [];
+    const today = todayIn("Asia/Kolkata");
+    let gscN = 0, gaN = 0;
+    let pixel: Record<string, unknown> | null = null;
+    // The Meta Pixel on the ad account: is it firing? (website audiences need it)
+    const { p } = platforms(s);
+    if (p.meta && w.account_id) {
+      try {
+        const px = await p.meta.readAll(`act_${w.account_id}/adspixels`, { fields: "id,name,last_fired_time,is_unavailable", limit: "25" });
+        const best = px.filter((x: any) => !x.is_unavailable).sort((a: any, b: any) => String(b.last_fired_time ?? "").localeCompare(String(a.last_fired_time ?? "")))[0];
+        pixel = best ? { id: String(best.id), name: best.name ?? null, last_fired_time: best.last_fired_time ?? null,
+          firing: !!best.last_fired_time && Date.now() - Date.parse(best.last_fired_time) < 7 * 86400e3 } : { id: null, firing: false, detail: "No Meta Pixel on this ad account" };
+      } catch (e) { notes.push(`Meta Pixel: ${scrubSecrets((e as Error).message, s).slice(0, 160)}`); }
+    }
+    const site = w.gsc_url ? gscSite(w.gsc_url) : null;
+    if ((site || w.ga4_property) && !(s.GOOGLE_ADS_CLIENT_ID && s.GOOGLE_ADS_CLIENT_SECRET && s.GOOGLE_SITE_REFRESH_TOKEN)) {
+      notes.push("Google sign-in for the website is not set (OAuth client ID / secret and the website refresh token)");
+    } else if (site || w.ga4_property) {
+      let token = "";
+      try { token = await googleToken(fetch, s.GOOGLE_ADS_CLIENT_ID, s.GOOGLE_ADS_CLIENT_SECRET, s.GOOGLE_SITE_REFRESH_TOKEN); }
+      catch (e) { notes.push(scrubSecrets((e as Error).message, s).slice(0, 200)); }
+      const post = async (url: string, body: unknown, api: "Search Console" | "GA4") => {
+        const r = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const b = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(siteError(api, r.status, b));
+        return b;
+      };
+      if (token && site) {
+        try {
+          const rows: SiteRow[] = [];
+          const win = windows(today, 3);
+          const base = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(site)}/searchAnalytics/query`;
+          for (const [wn, [a, b]] of [["cur", win.cur], ["prev", win.prev]] as const) {
+            rows.push(...parseGsc(await post(base, gscBody("query", a, b, 1000), "Search Console"), "query", wn));
+            rows.push(...parseGsc(await post(base, gscBody("page", a, b, 200), "Search Console"), "page", wn));
+          }
+          gscN = await rpc("svc_ads_site_save", { p_src: "gsc", p_rows: rows }) as number;
+        } catch (e) { notes.push(scrubSecrets((e as Error).message, s).slice(0, 300)); }
+      }
+      if (token && w.ga4_property && Date.now() - t0 < 90_000) {
+        try {
+          const rows: SiteRow[] = [];
+          const win = windows(today, 1);
+          for (const r of GA_REPORTS) {
+            for (const [wn, [a, b]] of [["cur", win.cur], ["prev", win.prev]] as const) {
+              if (wn === "prev" && !["landing", "channel"].includes(r.kind)) continue;
+              rows.push(...parseGa(await post(`https://analyticsdata.googleapis.com/v1beta/properties/${w.ga4_property}:runReport`, gaBody(r, a, b), "GA4"), r.kind, wn));
+            }
+          }
+          gaN = await rpc("svc_ads_site_save", { p_src: "ga", p_rows: rows }) as number;
+        } catch (e) { notes.push(scrubSecrets((e as Error).message, s).slice(0, 300)); }
+      }
+    } else notes.push("Search Console site and GA4 property are not set yet");
+    const detail = `Search Console ${gscN} rows, GA4 ${gaN} rows${pixel ? `; Meta Pixel ${pixel.firing ? "firing" : "not firing"}` : ""}${notes.length ? `. ${notes.join("; ")}` : ""}`;
+    await rpc("svc_ads_site_done", { p_summary: { gsc_rows: gscN, ga_rows: gaN, notes }, p_pixel: pixel });
+    return { items: gscN + gaN, status: notes.length && !gscN && !gaN && !pixel ? "error" : "ok", detail: detail.slice(0, 600) };
+  });
+}
+
 const esc = (x: string) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
 Deno.serve(async (req) => {
@@ -803,14 +868,14 @@ Deno.serve(async (req) => {
     try { body = await req.json(); } catch { /* empty body */ }
     const jobs = (body.jobs ?? ["sync"]).filter((j) => ["test", "discover", "sync", "execute", "gcheck", "ideas", "convert",
       "meta_page", "meta_leads", "meta_leads_reconcile", "meta_convert", "setup", "meta_test_event", "meta_history", "meta_build", "meta_image",
-      "lead_alerts", "meta_report", "meta_health", "meta_audiences"].includes(j));
+      "lead_alerts", "meta_report", "meta_health", "meta_audiences", "site_signals"].includes(j));
     if (!jobs.length) return json(req, 422, { detail: "jobs must include test, discover, sync or execute" });
     if (!(await cronOk(req))) {
       const access = await asUser(req, "api_ads_access") as { can_view: boolean; can_approve: boolean; is_admin: boolean };
       if (!access?.can_view) throw new HttpError(403, "You do not have access to the ADS section");
       if ((jobs.includes("test") || jobs.includes("discover") || jobs.includes("gcheck") || jobs.includes("ideas") || jobs.includes("meta_page") || jobs.includes("meta_test_event") || jobs.includes("meta_history")) && !access.is_admin) throw new HttpError(403, "Only Admin can test connections or find accounts");
       if ((jobs.includes("meta_build") || jobs.includes("meta_image")) && !access.is_admin) throw new HttpError(403, "Only Admin can create campaigns in Meta");
-      if ((jobs.includes("execute") || jobs.includes("convert") || jobs.includes("lead_alerts") || jobs.some((j) => j.startsWith("meta_") && !["meta_page", "meta_test_event", "meta_history", "meta_build", "meta_image", "meta_report"].includes(j))) && !access.can_approve) throw new HttpError(403, "Only approvers can run changes");
+      if ((jobs.includes("execute") || jobs.includes("convert") || jobs.includes("lead_alerts") || jobs.includes("site_signals") || jobs.some((j) => j.startsWith("meta_") && !["meta_page", "meta_test_event", "meta_history", "meta_build", "meta_image", "meta_report"].includes(j))) && !access.can_approve) throw new HttpError(403, "Only approvers can run changes");
     }
     if (jobs.length === 1 && jobs[0] === "setup") return json(req, 200, { results: { setup: await setupCheck() } });   // no keys needed
     const secrets = (await rpc("svc_ads_secrets")) as Record<string, string>;
@@ -860,6 +925,7 @@ Deno.serve(async (req) => {
     if (jobs.includes("meta_report")) results.meta_report = await metaReport(secrets, body.report, body.force === true);
     if (jobs.includes("meta_health")) results.meta_health = await metaHealth(secrets);
     if (jobs.includes("meta_audiences")) results.meta_audiences = await metaAudiences(secrets, t0);
+    if (jobs.includes("site_signals")) results.site_signals = await siteSignals(secrets, t0);
     return json(req, 200, { results });
   } catch (e) {
     if (e instanceof HttpError) return json(req, e.status, { detail: e.message });

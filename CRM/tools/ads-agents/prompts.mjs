@@ -124,6 +124,17 @@ gender, region, placement, device, hour, weekday, ad fatigue) joined with CRM re
 admissions). CONTEXT.patterns are the proven/early patterns the CRM computed from it: the strongest evidence you have.
 CONTEXT.crm and CONTEXT.lead_archive show lead quality and what leads answered; CONTEXT.past_strategies and
 CONTEXT.this_strategy_checks show plans and how they did against reality.
+FUNNEL TARGETING (2026): Meta treats only location, minimum age, languages and custom-audience EXCLUSIONS as hard limits;
+age, gender, interests and included custom / lookalike audiences are only hints for Advantage+ audience, and interest
+exclusions no longer exist. So target with (1) the funnel stage, (2) hard exclusions, (3) a distinct message and form per
+stage, and (4) creative diversity (different personas, angles and formats, not small variations). CONTEXT.funnel_90d is the
+real funnel (views, clicks, leads, called, qualified, admissions, cost per stage, notes); CONTEXT.audiences is the audience
+library (key, stage, use_as, ready_in_meta, size); CONTEXT.locations gives a verdict per state from CRM quality;
+CONTEXT.website gives Google search intent (topics, rising queries), landing pages, cities and the Meta Pixel status.
+Build a full-funnel plan when the warm pools exist: a "prospecting" ad set (broad, Advantage+ audience, locations from the
+verdicts) plus "retarget" ad sets for ready hot / warm audiences (proof, fees and process answers) and "reengage" for open or
+lost leads (a new offer). Use only audience keys from CONTEXT.audiences; an audience that is not ready_in_meta can be named
+but say so in the reason. Turn the search topics into angles in the searchers' own words.
 Reply with ONE JSON object and nothing else (no markdown fences).`;
 
 const META_PLAN = `Plan format (numbers are plain numbers in INR, never strings; keys are short ids you choose):
@@ -133,7 +144,8 @@ const META_PLAN = `Plan format (numbers are plain numbers in INR, never strings;
  "campaigns": [{"key": "c1", "name": "...", "objective": "OUTCOME_LEADS", "budget_level": "adset"|"campaign", "daily_budget": number|null,
    "reason": "...", "adsets": [{"key": "a1", "name": "...", "daily_budget": number|null, "optimization": "LEAD_GENERATION"|"QUALITY_LEAD",
      "audience": {"locations": [{"name": "Delhi", "type": "city", "radius_km": 40} | {"name": "India", "type": "country"} | {"name": "Haryana", "type": "region"}],
-       "age_min": 18+, "age_max": up to 65, "genders": "all"|"male"|"female", "interests": ["Meta interest names"], "advantage_audience": true|false},
+       "age_min": 18+, "age_max": up to 65, "genders": "all"|"male"|"female", "interests": ["Meta interest names"], "advantage_audience": true|false,
+       "funnel": "prospecting"|"retarget"|"reengage", "include_audiences": ["CONTEXT.audiences keys"], "exclude_audiences": ["CONTEXT.audiences keys"]},
      "placements": "advantage" | ["facebook_feed", "facebook_reels", "facebook_stories", "instagram_feed", "instagram_reels", "instagram_stories", "instagram_explore"],
      "form": "f1", "ads": ["v1", "i1"], "reason": "..."}]}],
  "forms": [{"key": "f1", "name": "...", "type": "higher_intent"|"more_volume", "headline": "...", "intro": "...",

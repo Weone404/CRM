@@ -12,7 +12,7 @@ SELECT pg_temp.ok((SELECT jsonb_array_length(v->'stages') = 6 AND (v->'stages'->
   'FN01 the funnel map counts Meta leads, called, qualified and admissions, with the share moving on and plain notes');
 SELECT pg_temp.fails($q$SELECT public.api_ads_meta_funnel(current_date, current_date - 1)$q$, '%Pick a period%', 'FN02 periods are checked');
 CREATE TEMP TABLE au AS SELECT public.api_ads_meta_audiences() v;
-SELECT pg_temp.ok((SELECT NOT (v->>'on')::boolean AND jsonb_array_length(v->'audiences') = 12 FROM au)
+SELECT pg_temp.ok((SELECT NOT (v->>'on')::boolean AND (SELECT count(*) FROM jsonb_array_elements(v->'audiences') x WHERE x->>'kind' IN ('engagement', 'crm')) = 12 FROM au)
   AND (SELECT (x->>'eligible')::int = 6 FROM au, jsonb_array_elements(v->'audiences') x WHERE x->>'key' = 'crm_leads_30')
   AND (SELECT (x->>'eligible')::int = 5 FROM au, jsonb_array_elements(v->'audiences') x WHERE x->>'key' = 'crm_qualified_365')
   AND (SELECT (x->>'eligible')::int = 1 FROM au, jsonb_array_elements(v->'audiences') x WHERE x->>'key' = 'crm_customers')

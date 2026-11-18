@@ -21,7 +21,7 @@ test("FT02 Page, Instagram and messaged audiences; missing ids give a reason ins
   assert.deepEqual(m.map((x: any) => x.filter.filters[0].value), ["page_messaged", "ig_user_messaged_business"]);
   assert.ok(/Instagram/.test(engagementRule({ source: "ig", event: "ig_business_profile_engaged" }, { ...ids, ig_id: null }).missing!));
   assert.ok(/lead forms/.test(engagementRule({ source: "lead", event: "lead_generation_opened" }, { ...ids, forms: [] }).missing!));
-  assert.ok(/Unknown/.test(engagementRule({ source: "pixel" }, ids).missing!));
+  assert.ok(/Unknown/.test(engagementRule({ source: "tiktok" }, ids).missing!));
 });
 
 test("FT03 Replace batches: hashed rows only, numbered, last batch flagged", () => {
@@ -57,4 +57,47 @@ test("FT05 builds: new-people ad sets get the default exclusions; retargeting in
   assert.deepEqual(ret.excluded_custom_audiences, [{ id: "7003" }]);
   assert.deepEqual(audienceSpec({ audience: { include_audiences: ["ig_visit_30"] } }, aud).missing, ["ig_visit_30"]);
   assert.deepEqual((targeting({ audience: {} }, geo, []) as any).excluded_custom_audiences, undefined);
+});
+
+// 108: website signals and website audiences.
+import { gaBody, gscBody, gscSite, parseGa, parseGsc, siteError, windows } from "../../functions/_shared/site_signals.ts";
+
+test("FT06 windows: two back-to-back 28-day windows; Search Console ends 3 days back", () => {
+  const w = windows("2026-11-18", 3);
+  assert.deepEqual(w.cur, ["2026-10-19", "2026-11-15"]);
+  assert.deepEqual(w.prev, ["2026-09-21", "2026-10-18"]);
+  assert.deepEqual(windows("2026-11-18", 1).cur[1], "2026-11-17");
+});
+
+test("FT07 Search Console and GA4 requests and rows", () => {
+  assert.deepEqual(gscBody("query", "2026-10-19", "2026-11-15", 1000), { startDate: "2026-10-19", endDate: "2026-11-15", dimensions: ["query"], type: "web", rowLimit: 1000, dataState: "final" });
+  const g = parseGsc({ rows: [{ keys: ["pilot training fees"], clicks: 12, impressions: 300, ctr: 0.04, position: 7.2 }, { keys: [""] }] }, "query", "cur");
+  assert.deepEqual(g, [{ src: "gsc", kind: "query", k1: "pilot training fees", k2: "", win: "cur", m: { clicks: 12, impressions: 300, ctr: 0.04, position: 7.2 } }]);
+  const body = gaBody({ dims: ["city", "region"], metrics: ["activeUsers", "keyEvents"], limit: 100 }, "a", "b") as any;
+  assert.deepEqual(body.dimensions, [{ name: "city" }, { name: "region" }]);
+  assert.deepEqual(body.orderBys[0].metric.metricName, "activeUsers");
+  const ga = parseGa({ metricHeaders: [{ name: "activeUsers" }, { name: "keyEvents" }], rows: [
+    { dimensionValues: [{ value: "Delhi" }, { value: "Delhi" }], metricValues: [{ value: "120" }, { value: "4" }] },
+    { dimensionValues: [{ value: "(not set)" }], metricValues: [{ value: "9" }] }] }, "city", "cur");
+  assert.deepEqual(ga, [{ src: "ga", kind: "city", k1: "Delhi", k2: "Delhi", win: "cur", m: { activeUsers: 120, keyEvents: 4 } }]);
+});
+
+test("FT08 site settings and plain errors", () => {
+  assert.deepEqual(gscSite("sc-domain:WeOneAviation.in"), "sc-domain:weoneaviation.in");
+  assert.deepEqual(gscSite("https://weoneaviation.in"), "https://weoneaviation.in/");
+  assert.deepEqual(gscSite("weoneaviation.in"), null);
+  assert.ok(/read scope/.test(siteError("GA4", 403, { error: { message: "Request had insufficient authentication scopes." } })));
+  assert.ok(/no access/.test(siteError("Search Console", 403, { error: { message: "User does not have sufficient permission" } })));
+  assert.ok(/GA4 property ID/.test(siteError("GA4", 404, {})));
+});
+
+test("FT09 website audiences use the Pixel: URL rules, the Lead event, all visitors; 180 days at most", () => {
+  const ids = { page_id: "1", ig_id: null, forms: [], pixel_id: "555666777" };
+  const fees = (engagementRule({ source: "pixel", url_any: ["fee", "cost"], days: 400 }, ids).rule as any).inclusions.rules;
+  assert.deepEqual(fees.map((r: any) => [r.event_sources[0], r.retention_seconds, r.filter.filters[0]]), [
+    [{ id: "555666777", type: "pixel" }, 180 * 86400, { field: "url", operator: "i_contains", value: "fee" }],
+    [{ id: "555666777", type: "pixel" }, 180 * 86400, { field: "url", operator: "i_contains", value: "cost" }]]);
+  assert.deepEqual((engagementRule({ source: "pixel", event: "Lead", days: 30 }, ids).rule as any).inclusions.rules[0].filter.filters[0], { field: "event", operator: "i_contains", value: "Lead" });
+  assert.deepEqual((engagementRule({ source: "pixel", days: 30 }, ids).rule as any).inclusions.rules[0].filter.filters[0].value, "");
+  assert.ok(/Pixel/.test(engagementRule({ source: "pixel", days: 30 }, { ...ids, pixel_id: null }).missing!));
 });
