@@ -2,6 +2,24 @@
 import http from 'node:http';
 const mode = { health: 'ok', token: 'ok', leads: 'ok' };
 const calls = [];
+
+// Chart data: 28 days and the 28 before, deterministic so screenshots stay stable.
+const wave = (i, a, b) => Math.round(a + b * (0.5 + 0.5 * Math.sin(i / 2.3)) + ((i * 37) % 11));
+const day = (base, i) => new Date(Date.UTC(2026, base, 19 + i)).toISOString().slice(0, 10);
+const TREND = {
+  gsc: {
+    cur: Array.from({ length: 28 }, (_, i) => { const c = wave(i, 18, 22) + Math.round(i / 3), im = 6000 + wave(i, 0, 2400) * 1; return { d: day(9, i), clicks: c, impressions: im, ctr: c / im, position: +(9.4 - i * 0.04 + ((i * 7) % 5) / 10).toFixed(1) }; }),
+    prev: Array.from({ length: 28 }, (_, i) => { const c = wave(i + 4, 12, 14), im = 5200 + wave(i, 0, 1800); return { d: day(8, i + 2), clicks: c, impressions: im, ctr: c / im, position: +(9.8 + ((i * 3) % 4) / 10).toFixed(1) }; }),
+  },
+  ga: { cur: [], prev: [] },
+  ranks: { cur: { top3: 118, p1: 402, p2: 515, p3_5: 611, beyond: 354 }, prev: { top3: 96, p1: 371, p2: 548, p3_5: 590, beyond: 402 } },
+};
+const MORE_Q = Array.from({ length: 60 }, (_, i) => {
+  const pos = +(1 + ((i * 17) % 45) + ((i * 7) % 10) / 10).toFixed(1), im = Math.round(20 * 10 ** (((i * 29) % 30) / 10));
+  const clicks = Math.max(0, Math.round(im * (pos < 4 ? 0.08 : pos < 11 ? 0.012 : 0.002)));
+  return { query: `${['cpl', 'dgca', 'pilot', 'egca', 'atpl', 'ppl'][i % 6]} ${['fees', 'exam', 'course delhi', 'medical', 'syllabus', 'salary', 'eligibility', 'books', 'login', 'result'][i % 10]} ${i}`,
+    clicks, impressions: im, ctr: clicks / im, pos, prev_pos: i % 5 ? +(pos + ((i % 3) - 1) * 1.5).toFixed(1) : null, brand: i % 13 === 0, pages: 1, page_list: [] };
+});
 const WEB = {
   site: 'https://weoneaviation.in/', configured: { gsc: true, ga4: true },
   runs: { search: { status: 'ok', at: new Date().toISOString() }, visitors: { status: 'ok', detail: 'GA4 answered with no visits', at: new Date().toISOString() } },
@@ -103,11 +121,12 @@ http.createServer((req, res) => {
     if (fn === 'api_vault_overview') return send(res, 200, VAULT);
     if (fn === 'api_web_access') return send(res, 200, { can_view: true, can_run: true, is_admin: true });
     if (fn === 'api_web_overview') return send(res, 200, WEB);
+    if (fn === 'api_web_trend') return send(res, 200, TREND);
     if (fn === 'api_web_settings') return send(res, 200, { site_url: 'https://weoneaviation.in/', key_pages: '', psi_key: null });
     if (fn === 'api_web_queries') return send(res, 200, { total: 2, rows: [
       { query: 'egca login', clicks: 10, impressions: 13778, ctr: 0.0007, pos: 8.7, prev_clicks: 3, prev_impressions: 9000, prev_pos: 9.2, almost: true, pages: 2,
         page_list: [{ page: 'https://weoneaviation.in/egca', impressions: 9000, position: 8 }, { page: 'https://weoneaviation.in/blogs/egca-login', impressions: 4000, position: 12 }] },
-      { query: 'spl full form', clicks: 2, impressions: 2570, ctr: 0.0008, pos: 9.1, prev_pos: null, almost: true, pages: 1, page_list: [] }] });
+      { query: 'spl full form', clicks: 2, impressions: 2570, ctr: 0.0008, pos: 9.1, prev_pos: null, almost: true, pages: 1, page_list: [] }, ...(calls[calls.length - 1]?.args?.p_filter === 'almost' ? [] : MORE_Q)] });
     if (fn === 'api_web_copilot_upload') return send(res, 200, { saved: 2 });
     if (fn === 'api_connection_token') return send(res, 200, 'full-charter-token-xyz');
     if (/_save$|_set$|_delete$|_remove$|_rotate$|_toggle$/.test(fn)) return send(res, 200, { saved: true, removed: true, last4: 'new1' });

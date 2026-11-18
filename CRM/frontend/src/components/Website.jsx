@@ -3,6 +3,7 @@ import { supabase, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from '../backend/sup
 import { showToast } from '../utils/toast';
 import { navigate, useRoute } from '../utils/route';
 import Icon from './icons';
+import { Trend, TrendLegend, Spark, Columns, Share, HBars, OpportunityMap, Vital } from './website/charts';
 
 // Growth > Website: weoneaviation.in in one calm screen. Numbers come from Search Console, GA4, PageSpeed Insights,
 // URL Inspection and a scan of the site itself (crm-website Edge Function, nightly and on Refresh). Each number says
@@ -36,17 +37,23 @@ async function edge(jobs) {
 }
 
 let cache = null;   // last overview: reopening the section is instant, then it refreshes quietly
+let tcache = null;  // last chart data, same idea
 
 // ---------------------------------------------------------------- small pieces
-function Card({ title, value, note, tone, hint, onClick, dashed }) {
+function Card({ title, value, note, tone, hint, onClick, dashed, spark, selected }) {
   const color = tone === 'good' ? '#1E7B34' : tone === 'bad' ? '#A42219' : 'var(--label-2)';
   const Tag = onClick ? 'button' : 'div';
   return (
     <Tag type={onClick ? 'button' : undefined} onClick={onClick} title={hint}
-      className={`glass-card p-4 sm:p-5 flex flex-col gap-1 text-left ${onClick ? 'tile-link' : ''}`} style={dashed ? { borderStyle: 'dashed' } : undefined}>
-      <span className="text-[13px] text-glass-secondary">{title}</span>
-      <span className="text-[26px] font-semibold leading-tight text-glass-primary">{value}</span>
-      {note && <span className="text-[13px]" style={{ color }}>{note}</span>}
+      aria-pressed={selected == null ? undefined : selected}
+      className={`glass-card p-4 sm:p-5 flex flex-col gap-1 text-left ${onClick ? 'tile-link' : ''}`}
+      style={{ ...(dashed ? { borderStyle: 'dashed' } : {}), ...(selected ? { boxShadow: 'inset 0 0 0 2px var(--accent)' } : {}) }}>
+      <span className="flex flex-col gap-1 w-full">
+        <span className="block text-[13px] text-glass-secondary">{title}</span>
+        <span className="block text-[26px] font-semibold leading-tight text-glass-primary">{value}</span>
+        {note && <span className="block text-[13px]" style={{ color }}>{note}</span>}
+        {spark}
+      </span>
     </Tag>
   );
 }
@@ -95,25 +102,7 @@ function PosChange({ pos, prev }) {
   if (!d) return <span className="text-[12px] px-2 py-0.5 rounded-full bg-[var(--surface-sunken)] text-glass-secondary">same</span>;
   return <span className="text-[12px] px-2 py-0.5 rounded-full" style={d > 0 ? { background: 'rgba(30,123,52,0.10)', color: '#1E7B34' } : { background: 'rgba(192,39,29,0.10)', color: '#A42219' }}>{d > 0 ? '↑' : '↓'} {Math.abs(d)}</span>;
 }
-function Bars({ items, valueKey, labelKey, max }) {
-  const m = max || Math.max(1, ...items.map((x) => Number(x[valueKey]) || 0));
-  return (
-    <div className="flex flex-col gap-2">{items.map((x, i) => (
-      <div key={i} className="flex flex-col gap-1">
-        <div className="flex justify-between gap-3 text-sm"><span className="truncate text-glass-primary">{x[labelKey]}</span><span className="text-glass-secondary shrink-0">{fmt(x[valueKey])}</span></div>
-        <div className="h-1.5 rounded bg-[var(--surface-sunken)] overflow-hidden"><div className="h-1.5 rounded bg-[var(--accent)]" style={{ width: `${Math.round((100 * (Number(x[valueKey]) || 0)) / m)}%` }} /></div>
-      </div>))}</div>
-  );
-}
-function Spark({ points, k }) {
-  if (!points?.length) return null;
-  const vals = points.map((p) => Number(p[k]) || 0), max = Math.max(1, ...vals), w = 100 / vals.length;
-  return (
-    <svg viewBox="0 0 100 24" preserveAspectRatio="none" className="w-full h-12" role="img" aria-label={`Daily ${k}`}>
-      {vals.map((v, i) => <rect key={i} x={i * w + w * 0.15} width={w * 0.7} y={24 - (22 * v) / max} height={(22 * v) / max} rx="0.6" fill="var(--accent)" opacity="0.75" />)}
-    </svg>
-  );
-}
+const Bars = (props) => <HBars {...props} />;
 const rating = (r) => (r === 'fast' ? ['Good', '#1E7B34', 'rgba(30,123,52,0.10)'] : r === 'average' ? ['Needs work', '#8A5300', 'rgba(178,106,0,0.12)'] : r === 'slow' ? ['Poor', '#A42219', 'rgba(192,39,29,0.10)'] : ['No data', 'var(--label-2)', 'var(--surface-sunken)']);
 const Chip = ({ r, children }) => { const [t, fg, bg] = rating(r); return <span className="text-[12px] px-2 py-0.5 rounded-full whitespace-nowrap" style={{ color: fg, background: bg }}>{children || t}</span>; };
 const ISSUE = { no_title: 'No title', long_title: 'Title over ~60 characters', short_title: 'Very short title', no_description: 'No description',
@@ -121,23 +110,77 @@ const ISSUE = { no_title: 'No title', long_title: 'Title over ~60 characters', s
   no_canonical: 'No canonical link', noindex: 'Hidden from Google (noindex)', no_schema: 'No structured data', bad_schema: 'Broken structured data', unreachable: 'Did not load' };
 
 // ---------------------------------------------------------------- tabs
-function Overview({ o, live, go }) {
+const METRICS = [
+  { k: 'clicks', label: 'Clicks', v: (r) => r.clicks, f: (v) => fmt(Math.round(v)) },
+  { k: 'impressions', label: 'Seen', v: (r) => r.impressions, f: (v, axis) => (axis ? short(v) : fmt(Math.round(v))) },
+  { k: 'ctr', label: 'Click rate', v: (r) => (r.ctr == null ? null : r.ctr * 100), f: (v) => `${Number(v).toFixed(axis2(v))}%` },
+  { k: 'position', label: 'Position', v: (r) => r.position, f: (v) => Number(v).toFixed(1), invert: true },
+];
+function axis2(v) { return Math.abs(v) < 10 ? 1 : 0; }
+const sum = (rows, k) => (rows || []).reduce((n, r) => n + (Number(r[k]) || 0), 0);
+function periodValue(rows, k) {
+  if (!rows?.length) return null;
+  if (k === 'ctr') { const i = sum(rows, 'impressions'); return i ? (100 * sum(rows, 'clicks')) / i : null; }
+  if (k === 'position') { const i = sum(rows, 'impressions'); return i ? rows.reduce((n, r) => n + (Number(r.position) || 0) * (Number(r.impressions) || 0), 0) / i : null; }
+  return sum(rows, k);
+}
+function takeaway(m, cur, prev) {
+  const a = periodValue(cur, m.k), b = periodValue(prev, m.k);
+  if (a == null) return '';
+  const best = [...(cur || [])].filter((r) => m.v(r) != null).sort((x, y) => (m.invert ? m.v(x) - m.v(y) : m.v(y) - m.v(x)))[0];
+  const bestTxt = best ? ` Best day: ${new Date(`${best.d}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })} (${m.f(m.v(best))}).` : '';
+  if (b == null || !b) return `Last 28 days: ${m.f(a)}.${bestTxt}`;
+  if (m.k === 'position') { const d = Math.round((b - a) * 10) / 10; return `Average position ${a.toFixed(1)}, ${d > 0 ? `${d} places better` : d < 0 ? `${-d} places worse` : 'the same as'} than the 28 days before.${bestTxt}`; }
+  if (m.k === 'ctr') { const d = Math.round((a - b) * 100) / 100; return `${a.toFixed(2)}% of people who saw you clicked, ${d >= 0 ? 'up' : 'down'} ${Math.abs(d).toFixed(2)} points.${bestTxt}`; }
+  const c = Math.round((100 * (a - b)) / b);
+  return `${m.label} ${c >= 0 ? 'up' : 'down'} ${Math.abs(c)}% vs the 28 days before (${m.f(b)} → ${m.f(a)}).${bestTxt}`;
+}
+const RANKS = [['top3', 'Top 3', 'great spot'], ['p1', '4–10', 'page 1'], ['p2', '11–20', 'page 2'], ['p3_5', '21–50', 'pages 3–5'], ['beyond', '50+', 'far back']];
+
+function Overview({ o, t, live, go }) {
   const s = o.search || {}, v = o.visitors || {};
+  const [metric, setMetric] = useState('clicks');
   const clicks = change(s.cur?.clicks, s.prev?.clicks), seen = change(s.cur?.impressions, s.prev?.impressions);
   const pos = change(s.cur?.position, s.prev?.position, { lowerIsBetter: true, suffix: '' });
   const users = change(v.cur?.users, v.prev?.users);
   const gaReady = Number(v.cur?.days || 0) > 0;
   const c = s.counts || {};
+  const g = t?.gsc || {}, ga = t?.ga || {};
+  const m = METRICS.find((x) => x.k === metric);
+  const ranks = t?.ranks?.cur;
   return (
     <div className="flex flex-col gap-5">
       <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
-        <Card title="Clicks from Google" value={fmt(s.cur?.clicks)} {...clicks} hint="Search Console, last 28 days" />
-        <Card title="Seen on Google" value={short(s.cur?.impressions)} {...seen} hint="Times a page of yours showed in Google results" />
-        <Card title="Average position" value={s.cur?.position ?? '—'} {...pos} hint="Weighted by how often each result was seen; lower is better" />
+        <Card title="Clicks from Google" value={fmt(s.cur?.clicks)} {...clicks} hint="Search Console, last 28 days. Click to chart it." onClick={() => setMetric('clicks')} selected={metric === 'clicks'}
+          spark={<Spark values={(g.cur || []).map((r) => r.clicks)} />} />
+        <Card title="Seen on Google" value={short(s.cur?.impressions)} {...seen} hint="Times a page of yours showed in Google results. Click to chart it." onClick={() => setMetric('impressions')} selected={metric === 'impressions'}
+          spark={<Spark values={(g.cur || []).map((r) => r.impressions)} />} />
+        <Card title="Average position" value={s.cur?.position ?? '—'} {...pos} hint="Weighted by how often each result was seen; lower is better. Click to chart it." onClick={() => setMetric('position')} selected={metric === 'position'}
+          spark={<Spark values={(g.cur || []).map((r) => r.position)} invert />} />
         <Card title="Visitors" value={gaReady ? fmt(v.cur?.users) : '—'} {...(gaReady ? users : { note: o.configured?.ga4 ? 'GA4 has no visits yet: fix' : 'Connect GA4: fix', tone: 'bad' })}
-          dashed={!gaReady} onClick={gaReady ? undefined : () => navigate('connections')} hint="GA4 active users" />
+          dashed={!gaReady} onClick={gaReady ? undefined : () => navigate('connections')} hint="GA4 active users" spark={gaReady ? <Spark values={(ga.cur || []).map((r) => r.users)} /> : null} />
         <Card title="On the site now" value={live?.total ? fmt(live.total[0]?.users ?? 0) : '—'} note={live?.page?.[0] ? `Most on ${live.page[0].k}` : (gaReady ? 'Last 30 minutes' : 'Needs GA4')} tone="muted" />
       </div>
+
+      <section className="glass-card p-5" data-section="trend">
+        <div className="flex flex-wrap items-start justify-between gap-3 mb-1">
+          <div>
+            <h2 className="m-0 text-base font-semibold text-glass-primary">Google, day by day</h2>
+            <p className="m-0 text-[13px] text-glass-secondary">{t ? takeaway(m, g.cur, g.prev) : 'Loading…'}</p>
+          </div>
+          <div role="tablist" aria-label="What to chart" className="inline-flex p-0.5 rounded-[10px] bg-[var(--surface-sunken)]">
+            {METRICS.map((x) => (
+              <button key={x.k} role="tab" aria-selected={metric === x.k} type="button" onClick={() => setMetric(x.k)}
+                className={`min-h-[32px] px-3 rounded-[8px] text-[13px] transition-colors ${metric === x.k ? 'bg-white shadow-sm font-semibold text-glass-primary' : 'text-glass-secondary'}`}>{x.label}</button>
+            ))}
+          </div>
+        </div>
+        <div className="mt-3"><Trend cur={g.cur} prev={g.prev} value={m.v} format={m.f} invert={m.invert} label={`${m.label} per day`} /></div>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <TrendLegend prevShown={(g.prev || []).length > 0} />
+          <span className="text-[12px] text-glass-secondary">{m.invert ? 'Higher on the chart = better position. ' : ''}Search Console runs about 3 days behind.</span>
+        </div>
+      </section>
 
       {(o.actions || []).length > 0 && (
         <section className="glass-card p-5" data-section="actions">
@@ -153,25 +196,35 @@ function Overview({ o, live, go }) {
         </section>
       )}
 
-      <section className="glass-card p-5">
-        <h2 className="m-0 mb-3 text-base font-semibold text-glass-primary">Best opportunities in Google</h2>
-        <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
-          {[['almost', 'Almost on page 1', 'Position 8–20, seen 50+ times'], ['low_ctr', 'Seen a lot, rarely clicked', 'Top 10 but under 2% clicks'],
-            ['dropping', 'Dropped 3+ places', 'vs the 28 days before'], ['new', 'New searches', 'Not seen before'], ['cannibal', 'Two pages competing', 'Same search, two of your pages']].map(([k, t, h]) => (
-            <button key={k} type="button" onClick={() => go('searches', null, k)} className="tile-link text-left rounded-xl border border-[var(--hairline)] p-4 bg-white/60">
-              <div className="text-2xl font-semibold">{fmt(c[k])}</div><div className="text-sm font-medium">{t}</div><div className="text-[12px] text-glass-secondary">{h}</div>
-            </button>))}
-        </div>
-      </section>
+      <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}>
+        <section className="glass-card p-5">
+          <h2 className="m-0 text-base font-semibold text-glass-primary">Where your searches rank</h2>
+          <p className="m-0 mb-2 text-[13px] text-glass-secondary">How many searches show you at each position. Dashed outline = the 28 days before. Page 2 is the quickest win.</p>
+          {ranks ? <Columns label="Searches by position" items={RANKS.map(([k, l, sub]) => ({ k: l, sub, v: Number(ranks[k] || 0), pv: t?.ranks?.prev ? Number(t.ranks.prev[k] || 0) : null,
+            hint: k === 'p2' ? 'Click to see them' : 'Click to open searches', key: k }))}
+            format={(x) => fmt(x)} prevLabel="Before" onPick={(x) => go('searches', null, x.key === 'p2' ? 'almost' : undefined)} />
+            : <p className="m-0 text-sm text-glass-secondary">No Search Console data yet. Press Refresh.</p>}
+        </section>
+        <section className="glass-card p-5">
+          <h2 className="m-0 mb-3 text-base font-semibold text-glass-primary">Best opportunities in Google</h2>
+          <div className="grid gap-2.5" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
+            {[['almost', 'Almost on page 1', 'Position 8–20, seen 50+ times'], ['low_ctr', 'Seen a lot, rarely clicked', 'Top 10 but under 2% clicks'],
+              ['dropping', 'Dropped 3+ places', 'vs the 28 days before'], ['new', 'New searches', 'Not seen before'], ['cannibal', 'Two pages competing', 'Same search, two of your pages']].map(([k, tt, h]) => (
+              <button key={k} type="button" onClick={() => go('searches', null, k)} className="tile-link text-left rounded-xl border border-[var(--hairline)] p-3.5 bg-white/60">
+                <div className="text-2xl font-semibold">{fmt(c[k])}</div><div className="text-sm font-medium">{tt}</div><div className="text-[12px] text-glass-secondary">{h}</div>
+              </button>))}
+          </div>
+        </section>
+      </div>
 
       <section className="glass-card p-5">
         <div className="flex items-baseline justify-between"><h2 className="m-0 text-base font-semibold text-glass-primary">What people search on Google</h2>
           <button type="button" className="text-sm text-[var(--accent)] min-h-[36px]" onClick={() => go('searches')}>See all {fmt(c.queries)}</button></div>
         <Rows rows={s.top_queries} empty="No Search Console data yet. Press Refresh." cols={[
-          { k: 'query', label: 'Search' }, { k: 'clicks', label: 'Clicks', right: true, render: (r) => fmt(r.clicks) },
+          { k: 'query', label: 'Search', render: (r) => <button type="button" className="text-left hover:text-[var(--accent)]" onClick={() => go('searches', r.query)}>{r.query}</button> },
+          { k: 'clicks', label: 'Clicks', right: true, render: (r) => fmt(r.clicks) },
           { k: 'impressions', label: 'Seen', right: true, render: (r) => fmt(r.impressions) }, { k: 'pos', label: 'Position', right: true },
           { k: 'chg', label: 'Change', right: true, render: (r) => <PosChange pos={r.pos} prev={r.prev_pos} /> }]} />
-        {s.daily?.length > 0 && <div className="mt-3"><div className="text-[12px] text-glass-secondary mb-1">Clicks per day</div><Spark points={s.daily} k="clicks" /></div>}
       </section>
 
       <Fold title="Top pages" hint="from Google" id="pages">
@@ -180,24 +233,29 @@ function Overview({ o, live, go }) {
       </Fold>
       <Fold title="Visitors" hint={gaReady ? 'GA4, last 28 days' : 'waiting for GA4'} id="visitors">
         {!gaReady ? <p className="text-sm text-glass-secondary m-0 py-2">GA4 has not sent visits yet. Check the GA4 property in Connections &amp; keys.</p> : (
-          <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
-            <div><div className="text-[13px] text-glass-secondary mb-2">How they arrived</div><Bars items={v.channels || []} valueKey="sessions" labelKey="k" /></div>
-            <div><div className="text-[13px] text-glass-secondary mb-2">Cities</div><Bars items={(v.cities || []).slice(0, 6)} valueKey="users" labelKey="city" /></div>
-            <div className="text-sm flex flex-col gap-1.5">
-              <div><span className="text-glass-secondary">Engaged visits:</span> {v.cur?.engaged_rate ?? '—'}%</div>
-              <div><span className="text-glass-secondary">Time on site per visitor:</span> {v.cur?.avg_engagement_s != null ? `${Math.floor(v.cur.avg_engagement_s / 60)}m ${v.cur.avg_engagement_s % 60}s` : '—'}</div>
-              <div><span className="text-glass-secondary">New / returning:</span> {fmt(v.newret?.new)} / {fmt(v.newret?.returning)}</div>
-              <div><span className="text-glass-secondary">Devices:</span> {(v.devices || []).map((d) => `${d.k} ${fmt(d.users)}`).join(' · ') || '—'}</div>
-              <div><span className="text-glass-secondary">Busiest:</span> {(v.busiest || []).map((b) => `${DOW[b.dow] || b.dow} ${b.hour}:00`).join(', ') || '—'}</div>
-              <div><span className="text-glass-secondary">Actions taken:</span> {(v.events || []).slice(0, 4).map((e) => `${e.event} ${fmt(e.count)}`).join(' · ') || '—'}</div>
+          <div className="flex flex-col gap-6 pt-2">
+            <div><Trend cur={ga.cur} prev={ga.prev} value={(r) => r.users} format={(x) => fmt(Math.round(x))} label="Visitors per day" /><div className="mt-2"><TrendLegend prevShown={(ga.prev || []).length > 0} /></div></div>
+            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
+              <div><div className="text-[13px] text-glass-secondary mb-2">How they arrived</div><Bars items={v.channels || []} valueKey="sessions" labelKey="k" /></div>
+              <div><div className="text-[13px] text-glass-secondary mb-2">Cities</div><Bars items={(v.cities || []).slice(0, 6)} valueKey="users" labelKey="city" /></div>
+              <div className="text-sm flex flex-col gap-3">
+                <div><div className="text-[13px] text-glass-secondary mb-2">Devices</div><Share items={(v.devices || []).slice(0, 3).map((d) => ({ k: d.k, v: d.users }))} unit="visitors" label="Visitors by device" /></div>
+                <div><span className="text-glass-secondary">Engaged visits:</span> {v.cur?.engaged_rate ?? '—'}%</div>
+                <div><span className="text-glass-secondary">Time on site per visitor:</span> {v.cur?.avg_engagement_s != null ? `${Math.floor(v.cur.avg_engagement_s / 60)}m ${v.cur.avg_engagement_s % 60}s` : '—'}</div>
+                <div><span className="text-glass-secondary">New / returning:</span> {fmt(v.newret?.new)} / {fmt(v.newret?.returning)}</div>
+                <div><span className="text-glass-secondary">Busiest:</span> {(v.busiest || []).map((b) => `${DOW[b.dow] || b.dow} ${b.hour}:00`).join(', ') || '—'}</div>
+                <div><span className="text-glass-secondary">Actions taken:</span> {(v.events || []).slice(0, 4).map((e) => `${e.event} ${fmt(e.count)}`).join(' · ') || '—'}</div>
+              </div>
             </div>
           </div>)}
       </Fold>
       <Fold title="Where Google shows you" hint="devices, countries, result types" id="where">
-        <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
-          <div><div className="text-[13px] text-glass-secondary mb-2">Devices (clicks)</div><Bars items={s.devices || []} valueKey="clicks" labelKey="k" /></div>
-          <div><div className="text-[13px] text-glass-secondary mb-2">Countries (clicks)</div><Bars items={s.countries || []} valueKey="clicks" labelKey="k" /></div>
-          <div><div className="text-[13px] text-glass-secondary mb-2">Result types</div>{(s.appearance || []).length ? <Bars items={s.appearance} valueKey="impressions" labelKey="k" /> : <p className="m-0 text-sm text-glass-secondary">Plain results only.</p>}</div>
+        <div className="flex flex-col gap-6 pt-2">
+          <div><div className="text-[13px] text-glass-secondary mb-2">Clicks by device</div><Share items={(s.devices || []).slice(0, 3).map((d) => ({ k: d.k, v: d.clicks }))} unit="clicks" label="Clicks by device" /></div>
+          <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
+            <div><div className="text-[13px] text-glass-secondary mb-2">Countries (clicks)</div><Bars items={s.countries || []} valueKey="clicks" labelKey="k" sub={(x) => `${short(x.impressions)} seen`} /></div>
+            <div><div className="text-[13px] text-glass-secondary mb-2">Result types (times seen)</div>{(s.appearance || []).length ? <Bars items={s.appearance} valueKey="impressions" labelKey="k" /> : <p className="m-0 text-sm text-glass-secondary">Plain results only.</p>}</div>
+          </div>
         </div>
       </Fold>
     </div>
@@ -225,7 +283,18 @@ function Searches({ initialFilter, initialQ }) {
         ))}
       </div>
       <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search the searches" aria-label="Search the searches" className="glass-input min-h-[38px] px-3 text-sm max-w-sm" />
-      <div className="text-[13px] text-glass-secondary">{data ? `${fmt(data.total)} searches` : 'Loading…'} · Search Console, last 28 days vs the 28 before. Google hides very rare searches.</div>
+      <div className="text-[13px] text-glass-secondary">{data ? `${fmt(data.total)} searches${data.total > (data.rows || []).length ? `, top ${fmt((data.rows || []).length)} shown` : ''}` : 'Loading…'} · Search Console, last 28 days vs the 28 before. Google hides very rare searches.</div>
+      {(data?.rows || []).length > 1 && (
+        <details open className="group rounded-xl border border-[var(--hairline)] bg-white/50">
+          <summary className="flex items-center justify-between gap-3 px-4 min-h-[44px] cursor-pointer list-none">
+            <span className="text-sm font-semibold text-glass-primary">Opportunity map <span className="font-normal text-glass-secondary">· each dot is a search; the shaded band is where a small push reaches page 1</span></span>
+            <span className="text-[13px] text-[var(--accent)] group-open:hidden">Show</span><span className="text-[13px] text-[var(--accent)] hidden group-open:inline">Hide</span>
+          </summary>
+          <div className="px-4 pb-4"><OpportunityMap rows={data.rows} selected={openRow} onPick={(r) => {
+            setOpenRow(r.query);
+            requestAnimationFrame(() => document.getElementById(`q-${encodeURIComponent(r.query)}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+          }} /></div>
+        </details>)}
       <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse min-w-[560px]">
           <thead><tr className="text-left text-xs text-glass-secondary"><th className="font-medium py-2">Search</th><th className="font-medium text-right">Clicks</th><th className="font-medium text-right">Seen</th><th className="font-medium text-right">Click rate</th><th className="font-medium text-right">Position</th><th className="font-medium text-right">Change</th></tr></thead>
@@ -240,7 +309,7 @@ function Searches({ initialFilter, initialQ }) {
 function FragmentRow({ r, open, onToggle }) {
   const flags = [r.almost && 'almost page 1', r.low_ctr && 'low clicks', r.dropping && 'dropping', r.pages >= 2 && `${r.pages} pages`].filter(Boolean);
   return (<>
-    <tr className="border-t border-[var(--hairline)] cursor-pointer hover:bg-[rgba(118,118,128,0.05)]" onClick={onToggle}>
+    <tr id={`q-${encodeURIComponent(r.query)}`} className={`border-t border-[var(--hairline)] cursor-pointer hover:bg-[rgba(118,118,128,0.05)] ${open ? 'bg-[rgba(10,99,206,0.05)]' : ''}`} onClick={onToggle}>
       <td className="py-2.5 pr-2"><span className="text-glass-primary">{r.query}</span>{flags.length > 0 && <span className="ml-2 text-[11px] text-glass-secondary">{flags.join(' · ')}</span>}</td>
       <td className="text-right">{fmt(r.clicks)}</td><td className="text-right text-glass-secondary">{fmt(r.impressions)}</td>
       <td className="text-right">{r.ctr != null ? `${(r.ctr * 100).toFixed(1)}%` : '—'}</td><td className="text-right">{r.pos}</td>
@@ -339,7 +408,11 @@ function Health({ o }) {
                 <div key={k} className="text-sm flex flex-col gap-1">
                   <div className="flex items-center gap-2"><span className="font-medium capitalize">{k === 'mobile' ? 'Phone' : 'Computer'}</span><Chip r={r.overall}>{r.overall ? undefined : 'No real-user data'}</Chip>
                     {r.scores?.performance != null && <span className="text-glass-secondary">· score {r.scores.performance}</span>}</div>
-                  <div className="text-glass-secondary">LCP {r.field?.lcp ? `${(r.field.lcp.p75 / 1000).toFixed(1)} s` : '—'} · INP {r.field?.inp ? `${r.field.inp.p75} ms` : '—'} · CLS {r.field?.cls ? r.field.cls.p75 : '—'}</div>
+                  <div className="grid gap-2 mt-1">
+                    <Vital name="Main content shows (LCP)" value={r.field?.lcp ? r.field.lcp.p75 / 1000 : null} good={2.5} poor={4} unit=" s" digits={1} />
+                    <Vital name="Reacts to taps (INP)" value={r.field?.inp?.p75 ?? null} good={200} poor={500} unit=" ms" />
+                    <Vital name="Layout stays still (CLS)" value={r.field?.cls?.p75 ?? null} good={0.1} poor={0.25} unit="" digits={2} />
+                  </div>
                   {(r.fixes || []).length > 0 && <div className="text-[13px] text-glass-secondary">Fix first: {r.fixes.slice(0, 2).map((f) => f.title).join('; ')}</div>}
                 </div>); })}
             </div>
@@ -392,7 +465,9 @@ function Leads({ o }) {
         <Card title="Visitors who became leads" value={o.visitors?.cur?.users ? `${((100 * l.cur) / o.visitors.cur.users).toFixed(1)}%` : '—'} note={o.visitors?.cur?.users ? 'Leads ÷ GA4 visitors' : 'Needs GA4'} tone="muted" />
       </div>
       <section className="glass-card p-5"><h2 className="m-0 mb-3 text-base font-semibold">Where they came from</h2><Bars items={l.by_source || []} valueKey="n" labelKey="source" /></section>
-      <section className="glass-card p-5"><h2 className="m-0 mb-3 text-base font-semibold">Per week</h2><Bars items={(l.weekly || []).map((w) => ({ ...w, label: `Week of ${new Date(w.week).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` }))} valueKey="n" labelKey="label" /></section>
+      <section className="glass-card p-5"><h2 className="m-0 mb-1 text-base font-semibold">Per week</h2><p className="m-0 mb-2 text-[13px] text-glass-secondary">Website leads by the week they arrived.</p>
+        {(l.weekly || []).length ? <Columns label="Website leads per week" items={(l.weekly || []).map((w) => ({ k: new Date(w.week).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }), sub: 'week of', v: Number(w.n) || 0 }))} />
+          : <p className="m-0 text-sm text-glass-secondary">No website leads yet.</p>}</section>
       <p className="m-0 text-[13px] text-glass-secondary">To see which page and which Google search brought each lead, the website form needs to send the page address and UTM tags with the enquiry.</p>
     </div>
   );
@@ -431,11 +506,13 @@ export default function Website() {
   const route = useRoute();
   const tab = TABS.some(([k]) => k === route.section) ? route.section : 'overview';
   const [o, setO] = useState(cache);
+  const [t, setT] = useState(tcache);
   const [err, setErr] = useState('');
   const [access, setAccess] = useState(null);
   const [live, setLive] = useState(null);
   const [running, setRunning] = useState('');
   const load = useCallback(async () => {
+    rpc('api_web_trend').then((d) => { tcache = d; setT(d); }).catch(() => {});   // charts are extra: the page works without them
     try { const d = await rpc('api_web_overview'); cache = d; setO(d); setErr(''); } catch (e) { setErr(e.message); }
   }, []);
   useEffect(() => { load(); rpc('api_web_access').then(setAccess).catch(() => {}); }, [load]);
@@ -489,7 +566,7 @@ export default function Website() {
       </div>
       {err && !o && <div role="alert" className="glass-card p-5 text-sm">{err} <button type="button" className="text-[var(--accent)] font-medium ml-2" onClick={load}>Try again</button></div>}
       {!o && !err && <div className="glass-card p-5 text-sm text-glass-secondary">Loading…</div>}
-      {o && tab === 'overview' && <Overview o={o} live={live} go={go} />}
+      {o && tab === 'overview' && <Overview o={o} t={t} live={live} go={go} />}
       {o && tab === 'searches' && <Searches key={`${route.params.f || ''}|${route.params.q || ''}`} initialFilter={route.params.f} initialQ={route.params.q} />}
       {o && tab === 'ai' && <Ai o={o} canRun={access?.can_run} reload={load} />}
       {o && tab === 'health' && <Health o={o} />}

@@ -701,3 +701,13 @@ input[type="datetime-local"].glass-input { color-scheme: light; }
   color: #fff; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
 .crm-stale { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 12px;
   background: rgba(178, 106, 0, 0.10); color: #6B4100; font-size: 13px; }
+
+/* Website charts: one quiet entrance, then still. Off when the system asks for less motion. */
+.wv-draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: wv-draw .7s ease-out forwards; }
+.wv-fade { animation: wv-fade .5s ease-out both; }
+.wv-grow { animation: wv-grow .45s ease-out both; transform-box: view-box; }
+.wv-bar { transition: width .4s ease-out, opacity .15s; }
+@keyframes wv-draw { to { stroke-dashoffset: 0; } }
+@keyframes wv-fade { from { opacity: 0; } }
+@keyframes wv-grow { from { transform: scaleY(0); } }
+@media (prefers-reduced-motion: reduce) { .wv-draw { animation: none; stroke-dashoffset: 0; } .wv-fade, .wv-grow { animation: none; } .wv-bar { transition: none; } }

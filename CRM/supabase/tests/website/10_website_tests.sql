@@ -131,6 +131,13 @@ SELECT pg_temp.ok((SELECT bool_and((x.a->>'p')::int >= coalesce((y.a->>'p')::int
 SELECT pg_temp.ok((SELECT (v->'leads'->>'cur')::int = 3 AND (v->'leads'->>'prev')::int = 1 AND (v->'leads'->>'admissions')::int = 1
     AND v->'leads'->'by_source'->0->>'source' = 'website' FROM o), 'WB13 leads from the website: this period, last period, admissions, by source');
 SELECT pg_temp.ok((SELECT v->'runs'->'visitors'->>'status' = 'ok' FROM o), 'WB16 last run per job is shown');
+SELECT pg_temp.ok((SELECT jsonb_array_length(v->'gsc'->'cur') = 2 AND jsonb_array_length(v->'gsc'->'prev') = 1 AND (v->'gsc'->'cur'->0->>'clicks')::numeric = 30
+    AND v->'gsc'->'cur'->0->>'d' = '2026-11-01' AND v->'ranks'->'cur' = '{"top3": 1, "p1": 3, "p2": 1, "p3_5": 1, "beyond": 0}'::jsonb
+    AND (v->'ranks'->'prev'->>'p1')::int = 3 AND jsonb_array_length(v->'ga'->'cur') = 1 AND (v->'ga'->'prev'->0->>'users')::numeric = 80
+    FROM (SELECT public.api_web_trend() v) z), 'WB17 chart data: both windows day by day, GA4 days and how searches spread over positions');
+SELECT pg_temp.as_('b');
+SELECT pg_temp.fails($q$SELECT public.api_web_trend()$q$, '%do not have access%', 'WB17b chart data needs Website access');
+SELECT pg_temp.as_('a');
 SELECT pg_temp.as_('d');
 SELECT pg_temp.ok((public.api_web_copilot_upload('query', '[{"k": "pilot training delhi", "citations": 12}, {"k": "cpl cost", "citations": 3}, {"k": "", "citations": 9}]')->>'saved')::int = 2,
   'WB08 approvers upload the Copilot CSV (empty rows skipped)');
@@ -162,5 +169,6 @@ SELECT public.api_web_settings_save('https://weoneaviation.in/', '', '');
 SELECT pg_temp.ok(public.api_web_settings()->'psi_key' IS NULL OR jsonb_typeof(public.api_web_settings()->'psi_key') = 'null', 'WB14d an empty key removes it');
 RESET ROLE;
 SELECT pg_temp.ok(NOT has_function_privilege('anon', 'public.api_web_overview()', 'EXECUTE') AND NOT has_function_privilege('authenticated', 'public.svc_web_work()', 'EXECUTE')
+  AND NOT has_function_privilege('anon', 'public.api_web_trend()', 'EXECUTE')
   AND NOT has_table_privilege('authenticated', 'public.web_row', 'SELECT'), 'WB15 not callable without signing in; data and job functions are private');
 SELECT 'ALL WEBSITE SQL CHECKS PASSED';
