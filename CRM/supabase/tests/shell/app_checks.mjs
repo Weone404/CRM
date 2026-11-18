@@ -110,6 +110,46 @@ ok(/secret saved · META_ACCESS_TOKEN/.test(await body()), 'V10 activity shows w
 await nav.getByRole('button', { name: /^Settings/ }).click(); await page.waitForTimeout(1000);
 ok(/Now all in one place: Setup > Connections & keys/.test(await body()), 'V11 Settings points to Connections & keys');
 
+
+// Website (Phase 3)
+await page.goto(`${APP}#/website`);
+await page.getByRole('heading', { name: 'Website' }).waitFor({ timeout: 15000 });
+await page.waitForTimeout(1200);
+b = await body();
+ok(/GROWTH\s*Website/i.test(await nav.innerText()), 'WS01 Website is first under Growth');
+ok(/Clicks from Google\s*807\s*↑ 62% vs previous 28 days/.test(b) && /Seen on Google\s*231\.7K/.test(b) && /Average position\s*8\.3\s*Better · was 8\.9/.test(b), 'WS02 headline numbers with their change');
+ok(/Visitors\s*—\s*GA4 has no visits yet: fix/.test(b), 'WS02b visitors card says GA4 needs fixing instead of showing 0');
+ok(/On the site now\s*3\s*Most on CPL Course/.test(b), 'WS10 live visitors from GA4 realtime');
+const fix = page.locator('[data-section="actions"]');
+ok(/What to fix first/.test(await fix.innerText()) && (await fix.innerText()).includes('GA4 sends no visitor data') && /1 more/.test(await fix.innerText()), 'WS03 ranked fix list: top 5, the rest folded');
+ok(!/dgca-pariksha/.test(await page.locator('[data-fold="pages"]').innerText()) || !(await page.locator('[data-fold="pages"]').getAttribute('open')), 'WS03b top pages folded by default');
+await page.getByRole('button', { name: /11\s*Almost on page 1/ }).click(); await page.waitForTimeout(900);
+let cw = await calls();
+ok(/#\/website\/searches\?f=almost$/.test(page.url()) && cw.some((x) => x.fn === 'api_web_queries' && x.args.p_filter === 'almost'), 'WS04 an opportunity opens the Searches list already filtered');
+ok(await page.getByRole('button', { name: 'Almost page 1' }).getAttribute('aria-pressed') === 'true', 'WS04b the matching filter is selected');
+await page.getByText('egca login').first().click(); await page.waitForTimeout(300);
+ok(/\/blogs\/egca-login\s*4,000 seen · pos 12/.test(await body()), 'WS05 a search opens to show the pages competing for it');
+await page.getByRole('tab', { name: 'AI visibility' }).click(); await page.waitForTimeout(700);
+b = await body();
+ok(/ChatGPT\s*9\s*3\s*1/.test(b) && /\/cpl\s*6 · ChatGPT/.test(b), 'WS06 AI visits by assistant and their landing pages');
+ok(/GPTBot\s*Blocked/.test(b) && /llms\.txt: Not found \(optional\)/.test(b) && /80 of 92/.test(b), 'WS06b AI readiness: crawlers, llms.txt, structured data');
+await page.locator('input[type=file]').setInputFiles({ name: 'grounding.csv', mimeType: 'text/csv', buffer: Buffer.from('Grounding Query,Citations\n"pilot training, delhi",12\ncpl cost,3\n') });
+await page.waitForTimeout(900);
+cw = await calls();
+ok(cw.some((x) => x.fn === 'api_web_copilot_upload' && x.args.p_kind === 'query' && x.args.p_rows.length === 2 && x.args.p_rows[0].k === 'pilot training, delhi' && x.args.p_rows[0].citations === 12), 'WS06c Copilot CSV is read in the browser and saved');
+await page.getByRole('tab', { name: 'Speed & health' }).click(); await page.waitForTimeout(700);
+b = await body();
+ok(/Phone\s*Poor\s*· score 41/.test(b) && /LCP 4\.1 s · INP 180 ms · CLS 0\.05/.test(b) && /Fix first: Reduce unused JavaScript/.test(b), 'WS07 real-user speed per key page with the first fix');
+ok(/Submitted and indexed/.test(b) && /Pages\s*92\s*Errors\s*1/.test(b) && /Title over ~60 characters/.test(b), 'WS07b indexing and site check');
+await page.locator('[data-fold="broken"] summary').click();
+ok(/\/old\s*404\s*3/.test(await body()), 'WS07c broken links fold');
+await page.getByRole('tab', { name: 'Leads from website' }).click(); await page.waitForTimeout(500);
+ok(/Website leads · 28 days\s*23\s*↑ 28%/.test(await body()), 'WS08 leads from the website with change');
+await page.getByRole('button', { name: 'Refresh' }).click();
+await page.getByText('Website data is up to date').waitFor({ timeout: 10000 });
+cw = (await calls()).filter((x) => x.fn === 'edge:crm-website' && !(x.args.jobs.length === 1 && x.args.jobs[0] === 'live')).map((x) => x.args.jobs.join('+'));
+ok(cw.join(',') === 'search+visitors,scan,speed+index', 'WS09 Refresh runs search+visitors, then the site check, then speed+indexing');
+
 // Old "Academy" links still work
 await page.goto(`${APP}#/academy`); await page.waitForTimeout(1200);
 ok(/#\/academy$/.test(page.url()) && await nav.getByRole('button', { name: /^Students/ }).getAttribute('aria-current') === 'page', 'A10 old #/academy link opens a People screen');

@@ -92,9 +92,40 @@ Tests:
 - `supabase/tests/vault/run.sh` runs 18 SQL checks. They confirm that only Admin can open the page, that IDs come back in full while secrets come back as the last 4 only (no secret value anywhere in the answer), and that every store is covered, the activity log is merged and ordered, Amazon keys can be removed, private helpers stay private, and the rollback works.
 - `supabase/tests/shell/app_checks.mjs` adds 17 checks (V01–V11) for the page, run in the real app.
 
+## Phase 3: Website (migration 112, 2026-11-18)
+
+Growth > Website (`#/website`) covers weoneaviation.in. Admins and anyone with ADS access can view it; Admins and ADS approvers can press Refresh. It has five tabs, each with deep details folded:
+
+- **Overview:**
+  - Google clicks, how often the site was seen, average position, GA4 visitors and "on the site now" (GA4 Realtime).
+  - **What to fix first:** a ranked list built from every source.
+  - Opportunity tiles: almost on page 1, seen but rarely clicked, dropping, new searches, and two pages competing for one search.
+  - The top searches with their change. Top pages, Visitors, and "Where Google shows you" are folded.
+- **Google searches:** every query (Search Console, 28 days against the 28 before), with filters. The filters are: almost page 1, seen not clicked, dropping, new, questions & costs, brand, non-brand, and two pages competing. There is a search box, and each row opens to show the pages that rank for it.
+- **AI visibility:**
+  - Visits from ChatGPT, Perplexity, Gemini, Copilot, Claude, DeepSeek, Meta AI and Grok (GA4 session source), with their landing pages.
+  - Microsoft Copilot citations from an uploaded Bing Webmaster Tools CSV, because Bing has no API for them yet.
+  - A link to Search Console's report on Google AI Overviews and AI Mode.
+  - AI readiness: robots.txt rules for 13 crawlers, llms.txt, and structured-data coverage.
+- **Speed & health:**
+  - Real-user Core Web Vitals and Lighthouse scores per key page, on phone and computer, each with its top fixes. Source: PageSpeed Insights.
+  - URL Inspection for the key pages, and the sitemaps Google knows about.
+  - A scan of every sitemap page: status, speed, title, description, H1, canonical, schema, noindex and broken internal links.
+- **Leads from website:** CRM leads for the last 28 days against the 28 before, admissions, a breakdown by source, and counts per week.
+
+How the data is collected:
+- The new `crm-website` Edge Function collects the data. Nightly runs (pg_cron) are at 04:10, 04:25 and 04:40 IST, and Refresh triggers the same jobs.
+- It uses the Google sign-in, Search Console site and GA4 property already saved in Connections & keys.
+- A PageSpeed API key is optional and goes in Website settings. It is stored write-only, in Vault as `crm_web_psi_api_key`.
+- Everything is computed in SQL (`api_web_overview` and `api_web_queries`). Nothing is estimated.
+
+Tests:
+- `supabase/tests/website/run.sh`: 33 SQL checks plus a rollback check.
+- `website.test.ts` and `website_scan.test.ts`: 11 Deno checks. One runs a full scan against a local test site.
+- `app_checks.mjs`: WS01–WS10, run in the real app.
+
 ## Still to come
 
-- Phase 3: the Website module.
 - Phases 4–6: the same page layout applied to Ads, People, Amazon and FlightBridge AI.
 
 Server-side load worth reviewing later:

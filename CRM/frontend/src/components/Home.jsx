@@ -4,7 +4,7 @@ import { navigate } from '../utils/route';
 
 const DAY = 86400000;
 const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString('en-IN'));
-const short = (n) => (n == null ? '—' : n >= 100000 ? `${(n / 1000).toFixed(0)}K` : n >= 10000 ? `${(n / 1000).toFixed(1)}K` : fmt(n));
+const short = (n) => (n == null ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 10000 ? `${(n / 1000).toFixed(1)}K` : fmt(n));
 const pct = (cur, prev) => (prev > 0 ? Math.round((100 * (cur - prev)) / prev) : null);
 const label = (s) => { const t = String(s || 'new').replace(/[_-]+/g, ' ').trim(); return t.charAt(0).toUpperCase() + t.slice(1); };
 

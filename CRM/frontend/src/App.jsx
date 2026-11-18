@@ -39,6 +39,7 @@ const FlightBridge = lazy(() => import('./components/FlightBridge'));
 const PhoneApp = lazy(() => import('./components/AppAlerts').then((m) => ({ default: m.PhoneApp })));
 const BusinessEmail = lazy(() => import('./components/AppAlerts').then((m) => ({ default: m.BusinessEmail })));
 const Vault = lazy(() => import('./components/Vault'));
+const Website = lazy(() => import('./components/Website'));
 const Amazon = lazy(() => import('./components/Amazon'));
 const Ads = lazy(() => import('./components/Ads'));
 const AdsMeta = lazy(() => import('./components/AdsMeta'));
@@ -289,6 +290,7 @@ export default function App() {
     department === 'Admin' && { id: 'policy', label: 'Policy Docs', icon: 'policy' },
     canAccessFlightBridge && { id: 'partnerships', label: 'FlightBridge AI', icon: 'globe' },
     canAccessAmazon && { id: 'amazon', label: 'Amazon', icon: 'cart' },
+    (canAccessAds || (USE_SUPABASE && department === 'Admin')) && { id: 'website', label: 'Website', icon: 'chart' },
     canAccessAds && { id: 'ads', label: 'Google Ads', icon: 'rocket' },
     canAccessAds && { id: 'metaads', label: 'Meta Ads', icon: 'send' },
     USE_SUPABASE && department === 'Admin' && { id: 'connections', label: 'Connections & keys', icon: 'lock' },
@@ -501,6 +503,7 @@ export default function App() {
           {activeTab === 'account' && <div className="space-y-4">{accountCard}{USE_SUPABASE && <PhoneApp notifications={canAccessAmazon} />}</div>}
           {activeTab === 'leave' && isEmployeeSession && <LeaveCalendar employeeId={employee.id} />}
           {activeTab === 'connections' && USE_SUPABASE && department === 'Admin' && <Vault />}
+          {activeTab === 'website' && <Website />}
         </Suspense>
       </ErrorBoundary>
       </div>
