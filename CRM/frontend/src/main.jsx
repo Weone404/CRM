@@ -18,6 +18,21 @@ import { API_URL } from './api';
 // The original response is always returned.
 import { USE_SUPABASE } from './backend/mode';
 import { handleApiRequest, isRenderPassthrough, signOutSupabase, withSupabaseAuth } from './backend/router';
+import { supabase } from './backend/supabaseClient';
+import { renewSession as renew } from './utils/session';
+const renewSession = () => renew(supabase);
+
+// After a new version is deployed, an open tab still points at the old file names; opening a section then
+// failed with "Failed to fetch dynamically imported module" and the screen stayed blank. Vite reports this
+// as 'vite:preloadError': reload once to pick up the new version (guarded so it can never loop).
+window.addEventListener('vite:preloadError', (event) => {
+  const key = 'crm-reloaded-for-update';
+  const last = Number(sessionStorage.getItem(key) || 0);
+  if (Date.now() - last < 60000) return;
+  sessionStorage.setItem(key, String(Date.now()));
+  event.preventDefault();
+  window.location.reload();
+});
 
 // Supabase backend: every `${API_URL}/api/...` call is answered by backend/router.js
 // (same status codes and JSON shapes as the Render API), so no screen had to change.
@@ -68,7 +83,15 @@ if (!window.__crmFetchWrapped) {
         if (token && requestAuthHeader(input, init) === `Bearer ${token}`) {
           const body = await response.clone().json().catch(() => null);
           if (body?.detail === AUTH_FAILED_DETAIL) {
-            if (USE_SUPABASE) signOutSupabase();
+            // Before signing anyone out, try to renew the session once: after a laptop wakes up or Wi-Fi
+            // switches, the sign-in has often just expired and renews fine. Retry the original request then.
+            if (navigator.onLine === false) return response;
+            if (USE_SUPABASE) {
+              const renewed = await renewSession();
+              if (renewed === 'ok') return originalFetch(input, init);
+              if (renewed === 'offline') return response;
+              signOutSupabase();
+            }
             localStorage.removeItem('token');
             localStorage.removeItem('employee');
             window.location.replace('/');

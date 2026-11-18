@@ -14,6 +14,7 @@ import { TEAM_ROUTES } from './team';
 import { ATTENDANCE_ROUTES } from './attendance';
 import { DOCS_ROUTES, OUTBOX_ROUTE } from './docs';
 import { FLIGHTBRIDGE_ROUTES } from './flightbridge';
+import { isNetworkError } from './http';
 
 const json = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -23,6 +24,7 @@ const detail = (status, message) => json(status, { detail: message });
 async function rpc(fn, args = {}) {
   const { data, error, status } = await supabase.rpc(fn, args);
   if (error) {
+    if (isNetworkError(error, status)) return detail(503, "Can't reach the CRM server. Check your internet; it will retry.");
     const code = /^PT(\d{3})$/.exec(error.code || '');
     const httpStatus = code ? Number(code[1]) : (status && status >= 400 ? status : 500);
     if (httpStatus === 401 || /JWT|not authenticated/i.test(error.message || '')) {
@@ -33,9 +35,14 @@ async function rpc(fn, args = {}) {
   return json(200, data);
 }
 
-async function hasSession() {
-  const { data } = await supabase.auth.getSession();
-  return Boolean(data.session);
+// 'ok' | 'none' | 'offline'. A sign-in refresh that fails because the network dropped (laptop waking up, Wi-Fi
+// switching) is not the same as being signed out: answering 401 there used to log people out for no reason.
+async function sessionState() {
+  const { data, error } = await supabase.auth.getSession();
+  if (data?.session) return 'ok';
+  const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+  const networkish = error && (error.name === 'AuthRetryableFetchError' || !error.status || error.status >= 500);
+  return offline || networkish ? 'offline' : 'none';
 }
 
 // ---- Sign-in (crm-auth Edge Function) ------------------------------------------
@@ -161,14 +168,19 @@ export async function handleApiRequest(method, path, query, rawBody) {
     if (m !== method) continue;
     const match = pattern.exec(path);
     if (!match) continue;
-    if (!PUBLIC_PATHS.test(path) && !(await hasSession())) {
-      return detail(401, 'Could not validate credentials');
+    if (!PUBLIC_PATHS.test(path)) {
+      const st = await sessionState();
+      if (st === 'offline') return detail(503, "Can't reach the CRM right now. Check your internet; the CRM will retry.");
+      if (st === 'none') return detail(401, 'Could not validate credentials');
     }
     try {
       return await handler({ params: match.slice(1), body, query, form });
     } catch (err) {
       console.error('[supabase-backend]', method, path, err);
-      return detail(500, 'Something went wrong. Please try again.');
+      const timedOut = err?.name === 'TimeoutError' || err?.name === 'AbortError' || /fetch|network/i.test(String(err?.message || ''));
+      return timedOut
+        ? detail(503, "The CRM server didn't answer in time. Check your internet and try again.")
+        : detail(500, 'Something went wrong. Please try again.');
     }
   }
   return detail(501, `Not moved to the new backend yet: ${method} ${path}`);

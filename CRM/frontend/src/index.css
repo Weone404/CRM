@@ -34,9 +34,9 @@
   --label-4: rgba(0, 0, 0, 0.18);
 
   /* HIG tints and semantic colours */
-  --accent: #007AFF;
-  --accent-hover: #0062CC;
-  --accent-light: rgba(0, 122, 255, 0.12);
+  --accent: #0A63CE;
+  --accent-hover: #084E9F;
+  --accent-light: rgba(10, 99, 206, 0.10);
   --red: #FF3B30;
   --green: #34C759;
   --orange: #FF9500;
@@ -117,12 +117,8 @@ body::before {
   inset: 0;
   z-index: -1;
   pointer-events: none;
+  /* Calm, flat canvas (2026-11 redesign): no colour wash behind the work. */
   background:
-    radial-gradient(55% 45% at 6% 0%, rgba(0, 122, 255, 0.26) 0%, rgba(0, 122, 255, 0) 70%),
-    radial-gradient(45% 40% at 100% 6%, rgba(175, 82, 222, 0.20) 0%, rgba(175, 82, 222, 0) 70%),
-    radial-gradient(50% 45% at 92% 100%, rgba(48, 176, 199, 0.24) 0%, rgba(48, 176, 199, 0) 70%),
-    radial-gradient(45% 40% at 0% 96%, rgba(255, 45, 85, 0.12) 0%, rgba(255, 45, 85, 0) 70%),
-    radial-gradient(40% 35% at 50% 50%, rgba(88, 86, 214, 0.08) 0%, rgba(88, 86, 214, 0) 70%),
     var(--bg-secondary);
   transform: translateZ(0);
 }
@@ -501,7 +497,7 @@ input[type="datetime-local"].glass-input { color-scheme: light; }
 .safe-top { padding-top: env(safe-area-inset-top); }
 /* Room for the phone tab bar (and the home indicator) so the end of every page can be scrolled into view. */
 .app-shell { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
-@media (min-width: 768px) { .app-shell { padding-bottom: 0; } }
+@media (min-width: 1024px) { .app-shell { padding-bottom: 0; } }
 
 /* Phone tab bar: thicker glass so the coloured wallpaper does not glow through it. */
 .tab-bar { border-bottom: none; border-top: 1px solid var(--glass-edge); padding-bottom: env(safe-area-inset-bottom);
@@ -692,3 +688,16 @@ input[type="datetime-local"].glass-input { color-scheme: light; }
   background: rgba(118,118,128,.14); color: #6e6e73; }
 .guide-tick.is-on { background: rgba(52,199,89,.18); color: #1E7B34; }
 .guide-tick.is-off { background: rgba(255,59,48,.14); color: #C4261D; }
+
+/* ── Shell (2026-11 redesign): grouped left sidebar on laptops, bottom bar on phones and tablets ── */
+.crm-sidebar { width: 240px; flex: none; position: sticky; top: 57px; height: calc(100vh - 57px); overflow-y: auto;
+  border-right: 1px solid var(--hairline); background: rgba(251, 251, 253, 0.85); }
+.crm-side-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 38px; padding: 0 12px;
+  border-radius: 9px; font-size: 14px; color: var(--label); text-align: left; background: transparent; border: 0; cursor: pointer; width: 100%; }
+.crm-side-item:hover { background: rgba(118, 118, 128, 0.08); }
+.crm-side-item.is-active { background: var(--accent-light); color: var(--accent); font-weight: 600; }
+.crm-side-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.crm-side-badge { min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #C0271D;
+  color: #fff; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+.crm-stale { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 12px;
+  background: rgba(178, 106, 0, 0.10); color: #6B4100; font-size: 13px; }

@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import Login from './components/Login';
 import EmployeeLogin from './components/EmployeeLogin';
@@ -15,7 +15,11 @@ import { modalProps } from './components/ui/overlay';
 import { showToast } from './utils/toast';
 import { useRoute, navigate } from './utils/route';
 import LinkTile from './components/ui/LinkTile';
-import OverflowNav from './components/ui/OverflowNav';
+import Sidebar, { groupTabs } from './components/ui/Sidebar';
+import SignalPill from './components/ui/SignalPill';
+import ErrorBoundary from './components/ui/ErrorBoundary';
+import Home from './components/Home';
+import { markSynced } from './utils/netStatus';
 
 // Code-split everything that isn't needed for the first paint. Each of these
 // tabs/modals now ships as its own chunk fetched on demand, so a Sales user
@@ -42,7 +46,7 @@ const AdsMeta = lazy(() => import('./components/AdsMeta'));
 
 // Tabs the birthday popup is allowed to appear over: the landing tab plus the
 // two people-facing views. Anywhere else it would be an interruption.
-const BIRTHDAY_TABS = ['leads', 'team', 'attendance'];
+const BIRTHDAY_TABS = ['home', 'leads', 'team', 'attendance'];
 // Section access (Amazon, ADS). A slow network or a token refresh right after opening the app used to hide the
 // section until a reload; now: last known answer first, then up to 4 tries, and again whenever the app comes back to the screen.
 function loadAccess(fn, employee, set) {
@@ -62,7 +66,7 @@ function loadAccess(fn, employee, set) {
   return () => { live = false; clearTimeout(timer); document.removeEventListener('visibilitychange', again); };
 }
 
-// The Academy section groups these screens, in this order.
+// Old links to the former "Academy" group still open one of its screens.
 const ACADEMY = ['students', 'team', 'attendance', 'tasks'];
 
 export default function App() {
@@ -72,6 +76,13 @@ export default function App() {
   const [showStudentLogin, setShowStudentLogin] = useState(false);
   const [leads, setLeads] = useState([]);
   const [leadsError, setLeadsError] = useState('');
+  const [leadsReady, setLeadsReady] = useState(false);
+  // When a refresh fails but we already have data: keep showing it, say how old it is, retry quietly.
+  const [staleSince, setStaleSince] = useState(0);
+  const haveLeadsRef = useRef(false);
+  const lastSyncRef = useRef(0);
+  const retryRef = useRef({ timer: null, fails: 0 });
+  const syncingRef = useRef(null);
   const [followups, setFollowups] = useState([]);
   const [selectedLead, setSelectedLead] = useState(null);
   const [showOutbox, setShowOutbox] = useState(false);
@@ -79,7 +90,7 @@ export default function App() {
   const [config, setConfig] = useState({});
   // Where we are comes from the address (#/tab/section?filters), so links, Back/Forward and refresh all work.
   const route = useRoute();
-  const routeTab = route.tab || 'leads';
+  const routeTab = route.tab || 'home';
   useEffect(() => { window.scrollTo({ top: 0 }); }, [route.tab, route.section]);
   // Aviation (pilot training) or Charter (Book My Charter). Remembered per
   // browser so a charter desk stays on Charter; falls back safely if storage
@@ -145,11 +156,18 @@ export default function App() {
   // heavy /api/sync snapshot (all employees + 500 leads + 1000 contact attempts)
   // every 60s and throw almost all of it away — pure wasted bandwidth/CPU.
   useEffect(() => {
-    if (employee) {
-      syncNow();
-      const interval = setInterval(syncNow, 60000);
-      return () => clearInterval(interval);
-    }
+    if (!employee) return undefined;
+    syncNow();
+    // Refresh every minute while the CRM is on screen; a hidden tab does not poll (saves battery and server load).
+    const interval = setInterval(() => { if (document.visibilityState === 'visible') syncNow(); }, 60000);
+    // Coming back to the tab or back online: refresh straight away if the data is older than 20 s.
+    const back = () => { if (document.visibilityState === 'visible' && Date.now() - lastSyncRef.current > 20000) syncNow(); };
+    document.addEventListener('visibilitychange', back);
+    window.addEventListener('online', back);
+    return () => {
+      clearInterval(interval); clearTimeout(retryRef.current.timer);
+      document.removeEventListener('visibilitychange', back); window.removeEventListener('online', back);
+    };
   }, [employee]);
 
   // Config barely ever changes, so load it once per session instead of on every
@@ -178,37 +196,56 @@ export default function App() {
     if (!token) return;
     const shouldFetchLeads = !isEmployeeSession || canAccessLeads;
     if (!shouldFetchLeads) return;
-    try {
-      // Fetch leads + pending follow-ups concurrently (was sequential).
-      const [leadsRes, followupsRes] = await Promise.all([
-        apiFetch('/api/leads', { token }),
-        apiFetch('/api/followups/pending', { token }),
-      ]);
-      if (leadsRes.ok) {
-        setLeads(await leadsRes.json()); setLeadsError('');
-      } else {
-        let detail = '';
-        try { detail = (await leadsRes.json()).detail || ''; } catch { }
-        setLeadsError(`Server error (HTTP ${leadsRes.status})${detail ? `: ${detail}` : ''}. Data was not loaded.`);
-        return;
+    if (syncingRef.current) return syncingRef.current;          // one refresh at a time; extra clicks share it
+    const run = (async () => {
+      const failed = (message) => {
+        if (haveLeadsRef.current) {
+          // We already show data: keep it, mark it as saved data, retry with growing gaps (10 s, 20 s, 40 s, 60 s).
+          setStaleSince((t) => t || lastSyncRef.current || Date.now());
+          const r = retryRef.current; r.fails += 1; clearTimeout(r.timer);
+          r.timer = setTimeout(() => syncNow(), Math.min(60000, 10000 * 2 ** (r.fails - 1)));
+        } else {
+          setLeadsError(message);
+        }
+      };
+      try {
+        const [leadsRes, followupsRes] = await Promise.all([
+          apiFetch('/api/leads', { token }),
+          apiFetch('/api/followups/pending', { token }),
+        ]);
+        if (!leadsRes.ok) {
+          let detail = '';
+          try { detail = (await leadsRes.json()).detail || ''; } catch { }
+          failed(leadsRes.status >= 500 && /reach|internet|in time/i.test(detail) ? detail : `Server error (HTTP ${leadsRes.status})${detail ? `: ${detail}` : ''}. Data was not loaded.`);
+          return;
+        }
+        setLeads(await leadsRes.json()); setLeadsError(''); setLeadsReady(true);
+        haveLeadsRef.current = true; lastSyncRef.current = Date.now(); setStaleSince(0);
+        clearTimeout(retryRef.current.timer); retryRef.current.fails = 0;
+        markSynced();
+        if (followupsRes.ok) setFollowups(await followupsRes.json());
+      } catch (err) {
+        console.error('Sync failed:', err);
+        failed('Could not reach the server. Check your connection and retry.');
       }
-      if (followupsRes.ok) setFollowups(await followupsRes.json());
-    } catch (err) {
-      console.error('Sync failed:', err);
-      setLeadsError('Could not reach the server. Check your connection and retry.');
-    }
+    })();
+    syncingRef.current = run;
+    try { await run; } finally { syncingRef.current = null; }
   };
 
   const handleContact = async (leadId, data) => {
     const token = localStorage.getItem('token');
-    if (data.closure_outcome) {
-      await fetch(`${API_URL}/api/leads/${leadId}/close`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ closure_outcome: data.closure_outcome, note: data.note }) });
-      await syncNow(); return;
-    }
-    if (data.followup) {
-      await fetch(`${API_URL}/api/leads/${leadId}/followup`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ due_date: data.due_date, reason: data.reason }) });
-    } else {
-      await fetch(`${API_URL}/api/leads/${leadId}/contact`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    const post = (path, body) => fetch(`${API_URL}/api/leads/${leadId}/${path}`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    let res;
+    try {
+      if (data.closure_outcome) res = await post('close', { closure_outcome: data.closure_outcome, note: data.note });
+      else if (data.followup) res = await post('followup', { due_date: data.due_date, reason: data.reason });
+      else res = await post('contact', data);
+    } catch { res = null; }
+    if (!res || !res.ok) {
+      const msg = res ? ((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`) : 'No connection';
+      showToast(`Not saved: ${msg}. Please try again.`, 'error');
+      throw new Error(msg);                                      // lets the lead panel keep what was typed
     }
     await syncNow();
   };
@@ -244,6 +281,7 @@ export default function App() {
   }
 
   const tabs = [
+    { id: 'home', label: 'Home', icon: 'home' },
     canAccessLeads && { id: 'leads', label: 'Leads', icon: 'leads' },
     canAccessLeads && { id: 'students', label: 'Students', icon: 'students' },
     { id: 'tasks', label: isEmployeeSession ? 'My Tasks' : 'Tasks', icon: 'tasks' },
@@ -272,33 +310,25 @@ export default function App() {
       </div>
     </div>
   );
-  // Main sections: Leads, Academy (Students, Team, Attendance, Tasks), Amazon, Google Ads, Meta Ads; everything else is under More.
+  // Navigation: grouped sidebar on laptops (Home / People / Growth / Setup), bottom bar + grouped sheet on phones and tablets.
   // Each screen keeps its own address (#/students, #/tasks ...), so old links and bookmarks still work.
-  const academyKids = ACADEMY.map((id) => tabs.find((t) => t.id === id)).filter(Boolean);
-  const pick = (id) => tabs.find((t) => t.id === id);
-  const primary = [
-    pick('leads'),
-    academyKids.length > 0 && { id: 'academy', label: 'Academy', logo: true },
-    pick('amazon'),
-    pick('ads'),
-    pick('metaads'),
-  ].filter(Boolean);
-  const moreTabs = tabs.filter((t) => !['leads', 'amazon', 'ads', 'metaads', ...ACADEMY].includes(t.id));
-  const lastAcademy = () => { try { const v = localStorage.getItem('academy_tab'); return academyKids.some((k) => k.id === v) ? v : null; } catch { return null; } };
-  const wanted = routeTab === 'academy' ? (lastAcademy() || academyKids[0]?.id) : routeTab;
-  const activeTab = tabs.some((t) => t.id === wanted) ? wanted : (primary[0]?.id === 'academy' ? academyKids[0]?.id : primary[0]?.id) || tabs[0]?.id || 'tasks';
-  const section = ACADEMY.includes(activeTab) ? 'academy' : activeTab;
+  const lastAcademy = () => { try { const v = localStorage.getItem('academy_tab'); return ACADEMY.includes(v) && tabs.some((t) => t.id === v) ? v : null; } catch { return null; } };
+  const wanted = routeTab === 'academy' ? (lastAcademy() || ACADEMY.find((id) => tabs.some((t) => t.id === id))) : routeTab;
+  const activeTab = tabs.some((t) => t.id === wanted) ? wanted : 'home';
+  const section = activeTab;
   const go = (id) => {
     setShowMore(false);
-    if (id === 'academy') { navigate(lastAcademy() || academyKids[0]?.id); return; }
     if (ACADEMY.includes(id)) { try { localStorage.setItem('academy_tab', id); } catch { /* ignore */ } }
     navigate(id);
   };
-  // Phones: as many sections as the width allows (about 72px each); ⋯ appears only when some do not fit.
-  const allNav = [...primary, ...moreTabs];
-  const slots = Math.max(3, Math.floor(vw / 72));
-  const barItems = allNav.length <= slots ? allNav : allNav.slice(0, slots - 1);
-  const sheetItems = allNav.slice(barItems.length);
+  const untouchedCount = canAccessLeads ? leads.filter((l) => !l.first_contacted_at && !l.closed && !l.closure_outcome).length : 0;
+  const navBadges = { leads: untouchedCount || 0 };
+  // Phones: the most used sections in the bar (about 72px each); everything else in the grouped "More" sheet.
+  const PHONE_FIRST = ['home', 'leads', 'tasks', 'students', 'ads', 'metaads'];
+  const ordered = [...PHONE_FIRST.map((id) => tabs.find((t) => t.id === id)).filter(Boolean), ...tabs.filter((t) => !PHONE_FIRST.includes(t.id))];
+  const slots = Math.min(5, Math.max(3, Math.floor(vw / 72)));
+  const barItems = ordered.length <= slots ? ordered : ordered.slice(0, slots - 1);
+  const sheetItems = ordered.slice(barItems.length);
   const sheetActive = sheetItems.some((t) => t.id === section);
   const tabIcon = (t, size, active) => (t.logo
     ? <img src="/icons/academy-mark.png" alt="" width={size + 4} height={size} style={{ width: size + 4, height: size }} className={`nav-logo ${active ? 'is-active' : ''}`} />
@@ -311,9 +341,10 @@ export default function App() {
       <nav className="px-3 sm:px-6 py-2.5 flex justify-between items-center gap-2 relative">
         <h1 className="text-base sm:text-xl font-bold tracking-tight flex items-center gap-2 min-w-0 text-glass-primary">
           <img src="/icons/crm-mark.png" alt="" width={32} height={32} className="rounded-[9px] shrink-0" style={{ width: 32, height: 32, boxShadow: '0 1px 3px rgba(0,0,0,0.12), 0 0 0 0.5px rgba(0,0,0,0.06)' }} />
-          <span className="truncate">CRM</span>
+          <span className="truncate">We One CRM</span>
         </h1>
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <SignalPill />
           {canAccessLeads && (
             <button onClick={() => setShowOutbox(true)} className="glass-btn-ghost px-3 py-2 text-sm inline-flex items-center gap-1.5 min-h-[40px]" aria-label="Outbox">
               <Icon name="outbox" size={16} /><span className="hidden sm:inline">Outbox</span>
@@ -323,15 +354,10 @@ export default function App() {
         </div>
       </nav>
 
-      {/* Tabs: tablet and desktop. Every section shows when it fits; only what does not fit goes behind ⋯ */}
-      <OverflowNav className="hidden md:block px-2 sm:px-4 pb-1" ariaLabel="Sections" items={allNav} activeId={section} onSelect={go}
-        itemClass={(a) => `glass-tab-btn inline-flex items-center gap-2 ${a ? 'active' : ''}`}
-        dotsClass={(a) => `nav-dots ${a ? 'is-active' : ''}`}
-        renderItem={(t, a) => <>{tabIcon(t, 16, a)}{t.label}</>} />
       </header>
 
-      {/* Tabs: phones (bottom bar) */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 glass-nav tab-bar" aria-label="Sections">
+      {/* Tabs: phones and tablets (bottom bar) */}
+      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 glass-nav tab-bar" aria-label="Sections">
         <div className="grid" style={{ gridTemplateColumns: `repeat(${barItems.length + (sheetItems.length > 0 ? 1 : 0)}, minmax(0, 1fr))` }}>
           {barItems.map((t) => (
             <button key={t.id} onClick={() => go(t.id)} aria-current={section === t.id ? 'page' : undefined} aria-label={t.label}
@@ -349,33 +375,44 @@ export default function App() {
       </nav>
 
       {showMore && createPortal(
-        <div className="md:hidden fixed inset-0 z-50 glass-overlay flex items-end" {...modalProps(() => setShowMore(false))}>
+        <div className="lg:hidden fixed inset-0 z-50 glass-overlay flex items-end" {...modalProps(() => setShowMore(false))}>
           <div className="w-full glass-strong rounded-b-none p-4 pb-6 animate-glass-in" style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }} role="dialog" aria-label="More" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-2">
               <div className="font-semibold text-glass-primary">{employee.name}</div>
               <button onClick={() => setShowMore(false)} className="p-2 rounded-full text-glass-muted min-h-[44px] min-w-[44px] inline-flex items-center justify-center" aria-label="Close"><Icon name="close" size={20} /></button>
             </div>
-            <div className="grid grid-cols-1 gap-1">
-              {sheetItems.map((t) => (
-                <button key={t.id} onClick={() => go(t.id)} className={`flex items-center gap-3 px-3 min-h-[48px] rounded-xl text-base ${section === t.id ? 'bg-[var(--accent-light)] text-[var(--accent)] font-semibold' : 'text-glass-primary'}`}>
-                  {tabIcon(t, 20, section === t.id)}{t.label}
-                </button>
-              ))}
-            </div>
+            {groupTabs(sheetItems).map((g) => (
+              <div key={g.id} className="mb-2">
+                {g.label && <div className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.05em] text-glass-secondary">{g.label}</div>}
+                <div className="grid grid-cols-1 gap-1">
+                  {g.items.map((t) => (
+                    <button key={t.id} onClick={() => go(t.id)} className={`flex items-center gap-3 px-3 min-h-[48px] rounded-xl text-base ${section === t.id ? 'bg-[var(--accent-light)] text-[var(--accent)] font-semibold' : 'text-glass-primary'}`}>
+                      {tabIcon(t, 20, section === t.id)}{t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         </div>,
         document.body
       )}
 
-      {/* Main Content */}
-      <div className="p-4 sm:p-6 max-w-7xl mx-auto">
-        {section === 'academy' && academyKids.length > 1 && (
-          <div className="seg-control mb-4" role="tablist" aria-label="Academy" style={{ gridTemplateColumns: `repeat(${academyKids.length}, minmax(0, 1fr))` }}>
-            {academyKids.map((t) => (
-              <button key={t.id} role="tab" aria-selected={activeTab === t.id} onClick={() => go(t.id)} className={activeTab === t.id ? 'is-active' : ''}>
-                <Icon name={t.icon} size={16} /><span className="truncate">{t.label}</span>
-              </button>
-            ))}
+      {/* Sidebar (laptops) + the open section */}
+      <div className="flex items-start">
+      <Sidebar tabs={tabs} active={section} onSelect={go} badges={navBadges} />
+      <main className="flex-1 min-w-0 p-4 sm:p-6">
+      <div className="max-w-7xl mx-auto">
+      <ErrorBoundary name={tabs.find((t) => t.id === activeTab)?.label} resetKey={activeTab}>
+        {activeTab === 'home' && (
+          <Home employee={employee} leads={leads} followups={followups} leadsReady={leadsReady}
+            canAccessLeads={canAccessLeads} canAccessAds={canAccessAds} onOpenTab={(tab, sec, params) => navigate(tab, sec, params)} />
+        )}
+        {activeTab === 'leads' && canAccessLeads && staleSince > 0 && !leadsError && (
+          <div className="crm-stale mb-4" role="status">
+            <Icon name="clock" size={15} />
+            <span>Couldn't refresh. Showing leads from {new Date(staleSince).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}; retrying automatically.</span>
+            <button type="button" onClick={syncNow} className="ml-auto font-medium underline">Retry now</button>
           </div>
         )}
         {activeTab === 'leads' && canAccessLeads && leadsError && (
@@ -460,6 +497,9 @@ export default function App() {
           {activeTab === 'account' && <div className="space-y-4">{accountCard}{USE_SUPABASE && <PhoneApp notifications={canAccessAmazon} />}</div>}
           {activeTab === 'leave' && isEmployeeSession && <LeaveCalendar employeeId={employee.id} />}
         </Suspense>
+      </ErrorBoundary>
+      </div>
+      </main>
       </div>
 
       <Suspense fallback={null}>

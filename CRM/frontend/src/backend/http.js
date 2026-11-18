@@ -1,6 +1,11 @@
 // Shared helpers for the Supabase route modules: Render-style responses and RPC calls.
 import { supabase, AUTH_FUNCTION_URL, SUPABASE_PUBLISHABLE_KEY } from './supabaseClient';
 
+// The request never reached the server or got no answer (offline, Wi-Fi dropped, time limit): a connection
+// problem, not a CRM bug. supabase-js reports these with status 0 and a fetch error message.
+export const isNetworkError = (error, status) =>
+  !status && /Failed to fetch|NetworkError|Load failed|network|aborted|TimeoutError|took too long/i.test(`${error?.name || ''} ${error?.message || ''} ${error?.details || ''}`);
+
 export const json = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 export const detail = (status, message) => json(status, { detail: message });
@@ -20,6 +25,7 @@ export async function call(fn, args = {}) {
   const { data, error, status } = res;
   if (!error) return { data };
   if (TRANSIENT.has(error.code)) return { error: detail(503, 'The database was busy for a moment. Please try again.') };
+  if (isNetworkError(error, status)) return { error: detail(503, "Can't reach the CRM server. Check your internet; it will retry.") };
   const code = /^PT(\d{3})$/.exec(error.code || '');
   const httpStatus = code ? Number(code[1]) : (status && status >= 400 ? status : 500);
   if (httpStatus === 401 || /JWT|not authenticated/i.test(error.message || '')) {

@@ -19,7 +19,9 @@ export default function LeadDetail({ lead, onClose, onContact }) {
   const closure = CLOSURE[isCharter ? 'charter' : 'aviation'];
   const trip = lead.charter_details || {};
 
-  const handleSave = async () => {
+  // A failed save shows its own message and keeps what was typed (the panel stays open).
+  const handleSave = () => save().catch(() => {});
+  const save = async () => {
     if (!disposition) { showToast('Select a disposition first', 'error'); return; }
     if (disposition === 'Closed') { if (!closureOutcome) { showToast(`Select ${closure.positive.label} or ${closure.negative.label}`, 'error'); return; } await onContact(lead.id, { closure_outcome: closureOutcome, note }); setDisposition(''); setClosureOutcome(''); setTrack(''); setNote(''); onClose(); return; }
     if (disposition === 'Interested' && !isCharter && !track) { showToast('Select a track (CPL / PPL / Flying)', 'error'); return; }
