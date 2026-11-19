@@ -35,10 +35,18 @@ const CONTENT = {
       evidence: [{ signal: 'search', detail: 'cpl fees in india, 900 seen' }], outline: ['Ground classes', 'Flying hours'] }, media: { permalink: 'https://www.instagram.com/reel/abc/' },
       stats: { views: 1200, shares: 30 }, leads: 2, link: 'https://weoneaviation.in/?utm_source=instagram&utm_medium=reel&utm_campaign=content_11' },
     { id: 12, kind: 'carousel', source: 'planner', title: 'Pilot after 12th: 6 steps', slot: at(1, '13:30'), status: 'planned', brief: { hook: 'The whole path on one swipe', evidence: [] }, stats: {}, leads: 0, link: 'x' }],
-  ad_creatives: [{ id: 22, kind: 'ad_video', source: 'studio', title: 'Pilot after 12th: check this first', status: 'ready', strategy_id: null, creative_key: null,
-      paths: {}, video_path: 'ad/22/video.mp4', thumb_path: 'ad/22/thumb.jpg', brief: { visual_brief: 'AI pilot presenter in the cockpit' } },
-    { id: 21, kind: 'ad_image', title: 'Cost card', status: 'ready', strategy_id: 900, creative_key: 'i1', has_picture: true, paths: {}, brief: { visual_brief: 'Clean card with the 5 cost blocks' } }],
-  video_slots: [{ strategy_id: 900, strategy: 'CPL admissions, Delhi NCR', approved: true, key: 'v1', name: 'Day in training', has_video: false }],
+  ad_creatives: [
+    { id: 31, kind: 'ad_video', source: 'studio', title: 'Myth: no science means no pilot', stage: 'made', status: 'ready', video_path: 'ad/31/video.mp4', thumb_path: 'ad/31/thumb.jpg', paths: {}, brief: { visual_brief: 'AI pilot presenter, myth vs fact' }, caption: 'x', ig: {} },
+    { id: 22, kind: 'ad_video', source: 'studio', title: 'Pilot after 12th: check this first', stage: 'approved', status: 'ready', video_path: 'ad/22/video.mp4', thumb_path: 'ad/22/thumb.jpg',
+      paths: {}, brief: {}, caption: '12th ke baad pilot banna hai? Free career counselling, no commitment.', approved_at: '2026-11-19T10:00:00Z', post_at: null, ig: {} },
+    { id: 23, kind: 'ad_video', source: 'studio', title: 'Parents: 3 questions before fees', stage: 'posted', status: 'posted', video_path: 'ad/23/video.mp4', thumb_path: 'ad/23/thumb.jpg', paths: {}, brief: {},
+      caption: 'Beta pilot banna chahta hai?', ig: { media_id: '17950000000000001', permalink: 'https://www.instagram.com/reel/abc/', posted_at: new Date(Date.now() - 2 * 864e5).toISOString(), stats: { views: 4210, likes: 186, saves: 41, comments: 9 } }, new_comments: 3 },
+    { id: 24, kind: 'ad_video', source: 'studio', title: '200 hours: the right order', stage: 'results', status: 'posted', video_path: 'ad/24/video.mp4', thumb_path: 'ad/24/thumb.jpg', paths: {}, brief: {},
+      strategy_id: 900, creative_key: 'v3', ig: { media_id: '17950000000000002', permalink: 'https://www.instagram.com/reel/def/', stats: {} }, results: { spend: 1840, leads: 7, cpl: 263, qualified: 3 }, new_comments: 0 }],
+  ad_slots: [{ strategy_id: 900, strategy: 'CPL admissions, Delhi NCR', approved: true, key: 'v2', name: 'Parents', format: 'video', taken: false },
+             { strategy_id: 900, strategy: 'CPL admissions, Delhi NCR', approved: true, key: 'i1', name: 'Cost card', format: 'image', taken: false }],
+  campaigns: [{ strategy_id: 900, title: 'CPL leads · Delhi NCR', daily_budget: 700, videos: 3, pictures: 2, learning_day: 3, campaigns: [{ id: '7001', status: 'ACTIVE' }] }],
+  instagram: { user_id: '17841400000000001', username: 'we_one_aviation', checked_at: new Date().toISOString(), problem: null },
   strategies: [{ id: 900, title: 'CPL admissions, Delhi NCR', approved_version: 1 }],
   results: [{ id: 11, kind: 'reel', title: 'CPL cost, line by line', slot: at(0, '13:30'), stats: { views: 1200, shares: 30, saves: 12 }, leads: 2, permalink: 'https://www.instagram.com/reel/abc/' }],
   studio: { last_seen: new Date().toISOString(), autoplan: 'on' },
@@ -153,6 +161,8 @@ http.createServer((req, res) => {
     if (fn === 'api_web_access') return send(res, 200, { can_view: true, can_run: true, is_admin: true });
     if (fn === 'api_web_overview') return send(res, 200, WEB);
     if (fn === 'api_content_overview') return send(res, 200, CONTENT);
+    if (fn === 'api_content_comments') return send(res, 200, [{ id: '18000000000000001', username: 'parent_delhi', body: 'Fees kitni hai?', at: new Date().toISOString(), seen: false, hidden: false }]);
+    if (fn === 'api_content_item_save') return send(res, 200, { id: 1, stage: 'approved' });
     if (fn === 'api_content_plan') return send(res, 200, { plan_id: 1 });
     if (fn === 'api_content_item_save') return send(res, 200, { id: 12 });
     if (fn === 'api_web_trend') return send(res, 200, TREND);

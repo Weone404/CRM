@@ -179,3 +179,41 @@ test("MetaAds video upload: Meta fetches the file from a link; status is read ba
   assert.match(calls[0].url, /act_1\/advideos/); assert.match(calls[0].body!, /file_url=https%3A%2F%2Fx\.supabase\.co/);
   assert.equal(await m.videoStatus("9001"), "ready"); assert.match(calls[1].url, /9001\?fields=status/);
 });
+
+test("Ad studio (119): a posted Instagram post becomes the ad itself, with the lead form; without the account it falls back", () => {
+  const w = work({ posts: { v1: { ig_media_id: "17950000000000001" } }, ig_user_id: "17841400000000001" });
+  assert.equal(planSteps(w).find((x) => x.key === "creative:v1:f1")!.skip, undefined);
+  const c = creativeParams(w, plan.creatives[1], "777");
+  assert.equal(c.source_instagram_media_id, "17950000000000001"); assert.equal(c.instagram_user_id, "17841400000000001");
+  assert.equal(c.object_id, "100521046017357"); assert.equal(c.object_story_spec, undefined);
+  assert.deepEqual(JSON.parse(c.call_to_action), { type: "LEARN_MORE", value: { lead_gen_form_id: "777" } });
+  assert.match(planSteps(work({ posts: { v1: { ig_media_id: "1795" } } })).find((x) => x.key === "creative:v1:f1")!.skip!, /attach its video/);   // no account id
+});
+
+test("MetaAds Instagram: container, status, publish, numbers, comments, reply and hide", async () => {
+  const calls: { url: string; body?: string; method?: string }[] = [];
+  const fake = async (url: string | URL | Request, init?: RequestInit) => {
+    const u = String(url); calls.push({ url: u, body: init?.body as string | undefined, method: init?.method });
+    if (u.includes("/me/permissions")) return new Response(JSON.stringify({ data: [{ permission: "instagram_basic", status: "granted" }, { permission: "ads_read", status: "declined" }] }));
+    if (u.includes("instagram_business_account")) return new Response(JSON.stringify({ instagram_business_account: { id: "1784", username: "we_one_aviation" } }));
+    if (u.endsWith("/1784/media")) return new Response(JSON.stringify({ id: "c1" }));
+    if (u.includes("/c1?")) return new Response(JSON.stringify({ status_code: "FINISHED" }));
+    if (u.endsWith("/media_publish")) return new Response(JSON.stringify({ id: "m1" }));
+    if (u.includes("/m1/insights")) return new Response(JSON.stringify({ data: [{ name: "views", values: [{ value: 4210 }] }, { name: "saved", total_value: { value: 41 } }] }));
+    if (u.includes("/m1/comments")) return new Response(JSON.stringify({ data: [{ id: "18000", text: "Fees?", username: "p", timestamp: "2026-11-20T10:00:00+0000" }] }));
+    if (u.includes("/m1?")) return new Response(JSON.stringify({ permalink: "https://www.instagram.com/reel/abc/", like_count: 186 }));
+    return new Response(JSON.stringify({ id: "r1", success: true }));
+  };
+  const m = new MetaAds({ accessToken: "EAAtoken", version: "v26.0" }, fake as typeof fetch);
+  assert.deepEqual(await m.permissions(), ["instagram_basic"]);
+  assert.deepEqual(await m.igAccount("100521046017357"), { id: "1784", username: "we_one_aviation" });
+  assert.equal(await m.igContainer("1784", { media_type: "REELS", video_url: "https://x/v.mp4", caption: "Hi", is_ai_generated: "true" }), "c1");
+  assert.match(calls.at(-1)!.body!, /media_type=REELS/); assert.match(calls.at(-1)!.body!, /is_ai_generated=true/);
+  assert.equal(await m.igContainerStatus("c1"), "FINISHED");
+  assert.equal(await m.igPublish("1784", "c1"), "m1"); assert.match(calls.at(-1)!.body!, /creation_id=c1/);
+  assert.equal((await m.igMedia("m1")).like_count, 186);
+  assert.deepEqual(await m.igInsights("m1", ["views", "saved"]), { views: 4210, saved: 41 });
+  assert.equal((await m.igComments("m1"))[0].id, "18000");
+  assert.equal(await m.igReply("18000", "Call us for the fee breakdown"), "r1"); assert.match(calls.at(-1)!.url, /18000\/replies/);
+  await m.igHide("18000", true); assert.match(calls.at(-1)!.body!, /hide=true/);
+});

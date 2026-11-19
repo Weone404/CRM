@@ -448,6 +448,51 @@ export class MetaAds {
     return Array.isArray(b?.data) ? b.data : [];
   }
   // A picture for ad creatives (base64 PNG / JPEG); returns its image hash.
+  // Instagram (Growth > Content > Ad creatives, migration 119): the account behind the Page, publishing, numbers, comments.
+  async permissions(): Promise<string[]> {
+    const b = await this.req("GET", "me/permissions");
+    return (b?.data ?? []).filter((x: any) => x.status === "granted").map((x: any) => String(x.permission));
+  }
+  async igAccount(pageId: string): Promise<{ id: string; username: string } | null> {
+    const b = await this.req("GET", pageId, { fields: "instagram_business_account{id,username}" });
+    const a = b?.instagram_business_account;
+    return a?.id ? { id: String(a.id), username: String(a.username ?? "") } : null;
+  }
+  async igContainer(igUserId: string, p: Record<string, string>): Promise<string> {
+    const b = await this.req("POST", `${igUserId}/media`, p, true);
+    if (!b?.id) throw new AdsError("sync_failed", "Instagram did not return a container id");
+    return String(b.id);
+  }
+  async igContainerStatus(containerId: string): Promise<string> {
+    const b = await this.req("GET", containerId, { fields: "status_code,status" });
+    return String(b?.status_code ?? "IN_PROGRESS");               // FINISHED | IN_PROGRESS | ERROR | EXPIRED | PUBLISHED
+  }
+  async igPublish(igUserId: string, containerId: string): Promise<string> {
+    const b = await this.req("POST", `${igUserId}/media_publish`, { creation_id: containerId }, true);
+    if (!b?.id) throw new AdsError("sync_failed", "Instagram did not return a post id");
+    return String(b.id);
+  }
+  async igMedia(mediaId: string): Promise<any> {
+    return this.req("GET", mediaId, { fields: "permalink,like_count,comments_count,media_type,is_ai_generated" });
+  }
+  async igInsights(mediaId: string, metrics: string[]): Promise<Record<string, number>> {
+    const b = await this.req("GET", `${mediaId}/insights`, { metric: metrics.join(",") });
+    const out: Record<string, number> = {};
+    for (const m of b?.data ?? []) { const v = m?.values?.[0]?.value ?? m?.total_value?.value; if (typeof v === "number") out[String(m.name)] = v; }
+    return out;
+  }
+  async igComments(mediaId: string): Promise<any[]> {
+    const b = await this.req("GET", `${mediaId}/comments`, { fields: "id,text,username,timestamp", limit: "50" });
+    return b?.data ?? [];
+  }
+  async igReply(commentId: string, text: string): Promise<string> {
+    const b = await this.req("POST", `${commentId}/replies`, { message: text.slice(0, 2200) }, true);
+    return String(b?.id ?? "");
+  }
+  async igHide(commentId: string, hide: boolean): Promise<void> {
+    await this.req("POST", commentId, { hide: hide ? "true" : "false" }, true);
+  }
+
   // Video ads: Meta downloads the file itself from a short-lived link (no bytes through the edge function), then processes it.
   async uploadVideo(accountId: string, fileUrl: string, name: string): Promise<string> {
     const b = await this.req("POST", `act_${accountId}/advideos`, { file_url: fileUrl, name: name.slice(0, 100) }, true);

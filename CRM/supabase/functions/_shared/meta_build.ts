@@ -13,6 +13,7 @@ export interface BuildWork {
   goal: { website_url?: string; privacy_url?: string; start_date?: string; languages?: string[] };
   plan: any; steps: Record<string, { id?: string; status?: string; error?: string }>; images: Record<string, { hash?: string }>;
   videos?: Record<string, { id?: string; thumb_hash?: string }>;
+  posts?: Record<string, { ig_media_id?: string }>; ig_user_id?: string | null;
 }
 export interface Step { key: string; kind: "form" | "campaign" | "adset" | "creative" | "ad"; label: string; needs: string[]; skip?: string }
 
@@ -40,7 +41,8 @@ export function planSteps(w: BuildWork): Step[] {
     const [k, f] = pair.split("|");
     const cr = creatives.get(k);
     if (!cr) continue;
-    const skip = cr.format === "video"
+    const post = w.posts?.[k]?.ig_media_id && w.ig_user_id;
+    const skip = post ? undefined : cr.format === "video"
       ? (w.videos?.[k]?.id && w.videos?.[k]?.thumb_hash ? undefined
         : "Video ad: attach its video in Growth > Content > Ad creatives and press Use in Meta, then press Create in Meta again")
       : cr.format !== "image" ? "Carousel ad: upload the cards and create it in Ads Manager (text is in the plan)"
@@ -172,6 +174,13 @@ export function adsetParams(w: BuildWork, c: any, a: any, campaignId: string, t:
 }
 
 export function creativeParams(w: BuildWork, cr: any, formId: string): Record<string, string> {
+  const post = w.posts?.[cr.key]?.ig_media_id;
+  if (post && w.ig_user_id) {                    // the Instagram post itself becomes the ad: likes and comments stay on one post
+    return {
+      name: nm(w, cr.name), object_id: String(w.page_id), instagram_user_id: String(w.ig_user_id), source_instagram_media_id: String(post),
+      call_to_action: J({ type: cr.cta || "LEARN_MORE", value: { lead_gen_form_id: formId } }),
+    };
+  }
   const v = w.videos?.[cr.key];
   if (cr.format === "video" && v?.id) {
     return {

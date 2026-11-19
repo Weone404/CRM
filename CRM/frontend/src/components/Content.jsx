@@ -150,69 +150,231 @@ function Ideas({ d }) {
     </div>);
 }
 
-// ---------------------------------------------------------------- ad creatives
-function Picture({ path }) {
+// ---------------------------------------------------------------- ad creatives (Ad studio, migration 119)
+// Every ad moves Made -> Approved -> Posted -> In ads -> Results. One card per ad, one dark button: always the next step.
+function Picture({ path, className = 'h-40 rounded-lg border border-[var(--hairline)] object-cover' }) {
   const [url, setUrl] = useState(null);
-  useEffect(() => { let on = true; supabase.storage.from('content').createSignedUrl(path, 3600).then(({ data }) => { if (on) setUrl(data?.signedUrl || null); }); return () => { on = false; }; }, [path]);
-  return url ? <img src={url} alt="" className="h-40 rounded-lg border border-[var(--hairline)] object-cover" /> : <div className="h-40 w-32 rounded-lg bg-[var(--surface-sunken)]" />;
+  useEffect(() => { let on = true; if (path) supabase.storage.from('content').createSignedUrl(path, 3600).then(({ data }) => { if (on) setUrl(data?.signedUrl || null); }); return () => { on = false; }; }, [path]);
+  return url ? <img src={url} alt="" className={className} /> : <div className={`${className} bg-[var(--surface-sunken)]`} />;
 }
-function VideoLink({ path }) {
+function useSigned(path) {
   const [url, setUrl] = useState(null);
-  useEffect(() => { let on = true; supabase.storage.from('content').createSignedUrl(path, 3600).then(({ data }) => { if (on) setUrl(data?.signedUrl || null); }); return () => { on = false; }; }, [path]);
-  return url ? <a className="text-[13px]" href={url} target="_blank" rel="noreferrer">Watch the ad video</a> : null;
+  useEffect(() => { let on = true; if (path) supabase.storage.from('content').createSignedUrl(path, 3600).then(({ data }) => { if (on) setUrl(data?.signedUrl || null); }); return () => { on = false; }; }, [path]);
+  return url;
 }
-function Attach({ it, slots, reload }) {
-  const cur = it.strategy_id && it.creative_key ? `${it.strategy_id}:${it.creative_key}` : '';
-  const pick = (v) => {
-    const [sid, key] = v ? v.split(':') : [null, null];
-    run(rpc('api_content_item_save', { p: { action: 'attach', id: it.id, strategy_id: sid ? Number(sid) : null, creative_key: key } }),
-      v ? 'Video attached to that ad' : 'Video detached').then(reload);
+const STAGES = [['made', 'Made'], ['approved', 'Approved'], ['posted', 'Posted'], ['in_ads', 'In ads'], ['results', 'Results']];
+const STAGE_CHIP = { making: ['Being made', C.blue, 'rgba(10,99,206,0.08)'], made: ['Ready to review', C.muted, C.grey], approved: ['Approved', C.green, 'rgba(30,123,52,0.1)'],
+  posted: ['Posted', C.blue, 'rgba(10,99,206,0.08)'], in_ads: ['In ads', C.amber, 'rgba(138,83,0,0.1)'], results: ['In ads', C.amber, 'rgba(138,83,0,0.1)'] };
+const rupees = (n) => (n == null ? '—' : `₹${Math.round(Number(n)).toLocaleString('en-IN')}`);
+const localInput = (d) => { const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0, 16); };
+const nextEvening = () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(18, 30, 0, 0); return localInput(d); };
+const save = (p, ok) => run(rpc('api_content_item_save', { p }), ok);
+const Stat = ({ label, value, extra }) => (
+  <div className="rounded-lg px-2.5 py-1.5" style={{ background: C.grey }}>
+    <div className="text-[11px] text-glass-secondary">{label}</div>
+    <div className="text-[15px] font-semibold tabular-nums">{value}{extra}</div>
+  </div>);
+const Dark = (props) => <Btn tone="#1d1d1f" {...props} />;
+
+function StageStrip({ ads, pick, setPick }) {
+  const n = (k) => ads.filter((a) => (k === 'approved' ? a.stage === 'approved' : k === 'in_ads' ? a.stage === 'in_ads' || a.stage === 'results' : a.stage === k)).length;
+  const leads = ads.reduce((t, a) => t + (Number(a.results?.leads) || 0), 0);
+  return (
+    <div className="grid grid-cols-5 gap-1.5" data-testid="studio-stages">
+      {STAGES.map(([k, l], i) => {
+        const on = pick === k;
+        return (
+          <button key={k} type="button" onClick={() => setPick(on ? '' : k)} className="rounded-xl px-2 py-2 text-center"
+            style={{ background: on ? 'rgba(10,99,206,0.1)' : C.grey, color: on ? C.blue : undefined }}>
+            <div className="text-[11px] opacity-80">{i + 1} · {l}</div>
+            <div className="text-[17px] font-semibold tabular-nums">{k === 'results' ? `${leads} leads` : n(k)}</div>
+          </button>);
+      })}
+    </div>);
+}
+
+function CampaignBar({ c, reload }) {
+  const live = (c.campaigns || []).filter((x) => x.id);
+  const on = live.some((x) => x.status === 'ACTIVE');
+  const dayN = Number(c.learning_day) || 0;
+  const act = async (kind) => {
+    for (const x of live) {
+      const r = await run(rpc('api_ads_meta_action_request', { p_level: 'campaign', p_object_id: x.id, p_kind: kind, p_params: {}, p_reason: 'From Content > Ad creatives' }));
+      if (r?.self_approve) await run(rpc('api_ads_meta_action_decide', { p_id: r.id, p_approve: true, p_note: null }));
+    }
+    const e = await edge({ jobs: ['meta_actions'] }).catch((x) => ({ error: x.message }));
+    showToast(e?.results?.meta_actions?.detail || e?.error || (kind === 'pause' ? 'Paused' : 'Switched on'), e?.error ? 'error' : 'success');
+    reload();
   };
   return (
-    <select aria-label="Attach to ad" data-testid="content-attach" className="glass-input px-3 py-1.5 text-[13px] min-w-[220px]" value={cur} onChange={(e) => pick(e.target.value)}>
-      <option value="">Not attached to an ad</option>
-      {slots.map((x) => <option key={`${x.strategy_id}:${x.key}`} value={`${x.strategy_id}:${x.key}`}>
-        {x.strategy} · {x.name || x.key}{x.approved ? '' : ' (not approved)'}{x.has_video && cur !== `${x.strategy_id}:${x.key}` ? ' · replaces its video' : ''}</option>)}
-    </select>);
+    <div className="glass-card px-4 py-3 flex flex-wrap items-center gap-3" data-testid="studio-campaign">
+      <span className="text-glass-secondary"><Icon name="send" size={18} /></span>
+      <div className="flex-1 min-w-[180px]">
+        <div className="text-sm font-semibold">{c.title}</div>
+        <div className="text-[12px] text-glass-secondary">{c.daily_budget ? `${rupees(c.daily_budget)}/day · ` : ''}{c.videos} video{c.videos === 1 ? '' : 's'}, {c.pictures} picture{c.pictures === 1 ? '' : 's'} · Instant Form</div>
+      </div>
+      {!live.length ? <Chip>Not in Meta yet</Chip>
+        : dayN > 0 && dayN <= 7 ? <Chip color={C.amber} bg="rgba(138,83,0,0.1)">Learning · day {dayN} of 7 · avoid edits</Chip>
+        : dayN > 7 ? <Chip color={C.green} bg="rgba(30,123,52,0.1)">Learning done</Chip> : <Chip>{on ? 'On' : 'Paused'}</Chip>}
+      {!live.length ? <Btn ghost onClick={() => navigate('metaads', 'strategy')}>Open strategy</Btn>
+        : on ? <Btn ghost onClick={() => act('pause')}>Pause</Btn> : <Btn ghost onClick={() => act('activate')}>Switch on</Btn>}
+    </div>);
 }
+
+function Comments({ it, canEdit, reload }) {
+  const [list, setList] = useState(null);
+  const [draft, setDraft] = useState({});
+  const load = () => rpc('api_content_comments', { p_id: it.id }).then(setList).catch(() => setList([]));
+  useEffect(() => { load(); if (it.new_comments) save({ action: 'comments_seen', id: it.id }).then(reload); }, [it.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const act = async (c, action) => {
+    const r = await run(edge({ jobs: ['ig_comment'], comment_id: c.id, action, text: draft[c.id] || '' }), action === 'reply' ? 'Reply posted' : action === 'hide' ? 'Comment hidden' : 'Comment shown');
+    if (r) { setDraft((d) => ({ ...d, [c.id]: '' })); load(); }
+  };
+  if (!list) return <div className="text-[13px] text-glass-secondary">Loading comments…</div>;
+  if (!list.length) return <div className="text-[13px] text-glass-secondary">No comments yet. They're read every hour.</div>;
+  return (
+    <div className="space-y-2" data-testid="studio-comments">
+      {list.map((c) => (
+        <div key={c.id} className="rounded-lg p-2.5" style={{ background: C.grey, opacity: c.hidden ? 0.55 : 1 }}>
+          <div className="text-[13px]"><b>@{c.username || 'someone'}</b> <span className="text-glass-secondary">· {c.at ? ago(c.at) : ''}{c.hidden ? ' · hidden' : ''}</span></div>
+          <div className="text-[13px] mt-0.5">{c.body}</div>
+          {c.reply && <div className="text-[12px] mt-1 text-glass-secondary">You replied: {c.reply}</div>}
+          {canEdit && <div className="flex flex-wrap gap-2 mt-2">
+            <input className="glass-input px-2.5 py-1.5 text-[13px] flex-1 min-w-[160px]" placeholder="Write a reply" value={draft[c.id] || ''}
+              onChange={(e) => setDraft((d) => ({ ...d, [c.id]: e.target.value }))} aria-label={`Reply to ${c.username || 'comment'}`} />
+            <Btn ghost onClick={() => act(c, 'reply')}>Reply</Btn>
+            <Btn ghost onClick={() => act(c, c.hidden ? 'unhide' : 'hide')}>{c.hidden ? 'Show' : 'Hide'}</Btn>
+          </div>}
+        </div>))}
+    </div>);
+}
+
+function AdCard({ it, d, reload }) {
+  const canEdit = d.can_edit;
+  const video = useSigned(it.video_path);
+  const [caption, setCaption] = useState(it.caption || '');
+  const [when, setWhen] = useState(it.post_at ? localInput(it.post_at) : nextEvening());
+  const [ai, setAi] = useState(it.kind === 'ad_video');
+  const [slot, setSlot] = useState('');
+  const [open, setOpen] = useState(false);
+  useEffect(() => { setCaption(it.caption || ''); }, [it.caption]);
+  const st = it.stage;
+  const [label, color, bg] = STAGE_CHIP[st] || STAGE_CHIP.made;
+  const s = it.ig?.stats || {};
+  const r = it.results || {};
+  const fmtKey = it.kind === 'ad_video' ? 'video' : 'image';
+  const slots = (d.ad_slots || []).filter((x) => x.format === fmtKey);
+  const saveCaption = () => (caption !== it.caption ? save({ action: 'caption', id: it.id, caption }, 'Caption saved').then(reload) : null);
+  const schedule = async () => {
+    if (caption !== it.caption && !(await save({ action: 'caption', id: it.id, caption }))) return;
+    if (await save({ action: 'schedule', id: it.id, post_at: new Date(when).toISOString(), ai }, `Will post ${day(new Date(when))} at ${time(new Date(when))}`)) reload();
+  };
+  const useInAds = async () => {
+    const [sid, key] = slot.split(':');
+    if (!sid) { showToast('Pick which ad it goes into', 'error'); return; }
+    if (await save({ action: 'use_in_ads', id: it.id, strategy_id: Number(sid), creative_key: key }, 'In the ad slot. Create in Meta uses this post (ads stay paused)')) reload();
+  };
+  return (
+    <div className="glass-card p-3 flex gap-3.5" data-testid="studio-card">
+      <a href={video || undefined} target="_blank" rel="noreferrer" className="relative shrink-0 w-[72px] h-[128px] rounded-lg overflow-hidden block" aria-label="Watch the ad">
+        <Picture path={it.thumb_path} className="w-full h-full object-cover" />
+        {it.kind === 'ad_video' && <span className="absolute inset-0 grid place-items-center text-white" style={{ textShadow: '0 1px 4px rgba(0,0,0,.6)' }}><Icon name="play" size={22} /></span>}
+      </a>
+      <div className="flex-1 min-w-0 space-y-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <b className="text-sm">{it.title}</b>
+          <Chip color={color} bg={bg}>{st === 'posted' && it.ig?.posted_at ? `Posted · ${ago(it.ig.posted_at)}` : st === 'approved' && it.post_at ? `Posts ${day(it.post_at)}, ${time(it.post_at)}` : label}</Chip>
+          {it.kind === 'ad_image' && <Chip>Picture</Chip>}
+        </div>
+
+        {st === 'making' && <div className="text-[13px] text-glass-secondary">Reel Studio is making it. It appears here when it's done.</div>}
+
+        {st === 'made' && <>
+          {it.brief?.visual_brief && <div className="text-[13px] text-glass-secondary">{it.brief.visual_brief}</div>}
+          {canEdit && <div className="flex flex-wrap gap-2 justify-end">
+            <Btn ghost onClick={() => save({ action: 'retire', id: it.id }, 'Removed from the list').then(reload)}>Not this one</Btn>
+            <Dark onClick={() => save({ action: 'approve', id: it.id }, 'Approved. Write the caption and pick a time').then(reload)} data-testid="studio-approve">Approve</Dark>
+          </div>}
+        </>}
+
+        {st === 'approved' && <>
+          <textarea className="glass-input w-full px-2.5 py-2 text-[13px] leading-snug" rows={3} value={caption} disabled={!canEdit}
+            onChange={(e) => setCaption(e.target.value)} onBlur={saveCaption} aria-label="Caption (also the ad text)" data-testid="studio-caption" />
+          <div className="text-[11px] text-glass-secondary -mt-1">{caption.length}/2,200 · this caption is also the ad text</div>
+          {it.ig?.error && <div className="text-[12px]" style={{ color: C.red }}>Last try: {it.ig.error}</div>}
+          {it.note && <div className="text-[12px]" style={{ color: C.amber }}>{it.note}</div>}
+          {canEdit && (it.post_at
+            ? <div className="flex flex-wrap items-center gap-2 justify-end">
+                <span className="text-[13px] text-glass-secondary">{it.post_ai ? 'With the AI info label' : 'No AI label'}</span>
+                <Btn ghost onClick={() => save({ action: 'unschedule', id: it.id }, 'Not scheduled').then(reload)}>Change time</Btn>
+              </div>
+            : <div className="flex flex-wrap items-center gap-2">
+                <input type="datetime-local" className="glass-input px-2.5 py-1.5 text-[13px]" value={when} onChange={(e) => setWhen(e.target.value)} aria-label="Post time" data-testid="studio-when" />
+                <label className="text-[13px] text-glass-secondary inline-flex items-center gap-1.5"><input type="checkbox" checked={ai} onChange={(e) => setAi(e.target.checked)} /> AI info label</label>
+                <span className="flex-1" />
+                <Dark onClick={schedule} data-testid="studio-schedule"><Icon name="calendar" size={14} /> Schedule post</Dark>
+              </div>)}
+        </>}
+
+        {st === 'posted' && <>
+          <div className="grid grid-cols-4 gap-1.5">
+            <Stat label="Views" value={fmt(s.views)} /><Stat label="Likes" value={fmt(s.likes)} /><Stat label="Saves" value={fmt(s.saves)} />
+            <Stat label="Comments" value={fmt(s.comments)} extra={it.new_comments ? <span className="text-[11px] font-normal" style={{ color: C.red }}> · {it.new_comments} new</span> : null} />
+          </div>
+          {canEdit && <div className="flex flex-wrap items-center gap-2 justify-end">
+            {it.ig?.permalink && <a className="text-[13px] mr-auto" href={it.ig.permalink} target="_blank" rel="noreferrer">Open on Instagram</a>}
+            <Btn ghost onClick={() => setOpen(!open)} data-testid="studio-comments-btn">{open ? 'Hide comments' : 'Reply to comments'}</Btn>
+            <select className="glass-input px-2.5 py-1.5 text-[13px] max-w-[220px]" value={slot} onChange={(e) => setSlot(e.target.value)} aria-label="Which ad" data-testid="studio-slot">
+              <option value="">Which ad?</option>
+              {slots.map((x) => <option key={`${x.strategy_id}:${x.key}`} value={`${x.strategy_id}:${x.key}`}>{x.name || x.key} · {x.strategy}{x.taken ? ' (replaces)' : ''}</option>)}
+            </select>
+            <Dark onClick={useInAds} data-testid="studio-use"><Icon name="zap" size={14} /> Use in ads</Dark>
+          </div>}
+        </>}
+
+        {(st === 'in_ads' || st === 'results') && <>
+          <div className="grid grid-cols-4 gap-1.5">
+            <Stat label="Spent" value={rupees(r.spend)} /><Stat label="Leads" value={fmt(r.leads)} />
+            <Stat label="Cost / lead" value={r.cpl ? rupees(r.cpl) : '—'} /><Stat label="Qualified" value={fmt(r.qualified)} />
+          </div>
+          <div className="flex flex-wrap items-center gap-2 justify-end">
+            {it.ig?.permalink && <a className="text-[13px] mr-auto" href={it.ig.permalink} target="_blank" rel="noreferrer">Open on Instagram</a>}
+            <Btn ghost onClick={() => setOpen(!open)}>{open ? 'Hide comments' : `Comments${it.new_comments ? ` (${it.new_comments} new)` : ''}`}</Btn>
+            <Btn ghost onClick={() => navigate('metaads', 'leads')}><Icon name="leads" size={14} /> See its leads</Btn>
+          </div>
+        </>}
+
+        {open && <Comments it={it} canEdit={canEdit} reload={reload} />}
+      </div>
+    </div>);
+}
+
 function AdCreatives({ d, reload }) {
   const [sid, setSid] = useState('');
+  const [pick, setPick] = useState('');
+  const ads = d.ad_creatives || [];
+  const shown = pick ? ads.filter((a) => (pick === 'in_ads' ? a.stage === 'in_ads' || a.stage === 'results' : a.stage === pick)) : ads;
+  const ig = d.instagram || {};
   const order = () => run(rpc('api_content_from_strategy', { p_strategy_id: Number(sid) }), 'Sent to Reel Studio: it makes each ad picture and video').then(reload);
-  const useInMeta = async (it) => {
-    const path = it.paths?.['1080x1350'] || Object.values(it.paths || {})[0];
-    const { data, error } = await supabase.storage.from('content').download(path);
-    if (error) { showToast(error.message, 'error'); return; }
-    const b64 = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.onerror = rej; fr.readAsDataURL(data); });
-    await run(edge({ jobs: ['meta_image'], strategy_id: it.strategy_id, creative_key: it.creative_key, image_base64: b64, filename: path.split('/').pop() }), 'Picture added to the ad in Meta (still paused)');
-  };
-  const videoToMeta = (it) => run(edge({ jobs: ['meta_video'], content_item_id: it.id }), 'Video uploaded to the ad account; press Create in Meta on the strategy (ads stay paused)').then(reload);
+  const check = () => run(edge({ jobs: ['ig_check'] }).then((r) => { const x = r?.results?.ig_check; if (x?.status === 'error') throw new Error(x.detail); return x; }), 'Instagram is ready').then(reload);
   return (
-    <div className="space-y-4" data-testid="content-ads">
-      <section className="glass-card p-5 space-y-2">
-        <h3 className="m-0 text-base font-semibold">Ad pictures and videos</h3>
-        <p className="m-0 text-[13px] text-glass-secondary">Reel Studio makes every image and video ad of an approved Meta strategy from its visual brief, in feed and Story sizes. Pictures and finished Reel Studio ad videos come back here. Attach a video to a strategy's video ad, then “Use in Meta” uploads it; every ad stays paused until you switch it on in Ads Manager.</p>
-        {d.can_edit && ((d.strategies || []).length ? <div className="flex flex-wrap gap-2">
+    <div className="space-y-3" data-testid="content-ads">
+      <StageStrip ads={ads} pick={pick} setPick={setPick} />
+      {(d.campaigns || []).slice(0, 2).map((c) => <CampaignBar key={c.strategy_id} c={c} reload={reload} />)}
+      {d.can_edit && (ig.problem || !ig.user_id) && (
+        <div className="glass-card px-4 py-2.5 flex flex-wrap items-center gap-2 text-[13px]" data-testid="studio-ig">
+          <span style={{ color: ig.problem ? C.amber : undefined }}>{ig.problem ? `Instagram: ${ig.problem}` : 'Connect Instagram posting: the CRM checks the Page’s Instagram account and the token’s permissions.'}</span>
+          <span className="flex-1" /><Btn ghost onClick={check}>{ig.checked_at ? 'Check again' : 'Check Instagram'}</Btn>
+        </div>)}
+      {!shown.length ? <div className="glass-card p-5 text-sm text-glass-secondary">{pick ? 'Nothing at this stage.' : 'No ads yet. Order them from an approved strategy below.'}</div>
+        : shown.map((it) => <AdCard key={it.id} it={it} d={d} reload={reload} />)}
+      {d.can_edit && <Fold title="Order ads from a strategy">
+        {(d.strategies || []).length ? <div className="flex flex-wrap gap-2">
           <select aria-label="Strategy" className="glass-input px-3 py-2 text-sm flex-1 min-w-[220px]" value={sid} onChange={(e) => setSid(e.target.value)}>
-            <option value="">Pick an approved strategy</option>{d.strategies.map((s) => <option key={s.id} value={s.id}>{s.title} (v{s.approved_version})</option>)}</select>
+            <option value="">Pick an approved strategy</option>{d.strategies.map((x) => <option key={x.id} value={x.id}>{x.title} (v{x.approved_version})</option>)}</select>
           <Btn disabled={!sid} onClick={order} data-testid="content-order">Make its ads</Btn></div>
-          : <div className="text-[13px] text-glass-secondary">Approve a strategy in Meta Ads &gt; Strategy first.</div>)}
-      </section>
-      <section className="glass-card p-5">
-        {!(d.ad_creatives || []).length ? <div className="text-sm text-glass-secondary">Nothing ordered yet.</div> : d.ad_creatives.map((it) => (
-          <div key={it.id} className="py-3 border-t border-[var(--hairline)] first:border-t-0 space-y-1.5" data-testid="content-ad">
-            <div className="flex flex-wrap items-center gap-1.5"><Chip color={C.blue} bg="rgba(10,99,206,0.08)">{KIND[it.kind]}</Chip>{it.source === 'studio' && <Chip>Reel Studio</Chip>}<Status s={it.status} /><b className="text-sm">{it.title}</b></div>
-            {it.brief?.visual_brief && <div className="text-[13px] text-glass-secondary">{it.brief.visual_brief}</div>}
-            {Object.keys(it.paths || {}).length > 0 && <div className="flex flex-wrap gap-2">{Object.entries(it.paths).map(([size, path]) => <div key={size}><Picture path={path} /><div className="text-[11px] text-glass-secondary">{size}</div></div>)}</div>}
-            {it.thumb_path && <Picture path={it.thumb_path} />}
-            {it.video_path ? <VideoLink path={it.video_path} /> : it.video && <a className="text-[13px]" href={it.video} target="_blank" rel="noreferrer">Watch the ad video</a>}
-            {it.meta_video && <div className="text-[12px] text-glass-secondary">In the Meta ad account (video {it.meta_video})</div>}
-            {it.note && <div className="text-[12px]" style={{ color: C.amber }}>{it.note}</div>}
-            {d.can_edit && it.kind === 'ad_image' && it.has_picture && <Btn ghost onClick={() => useInMeta(it)}>Use in Meta</Btn>}
-            {d.can_edit && it.kind === 'ad_video' && it.video_path && <div className="flex flex-wrap items-center gap-2">
-              <Attach it={it} slots={d.video_slots || []} reload={reload} />
-              {it.strategy_id && it.creative_key && <Btn ghost data-testid="content-video-meta" onClick={() => videoToMeta(it)}>Use in Meta</Btn>}</div>}
-          </div>))}
-      </section>
+          : <div className="text-[13px] text-glass-secondary">Approve a strategy in Meta Ads &gt; Strategy first.</div>}
+      </Fold>}
     </div>);
 }
 

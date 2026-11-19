@@ -24,6 +24,9 @@
 //                        everything PAUSED (lead forms, campaigns, ad sets, image ads). Resumable: each step is saved at once.
 //   meta_image           Admin. {strategy_id, creative_key, image_base64, filename}: uploads a creative's picture (PNG / JPEG).
 //   meta_video           Admin. {content_item_id}: uploads a Reel Studio ad video (and its cover) for the strategy creative it is attached to.
+//   ig_check             Admin. Finds the Instagram account behind the Page and checks the token's Instagram permissions.
+//   ig_due               Cron (every 5 min when due) / Admin. Posts approved ads at their time; reads numbers and comments hourly.
+//   ig_comment           Approver. {comment_id, action: reply|hide|unhide, text}: answers or hides an Instagram comment.
 //   lead_alerts          Cron / approver. Speed-to-lead: phone notifications and emails for ad leads still waiting for a first call.
 //   meta_report          Any ADS viewer. {report: {...}}: Meta Ads > Reports, read live from Meta's Insights API (cached 3 h / 7 days).
 //   meta_actions         Cron / approver. Runs approved Automate actions (pause, on, budget, duplicate) and creates Meta split tests.
@@ -659,6 +662,106 @@ async function metaVideo(s: Record<string, string>, itemId: number) {
   }
 }
 
+// Growth > Content > Ad creatives (migration 119): post approved ads on Instagram at their time, read their numbers and
+// comments, answer or hide comments. Needs a Meta token with instagram_basic, instagram_content_publish,
+// instagram_manage_comments and instagram_manage_insights, and the Instagram account connected to the Page.
+const IG_NEEDS = ["instagram_basic", "instagram_content_publish", "instagram_manage_comments", "instagram_manage_insights"];
+
+async function igCheck(s: Record<string, string>) {
+  const { p } = platforms(s);
+  if (!p.meta) throw new HttpError(409, "Meta access token is not set");
+  const due = await rpc("svc_content_ig_due") as { page_id: string | null };
+  let problem = "", acct: { id: string; username: string } | null = null;
+  try {
+    const granted = await p.meta.permissions().catch(() => [] as string[]);
+    const missing = granted.length ? IG_NEEDS.filter((x) => !granted.includes(x)) : [];
+    if (!due.page_id) problem = "Add the Facebook Page ID in Meta Ads > Settings";
+    else {
+      acct = await p.meta.igAccount(due.page_id);
+      if (!acct) problem = "No Instagram professional account is connected to the Facebook Page";
+    }
+    if (!problem && missing.length) problem = `The Meta token is missing: ${missing.join(", ")}`;
+  } catch (e) {
+    problem = scrubSecrets(e instanceof Error ? e.message : String(e), s).slice(0, 280);
+  }
+  await rpc("svc_content_ig_account", { p_user_id: acct?.id ?? null, p_username: acct?.username ?? null, p_problem: problem || null });
+  return problem ? { status: "error", detail: problem } : { status: "ok", detail: `Instagram @${acct!.username} is ready for posting` };
+}
+
+async function igDue(s: Record<string, string>) {
+  const { p } = platforms(s);
+  if (!p.meta) throw new HttpError(409, "Meta access token is not set");
+  let w = await rpc("svc_content_ig_due") as { ig_user_id: string | null; post: any[]; stats: any[] };
+  if (!w.ig_user_id) { await igCheck(s); w = await rpc("svc_content_ig_due") as typeof w; }
+  if (!w.ig_user_id) return { status: "error", detail: "Instagram is not connected: Content > Ad creatives shows why" };
+  const store = admin.storage.from("content");
+  let posted = 0, waiting = 0, failed = 0, read = 0;
+  for (const it of w.post) {
+    try {
+      let container: string | null = it.container ?? null;
+      if (!container) {
+        const path = it.kind === "ad_video" ? it.video_path : it.path;
+        const link = await store.createSignedUrl(path, 6 * 3600);
+        if (link.error || !link.data) throw new Error(`file link: ${link.error?.message ?? "none"}`);
+        const params: Record<string, string> = { caption: String(it.caption ?? "").slice(0, 2200), is_ai_generated: it.ai ? "true" : "false" };
+        if (it.kind === "ad_video") {
+          params.media_type = "REELS"; params.video_url = link.data.signedUrl; params.share_to_feed = "true";
+          if (it.thumb_path) {
+            const cover = await store.createSignedUrl(it.thumb_path, 6 * 3600);
+            if (cover.data) params.cover_url = cover.data.signedUrl;
+          }
+        } else params.image_url = link.data.signedUrl;
+        container = await p.meta.igContainer(w.ig_user_id, params);
+        await rpc("svc_content_ig_step", { p_id: it.id, p: { container } });
+      }
+      let state = await p.meta.igContainerStatus(container);
+      for (let i = 0; i < 6 && state === "IN_PROGRESS"; i++) { await new Promise((r) => setTimeout(r, 5000)); state = await p.meta.igContainerStatus(container); }
+      if (state === "FINISHED") {
+        const media = await p.meta.igPublish(w.ig_user_id, container);
+        const info = await p.meta.igMedia(media).catch(() => ({}));
+        await rpc("svc_content_ig_step", { p_id: it.id, p: { media_id: media, permalink: info?.permalink ?? null, ai: info?.is_ai_generated ?? it.ai } });
+        posted++;
+      } else if (state === "IN_PROGRESS") waiting++;          // picked up again in 5 minutes, same container
+      else throw new Error(`Instagram could not process it (${state})`);
+    } catch (e) {
+      failed++;
+      await rpc("svc_content_ig_step", { p_id: it.id, p: { error: scrubSecrets(e instanceof Error ? e.message : String(e), s).slice(0, 280) } });
+    }
+  }
+  for (const it of w.stats) {
+    try {
+      const info = await p.meta.igMedia(it.media_id);
+      const metrics = await p.meta.igInsights(it.media_id, ["views", "reach", "saved", "shares"]).catch(() => ({} as Record<string, number>));
+      const comments = await p.meta.igComments(it.media_id).catch(() => []);
+      await rpc("svc_content_ig_stats", { p_id: it.id, p_stats: { views: metrics.views, reach: metrics.reach, saves: metrics.saved, shares: metrics.shares,
+        likes: info?.like_count, comments: info?.comments_count }, p_comments: comments });
+      read++;
+    } catch (_e) { /* tried again next hour */ }
+  }
+  return { status: failed ? "error" : "ok", detail: `${posted} posted, ${waiting} still processing, ${failed} failed, ${read} read` };
+}
+
+async function igComment(s: Record<string, string>, commentId: string, action: string, text: string) {
+  if (!/^[0-9]{3,30}$/.test(commentId)) throw new HttpError(422, "comment_id is required");
+  if (!["reply", "hide", "unhide"].includes(action)) throw new HttpError(422, "action must be reply, hide or unhide");
+  const c = await rpc("svc_content_comment_get", { p_ig_id: commentId });
+  if (!c) throw new HttpError(404, "Comment not found");
+  const { p } = platforms(s);
+  if (!p.meta) throw new HttpError(409, "Meta access token is not set");
+  const body = text.trim();
+  try {
+    if (action === "reply") {
+      if (body.length < 2) throw new HttpError(422, "Write a reply first");
+      await p.meta.igReply(commentId, body);
+    } else await p.meta.igHide(commentId, action === "hide");
+  } catch (e) {
+    if (e instanceof HttpError) throw e;
+    throw new HttpError(502, scrubSecrets(e instanceof Error ? e.message : String(e), s).slice(0, 300));
+  }
+  await rpc("svc_content_comment_done", { p_ig_id: commentId, p_action: action, p_text: body || null });
+  return { ok: true };
+}
+
 // ------------------------------------------------------------------ speed-to-lead alerts (migration 104)
 async function leadAlerts(s: Record<string, string>) {
   return runJob("lead_alerts", s, async () => {
@@ -995,17 +1098,19 @@ Deno.serve(async (req) => {
   const t0 = Date.now();
   try {
     let body: { jobs?: string[]; ops?: { kind: string; payload: unknown }[]; seeds?: string[]; geos?: string[]; subscribe?: boolean; test_event_code?: string;
-      strategy_id?: number; creative_key?: string; image_base64?: string; filename?: string; content_item_id?: number; report?: unknown; force?: boolean } = {};
+      strategy_id?: number; creative_key?: string; image_base64?: string; filename?: string; content_item_id?: number; comment_id?: string; action?: string; text?: string; report?: unknown; force?: boolean } = {};
     try { body = await req.json(); } catch { /* empty body */ }
     const jobs = (body.jobs ?? ["sync"]).filter((j) => ["test", "discover", "sync", "execute", "gcheck", "ideas", "convert",
       "meta_page", "meta_leads", "meta_leads_reconcile", "meta_convert", "setup", "meta_test_event", "meta_history", "meta_build", "meta_image", "meta_video",
-      "lead_alerts", "meta_report", "meta_health", "meta_audiences", "site_signals", "meta_actions"].includes(j));
+      "lead_alerts", "meta_report", "meta_health", "meta_audiences", "site_signals", "meta_actions", "ig_check", "ig_due", "ig_comment"].includes(j));
     if (!jobs.length) return json(req, 422, { detail: "jobs must include test, discover, sync or execute" });
     if (!(await cronOk(req))) {
       const access = await asUser(req, "api_ads_access") as { can_view: boolean; can_approve: boolean; is_admin: boolean };
       if (!access?.can_view) throw new HttpError(403, "You do not have access to the ADS section");
       if ((jobs.includes("test") || jobs.includes("discover") || jobs.includes("gcheck") || jobs.includes("ideas") || jobs.includes("meta_page") || jobs.includes("meta_test_event") || jobs.includes("meta_history")) && !access.is_admin) throw new HttpError(403, "Only Admin can test connections or find accounts");
       if ((jobs.includes("meta_build") || jobs.includes("meta_image") || jobs.includes("meta_video")) && !access.is_admin) throw new HttpError(403, "Only Admin can create campaigns in Meta");
+      if ((jobs.includes("ig_check") || jobs.includes("ig_due")) && !access.is_admin) throw new HttpError(403, "Only Admin can post to Instagram");
+      if (jobs.includes("ig_comment") && !access.can_approve) throw new HttpError(403, "Only approvers can answer comments");
       if ((jobs.includes("execute") || jobs.includes("convert") || jobs.includes("lead_alerts") || jobs.includes("site_signals") || jobs.some((j) => j.startsWith("meta_") && !["meta_page", "meta_test_event", "meta_history", "meta_build", "meta_image", "meta_video", "meta_report"].includes(j))) && !access.can_approve) throw new HttpError(403, "Only approvers can run changes");
     }
     if (jobs.length === 1 && jobs[0] === "setup") return json(req, 200, { results: { setup: await setupCheck() } });   // no keys needed
@@ -1049,6 +1154,9 @@ Deno.serve(async (req) => {
     if (jobs.includes("meta_leads_reconcile")) results.meta_leads_reconcile = await metaReconcile(secrets, t0);
     if (jobs.includes("meta_leads")) results.meta_leads = await metaLeads(secrets, t0);
     if (jobs.includes("meta_convert")) results.meta_convert = await metaConvert(secrets, t0);
+    if (jobs.includes("ig_check")) results.ig_check = await igCheck(secrets);
+    if (jobs.includes("ig_due")) results.ig_due = await igDue(secrets);
+    if (jobs.includes("ig_comment")) results.ig_comment = await igComment(secrets, String(body.comment_id ?? ""), String(body.action ?? ""), String(body.text ?? ""));
     if (jobs.includes("meta_video")) results.meta_video = await metaVideo(secrets, Number(body.content_item_id));
     if (jobs.includes("meta_image")) results.meta_image = await metaImage(secrets, Number(body.strategy_id), String(body.creative_key ?? ""),
       String(body.image_base64 ?? ""), String(body.filename ?? "").replace(/[^\w. -]/g, "").slice(0, 100));

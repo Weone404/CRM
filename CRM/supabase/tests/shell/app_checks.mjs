@@ -130,14 +130,30 @@ ok(cw2.some((x) => x.fn === 'api_content_plan' && x.args.p_note === 'More parent
 await page.screenshot({ path: '/tmp/content_week.png', fullPage: true });
 await page.getByRole('tab', { name: 'Ideas' }).click(); await page.waitForTimeout(400);
 ok(/What people want to know/.test(await body()) && /900 searches for cpl fees in india/.test(await body()) && /Nobody shows the cost breakdown/.test(await body()), 'CN07 Ideas shows the Demand Analyst\'s brief with evidence and gaps');
-await page.getByRole('tab', { name: 'Ad creatives' }).click(); await page.waitForTimeout(400);
-ok(/Cost card/.test(await body()) && /Use in Meta/.test(await body()) && /CPL admissions, Delhi NCR \(v1\)/.test(await body()), 'CN08 Ad creatives lists approved strategies and finished pictures to use in Meta');
-ok(/Pilot after 12th: check this first/.test(await body()) && /Reel Studio/.test(await body()) && /Watch the ad video/.test(await body())
-  && await page.getByTestId('content-video-meta').count() === 0, 'CN11 a finished Reel Studio ad video shows with its cover and link, not sendable before it is attached');
-await page.getByTestId('content-attach').selectOption('900:v1'); await page.waitForTimeout(400);
-let cv = await calls();
-ok(cv.some((x) => x.fn === 'api_content_item_save' && x.args.p?.action === 'attach' && x.args.p.id === 22 && x.args.p.strategy_id === 900 && x.args.p.creative_key === 'v1'),
-  'CN12 attaching sends the item, strategy and video creative');
+await page.getByRole('tab', { name: 'Ad creatives' }).click(); await page.waitForTimeout(500);
+let sb = await body();
+ok(/1 · Made/.test(sb) && /3 · Posted/.test(sb) && /7 leads/.test(sb) && /Learning · day 3 of 7/.test(sb) && /₹700\/day/.test(sb),
+  'CN08 Ad creatives: the five stages, the campaign bar with budget and the 7-day learning lock');
+await page.getByTestId('studio-approve').click(); await page.waitForTimeout(400);
+let cs = await calls();
+ok(cs.some((x) => x.fn === 'api_content_item_save' && x.args.p?.action === 'approve' && x.args.p.id === 31), 'CN11 a finished ad is approved with one button');
+await page.getByTestId('studio-when').fill('2026-11-21T18:30'); await page.getByTestId('studio-schedule').click(); await page.waitForTimeout(400);
+cs = await calls();
+ok(cs.some((x) => x.fn === 'api_content_item_save' && x.args.p?.action === 'schedule' && x.args.p.id === 22 && new Date(x.args.p.post_at).getTime() === new Date('2026-11-21T18:30').getTime() && x.args.p.ai === true),
+  'CN12 an approved ad is scheduled for Instagram with its time and the AI info label');
+ok(/4,210/.test(sb) && /186/.test(sb) && /3 new/.test(sb), 'CN13 a posted ad shows views, likes, saves and new comments');
+await page.getByTestId('studio-slot').selectOption('900:v2'); await page.getByTestId('studio-use').click(); await page.waitForTimeout(400);
+cs = await calls();
+ok(cs.some((x) => x.fn === 'api_content_item_save' && x.args.p?.action === 'use_in_ads' && x.args.p.id === 23 && x.args.p.strategy_id === 900 && x.args.p.creative_key === 'v2'),
+  'CN14 "Use in ads" puts the posted ad into the chosen ad slot (only video slots are offered)');
+await page.getByTestId('studio-comments-btn').click(); await page.waitForTimeout(500);
+await page.getByLabel('Reply to parent_delhi').fill('Fee breakdown ke liye counselling book karein'); await page.getByRole('button', { name: 'Reply', exact: true }).click(); await page.waitForTimeout(400);
+cs = await calls();
+ok(/Fees kitni hai\?/.test(await body()) && cs.some((x) => x.fn === 'api_content_item_save' && x.args.p?.action === 'comments_seen')
+  && cs.some((x) => x.fn === 'edge:ads-sync' && x.args.jobs?.[0] === 'ig_comment' && x.args.comment_id === '18000000000000001' && x.args.action === 'reply'),
+  'CN15 comments open on the card, are marked read, and a reply goes to Instagram');
+ok(/₹1,840/.test(sb) && /₹263/.test(sb) && /See its leads/.test(sb), 'CN16 an ad in Meta shows spend, leads, cost per lead and qualified leads');
+await page.screenshot({ path: '/tmp/content_studio.png', fullPage: true });
 await page.getByRole('tab', { name: 'Results' }).click(); await page.waitForTimeout(400);
 ok(/1,200 views and 2 website enquiries/.test(await body()), 'CN09 Results add up views and enquiries');
 await page.setViewportSize({ width: 390, height: 844 }); await page.getByRole('tab', { name: 'This week' }).click(); await page.waitForTimeout(400);
