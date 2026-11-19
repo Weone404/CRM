@@ -39,7 +39,29 @@ Deno.serve(async (req) => {
         const r = await rpc("svc_content_picture", { p_id: id, p_size: p.size, p_path: path });
         return reply(200, r);
       }
-      default: return reply(422, { detail: "action must be ping, next, update, picture or signals" });
+      case "adopt": {                                    // a finished ad video made in Reel Studio becomes an Ad creatives item
+        return reply(200, await rpc("svc_content_adopt", { p: { studio_job: String(b.studio_job ?? "").slice(0, 80), title: String(b.title ?? "").slice(0, 120),
+          script: String(b.script ?? "").slice(0, 3000), summary: String(b.summary ?? "").slice(0, 600) } }));
+      }
+      case "video_upload": {                             // one-time upload links (the video goes straight to storage, not through here)
+        const id = Number(b.id);
+        if (!Number.isInteger(id) || id <= 0) return reply(422, { detail: "id is required" });
+        const out: Record<string, unknown> = {};
+        for (const [k, name] of [["video", "video.mp4"], ["thumb", "thumb.jpg"]]) {
+          const { data, error } = await admin.storage.from("content").createSignedUploadUrl(`ad/${id}/${name}`, { upsert: true });
+          if (error || !data) return reply(502, { detail: `upload link: ${error?.message ?? "none"}` });
+          out[k] = { path: `ad/${id}/${name}`, url: data.signedUrl };
+        }
+        return reply(200, out);
+      }
+      case "video_done": {
+        const id = Number(b.id);
+        if (!Number.isInteger(id) || id <= 0) return reply(422, { detail: "id is required" });
+        const secs = Number(b.seconds);
+        return reply(200, await rpc("svc_content_video", { p_id: id, p_video: `ad/${id}/video.mp4`, p_thumb: `ad/${id}/thumb.jpg`,
+          p_seconds: Number.isFinite(secs) && secs > 0 && secs < 600 ? secs : null }));
+      }
+      default: return reply(422, { detail: "action must be ping, next, update, picture, signals, adopt, video_upload or video_done" });
     }
   } catch (e) {
     console.error("crm-content error", String(e).slice(0, 300));

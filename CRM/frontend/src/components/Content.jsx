@@ -156,6 +156,25 @@ function Picture({ path }) {
   useEffect(() => { let on = true; supabase.storage.from('content').createSignedUrl(path, 3600).then(({ data }) => { if (on) setUrl(data?.signedUrl || null); }); return () => { on = false; }; }, [path]);
   return url ? <img src={url} alt="" className="h-40 rounded-lg border border-[var(--hairline)] object-cover" /> : <div className="h-40 w-32 rounded-lg bg-[var(--surface-sunken)]" />;
 }
+function VideoLink({ path }) {
+  const [url, setUrl] = useState(null);
+  useEffect(() => { let on = true; supabase.storage.from('content').createSignedUrl(path, 3600).then(({ data }) => { if (on) setUrl(data?.signedUrl || null); }); return () => { on = false; }; }, [path]);
+  return url ? <a className="text-[13px]" href={url} target="_blank" rel="noreferrer">Watch the ad video</a> : null;
+}
+function Attach({ it, slots, reload }) {
+  const cur = it.strategy_id && it.creative_key ? `${it.strategy_id}:${it.creative_key}` : '';
+  const pick = (v) => {
+    const [sid, key] = v ? v.split(':') : [null, null];
+    run(rpc('api_content_item_save', { p: { action: 'attach', id: it.id, strategy_id: sid ? Number(sid) : null, creative_key: key } }),
+      v ? 'Video attached to that ad' : 'Video detached').then(reload);
+  };
+  return (
+    <select aria-label="Attach to ad" data-testid="content-attach" className="glass-input px-3 py-1.5 text-[13px] min-w-[220px]" value={cur} onChange={(e) => pick(e.target.value)}>
+      <option value="">Not attached to an ad</option>
+      {slots.map((x) => <option key={`${x.strategy_id}:${x.key}`} value={`${x.strategy_id}:${x.key}`}>
+        {x.strategy} · {x.name || x.key}{x.approved ? '' : ' (not approved)'}{x.has_video && cur !== `${x.strategy_id}:${x.key}` ? ' · replaces its video' : ''}</option>)}
+    </select>);
+}
 function AdCreatives({ d, reload }) {
   const [sid, setSid] = useState('');
   const order = () => run(rpc('api_content_from_strategy', { p_strategy_id: Number(sid) }), 'Sent to Reel Studio: it makes each ad picture and video').then(reload);
@@ -166,11 +185,12 @@ function AdCreatives({ d, reload }) {
     const b64 = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.onerror = rej; fr.readAsDataURL(data); });
     await run(edge({ jobs: ['meta_image'], strategy_id: it.strategy_id, creative_key: it.creative_key, image_base64: b64, filename: path.split('/').pop() }), 'Picture added to the ad in Meta (still paused)');
   };
+  const videoToMeta = (it) => run(edge({ jobs: ['meta_video'], content_item_id: it.id }), 'Video uploaded to the ad account; press Create in Meta on the strategy (ads stay paused)').then(reload);
   return (
     <div className="space-y-4" data-testid="content-ads">
       <section className="glass-card p-5 space-y-2">
         <h3 className="m-0 text-base font-semibold">Ad pictures and videos</h3>
-        <p className="m-0 text-[13px] text-glass-secondary">Reel Studio makes every image and video ad of an approved Meta strategy from its visual brief, in feed and Story sizes. Pictures come back here; “Use in Meta” adds one to its ad, which stays paused until you switch it on in Ads Manager.</p>
+        <p className="m-0 text-[13px] text-glass-secondary">Reel Studio makes every image and video ad of an approved Meta strategy from its visual brief, in feed and Story sizes. Pictures and finished Reel Studio ad videos come back here. Attach a video to a strategy's video ad, then “Use in Meta” uploads it; every ad stays paused until you switch it on in Ads Manager.</p>
         {d.can_edit && ((d.strategies || []).length ? <div className="flex flex-wrap gap-2">
           <select aria-label="Strategy" className="glass-input px-3 py-2 text-sm flex-1 min-w-[220px]" value={sid} onChange={(e) => setSid(e.target.value)}>
             <option value="">Pick an approved strategy</option>{d.strategies.map((s) => <option key={s.id} value={s.id}>{s.title} (v{s.approved_version})</option>)}</select>
@@ -180,12 +200,17 @@ function AdCreatives({ d, reload }) {
       <section className="glass-card p-5">
         {!(d.ad_creatives || []).length ? <div className="text-sm text-glass-secondary">Nothing ordered yet.</div> : d.ad_creatives.map((it) => (
           <div key={it.id} className="py-3 border-t border-[var(--hairline)] first:border-t-0 space-y-1.5" data-testid="content-ad">
-            <div className="flex flex-wrap items-center gap-1.5"><Chip color={C.blue} bg="rgba(10,99,206,0.08)">{KIND[it.kind]}</Chip><Status s={it.status} /><b className="text-sm">{it.title}</b></div>
+            <div className="flex flex-wrap items-center gap-1.5"><Chip color={C.blue} bg="rgba(10,99,206,0.08)">{KIND[it.kind]}</Chip>{it.source === 'studio' && <Chip>Reel Studio</Chip>}<Status s={it.status} /><b className="text-sm">{it.title}</b></div>
             {it.brief?.visual_brief && <div className="text-[13px] text-glass-secondary">{it.brief.visual_brief}</div>}
             {Object.keys(it.paths || {}).length > 0 && <div className="flex flex-wrap gap-2">{Object.entries(it.paths).map(([size, path]) => <div key={size}><Picture path={path} /><div className="text-[11px] text-glass-secondary">{size}</div></div>)}</div>}
-            {it.video && <a className="text-[13px]" href={it.video} target="_blank" rel="noreferrer">Watch the ad video</a>}
+            {it.thumb_path && <Picture path={it.thumb_path} />}
+            {it.video_path ? <VideoLink path={it.video_path} /> : it.video && <a className="text-[13px]" href={it.video} target="_blank" rel="noreferrer">Watch the ad video</a>}
+            {it.meta_video && <div className="text-[12px] text-glass-secondary">In the Meta ad account (video {it.meta_video})</div>}
             {it.note && <div className="text-[12px]" style={{ color: C.amber }}>{it.note}</div>}
             {d.can_edit && it.kind === 'ad_image' && it.has_picture && <Btn ghost onClick={() => useInMeta(it)}>Use in Meta</Btn>}
+            {d.can_edit && it.kind === 'ad_video' && it.video_path && <div className="flex flex-wrap items-center gap-2">
+              <Attach it={it} slots={d.video_slots || []} reload={reload} />
+              {it.strategy_id && it.creative_key && <Btn ghost data-testid="content-video-meta" onClick={() => videoToMeta(it)}>Use in Meta</Btn>}</div>}
           </div>))}
       </section>
     </div>);

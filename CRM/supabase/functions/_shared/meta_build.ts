@@ -12,6 +12,7 @@ export interface BuildWork {
   strategy_id: number; version: number; account_id: string; currency: string | null; page_id: string;
   goal: { website_url?: string; privacy_url?: string; start_date?: string; languages?: string[] };
   plan: any; steps: Record<string, { id?: string; status?: string; error?: string }>; images: Record<string, { hash?: string }>;
+  videos?: Record<string, { id?: string; thumb_hash?: string }>;
 }
 export interface Step { key: string; kind: "form" | "campaign" | "adset" | "creative" | "ad"; label: string; needs: string[]; skip?: string }
 
@@ -39,7 +40,10 @@ export function planSteps(w: BuildWork): Step[] {
     const [k, f] = pair.split("|");
     const cr = creatives.get(k);
     if (!cr) continue;
-    const skip = cr.format !== "image" ? `${cr.format === "video" ? "Video" : "Carousel"} ad: upload the ${cr.format === "video" ? "video" : "cards"} and create it in Ads Manager (text is in the plan)`
+    const skip = cr.format === "video"
+      ? (w.videos?.[k]?.id && w.videos?.[k]?.thumb_hash ? undefined
+        : "Video ad: attach its video in Growth > Content > Ad creatives and press Use in Meta, then press Create in Meta again")
+      : cr.format !== "image" ? "Carousel ad: upload the cards and create it in Ads Manager (text is in the plan)"
       : !w.images?.[k]?.hash ? "Add the picture for this creative in the CRM, then press Create in Meta again" : undefined;
     out.push({ key: `creative:${k}:${f}`, kind: "creative", label: `Creative "${cr.name}"`, needs: [`form:${f}`], skip });
   }
@@ -168,6 +172,16 @@ export function adsetParams(w: BuildWork, c: any, a: any, campaignId: string, t:
 }
 
 export function creativeParams(w: BuildWork, cr: any, formId: string): Record<string, string> {
+  const v = w.videos?.[cr.key];
+  if (cr.format === "video" && v?.id) {
+    return {
+      name: nm(w, cr.name),
+      object_story_spec: J({ page_id: w.page_id, video_data: {
+        video_id: v.id, image_hash: v.thumb_hash, message: String(cr.primary_text ?? ""), title: String(cr.headline ?? "").slice(0, 255),
+        ...(cr.description ? { link_description: String(cr.description) } : {}),
+        call_to_action: { type: cr.cta || "LEARN_MORE", value: { lead_gen_form_id: formId } } } }),
+    };
+  }
   return {
     name: nm(w, cr.name),
     object_story_spec: J({ page_id: w.page_id, link_data: {

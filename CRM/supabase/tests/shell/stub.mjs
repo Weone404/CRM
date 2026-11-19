@@ -35,7 +35,10 @@ const CONTENT = {
       evidence: [{ signal: 'search', detail: 'cpl fees in india, 900 seen' }], outline: ['Ground classes', 'Flying hours'] }, media: { permalink: 'https://www.instagram.com/reel/abc/' },
       stats: { views: 1200, shares: 30 }, leads: 2, link: 'https://weoneaviation.in/?utm_source=instagram&utm_medium=reel&utm_campaign=content_11' },
     { id: 12, kind: 'carousel', source: 'planner', title: 'Pilot after 12th: 6 steps', slot: at(1, '13:30'), status: 'planned', brief: { hook: 'The whole path on one swipe', evidence: [] }, stats: {}, leads: 0, link: 'x' }],
-  ad_creatives: [{ id: 21, kind: 'ad_image', title: 'Cost card', status: 'ready', strategy_id: 900, creative_key: 'i1', has_picture: true, paths: {}, brief: { visual_brief: 'Clean card with the 5 cost blocks' } }],
+  ad_creatives: [{ id: 22, kind: 'ad_video', source: 'studio', title: 'Pilot after 12th: check this first', status: 'ready', strategy_id: null, creative_key: null,
+      paths: {}, video_path: 'ad/22/video.mp4', thumb_path: 'ad/22/thumb.jpg', brief: { visual_brief: 'AI pilot presenter in the cockpit' } },
+    { id: 21, kind: 'ad_image', title: 'Cost card', status: 'ready', strategy_id: 900, creative_key: 'i1', has_picture: true, paths: {}, brief: { visual_brief: 'Clean card with the 5 cost blocks' } }],
+  video_slots: [{ strategy_id: 900, strategy: 'CPL admissions, Delhi NCR', approved: true, key: 'v1', name: 'Day in training', has_video: false }],
   strategies: [{ id: 900, title: 'CPL admissions, Delhi NCR', approved_version: 1 }],
   results: [{ id: 11, kind: 'reel', title: 'CPL cost, line by line', slot: at(0, '13:30'), stats: { views: 1200, shares: 30, saves: 12 }, leads: 2, permalink: 'https://www.instagram.com/reel/abc/' }],
   studio: { last_seen: new Date().toISOString(), autoplan: 'on' },
@@ -111,6 +114,14 @@ http.createServer((req, res) => {
       return send(res, 200, { results: Object.fromEntries((b.jobs || []).map((j) => [j, { status: 'ok', detail: `${j} done` }])) });
     });
   }
+  if (u.pathname === '/functions/v1/ads-sync') {
+    let body = ''; req.on('data', (c) => { body += c; });
+    return req.on('end', () => {
+      const b = JSON.parse(body || '{}'); calls.push({ fn: 'edge:ads-sync', args: b });
+      return send(res, 200, { results: Object.fromEntries((b.jobs || []).map((j) => [j, { ok: true }])) });
+    });
+  }
+  if (u.pathname.startsWith('/storage/v1/object/sign/')) return send(res, 200, { signedURL: `/storage/v1/object/public/x?f=${encodeURIComponent(u.pathname.split('/').slice(-1)[0])}` });
   if (u.pathname === '/__mode') { for (const [k, v] of u.searchParams) mode[k] = v; return send(res, 200, mode); }
   if (u.pathname === '/auth/v1/health') {
     if (mode.health === 'down') return send(res, 503, { msg: 'down' });

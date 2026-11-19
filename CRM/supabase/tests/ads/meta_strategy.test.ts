@@ -38,7 +38,7 @@ test("Create in Meta: forms, campaigns, ad sets, one creative per creative and f
   assert.deepEqual(s.map((x) => x.key), ["form:f1", "campaign:c1", "campaign:c2", "adset:a1", "adset:a2", "creative:i1:f1", "creative:v1:f1",
     "ad:a1:i1", "ad:a1:v1", "ad:a2:i1"]);
   assert.deepEqual(s.find((x) => x.key === "ad:a1:i1")!.needs, ["adset:a1", "creative:i1:f1"]);
-  assert.match(s.find((x) => x.key === "creative:v1:f1")!.skip!, /Video ad: upload the video/);
+  assert.match(s.find((x) => x.key === "creative:v1:f1")!.skip!, /Video ad: attach its video in Growth > Content/);
   assert.equal(s.find((x) => x.key === "creative:i1:f1")!.skip, undefined);
   assert.match(planSteps(work()).find((x) => x.key === "creative:i1:f1")!.skip!, /Add the picture/);
 });
@@ -154,4 +154,28 @@ test("Speed-to-lead alert text: first name and course only, the right section, e
   assert.equal(g.title, "Still not called: Ravi");
   assert.match(g.body, /waited 18 minutes/);
   assert.equal(g.url, "https://crm.weoneaviation.in/#/ads/leads");
+});
+
+test("Video ads (117): with an uploaded video and cover the video creative is built, PAUSED, with its approved text and the lead form", () => {
+  const w = work({ images: { i1: { hash: "h1" } }, videos: { v1: { id: "9001", thumb_hash: "th1" } } });
+  assert.equal(planSteps(w).find((x) => x.key === "creative:v1:f1")!.skip, undefined);
+  assert.match(planSteps(work({ videos: { v1: { id: "9001" } } })).find((x) => x.key === "creative:v1:f1")!.skip!, /attach its video/);   // no cover yet
+  const c = JSON.parse(creativeParams(w, plan.creatives[1], "777").object_story_spec);
+  assert.deepEqual(c.video_data, { video_id: "9001", image_hash: "th1", message: "A day of DGCA ground classes.", title: "Ground classes",
+    call_to_action: { type: "LEARN_MORE", value: { lead_gen_form_id: "777" } } });
+  assert.equal(c.link_data, undefined);
+  assert.ok(JSON.parse(creativeParams(w, plan.creatives[0], "777").object_story_spec).link_data.image_hash === "h1");     // pictures unchanged
+});
+
+test("MetaAds video upload: Meta fetches the file from a link; status is read back", async () => {
+  const calls: { url: string; body?: string }[] = [];
+  const fake = async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), body: init?.body as string | undefined });
+    if (String(url).includes("/advideos")) return new Response(JSON.stringify({ id: "9001" }));
+    return new Response(JSON.stringify({ status: { video_status: "ready" } }));
+  };
+  const m = new MetaAds({ accessToken: "EAAtoken", version: "v26.0" }, fake as typeof fetch);
+  assert.equal(await m.uploadVideo("1", "https://x.supabase.co/storage/v1/object/sign/content/ad/5/video.mp4?token=t", "Ad"), "9001");
+  assert.match(calls[0].url, /act_1\/advideos/); assert.match(calls[0].body!, /file_url=https%3A%2F%2Fx\.supabase\.co/);
+  assert.equal(await m.videoStatus("9001"), "ready"); assert.match(calls[1].url, /9001\?fields=status/);
 });

@@ -448,6 +448,16 @@ export class MetaAds {
     return Array.isArray(b?.data) ? b.data : [];
   }
   // A picture for ad creatives (base64 PNG / JPEG); returns its image hash.
+  // Video ads: Meta downloads the file itself from a short-lived link (no bytes through the edge function), then processes it.
+  async uploadVideo(accountId: string, fileUrl: string, name: string): Promise<string> {
+    const b = await this.req("POST", `act_${accountId}/advideos`, { file_url: fileUrl, name: name.slice(0, 100) }, true);
+    if (!b?.id) throw new AdsError("sync_failed", "Meta did not return a video id");
+    return String(b.id);
+  }
+  async videoStatus(videoId: string): Promise<string> {
+    const b = await this.req("GET", videoId, { fields: "status" });
+    return String(b?.status?.video_status ?? "unknown");      // ready | processing | error
+  }
   async uploadImage(accountId: string, base64: string, name: string): Promise<string> {
     const b = await this.req("POST", `act_${accountId}/adimages`, { bytes: base64, name: name.slice(0, 100) }, true);
     const first = b?.images ? Object.values(b.images)[0] as any : null;

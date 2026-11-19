@@ -23,6 +23,7 @@
 //   meta_build           Admin. {strategy_id}: Meta Ads > Strategy > Create in Meta - creates the approved plan in the ad account,
 //                        everything PAUSED (lead forms, campaigns, ad sets, image ads). Resumable: each step is saved at once.
 //   meta_image           Admin. {strategy_id, creative_key, image_base64, filename}: uploads a creative's picture (PNG / JPEG).
+//   meta_video           Admin. {content_item_id}: uploads a Reel Studio ad video (and its cover) for the strategy creative it is attached to.
 //   lead_alerts          Cron / approver. Speed-to-lead: phone notifications and emails for ad leads still waiting for a first call.
 //   meta_report          Any ADS viewer. {report: {...}}: Meta Ads > Reports, read live from Meta's Insights API (cached 3 h / 7 days).
 //   meta_actions         Cron / approver. Runs approved Automate actions (pause, on, budget, duplicate) and creates Meta split tests.
@@ -32,7 +33,8 @@
 // Every job takes its own lock (svc_ads_run_begin), so overlapping runs skip instead of doubling up.
 // Keys come from Vault through the service role and never leave this function (responses and logs are scrubbed).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { asUser, cors, cronOk, json, HttpError, rpc } from "../_shared/ads_deno.ts";
+import { admin, asUser, cors, cronOk, json, HttpError, rpc } from "../_shared/ads_deno.ts";
+import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 import { AdsError, GoogleAds, MetaAds, dateRange, discover, executeOne, scrubSecrets, todayIn, verify, type Platforms, type WorkItem } from "../_shared/ads_core.ts";
 import { buildOps, convertOutcome, dmRequest, executeGoogleOp, googleSnapshot, resultNames, type ConvItem, type GoogleOp } from "../_shared/ads_google_ops.ts";
 import { ADS_BUILD, buildEvent, crmEvent, ctwaPayload, deployState, EventError, isTestLead, metaLeadPayload, organicPayload, serializeEvents, type CapiItem } from "../_shared/ads_meta.ts";
@@ -624,6 +626,39 @@ async function metaImage(s: Record<string, string>, strategyId: number, key: str
   }
 }
 
+// A Reel Studio ad video (Growth > Content > Ad creatives, migration 117) goes to the ad account of the strategy it is attached to:
+// the cover picture as an ad image (the video's thumbnail) and the video by a 1-hour link Meta downloads itself.
+async function metaVideo(s: Record<string, string>, itemId: number) {
+  if (!Number.isInteger(itemId) || itemId <= 0) throw new HttpError(422, "content_item_id is required");
+  const it = await rpc("svc_content_video_get", { p_id: itemId }) as { title: string; strategy_id: number | null; creative_key: string | null;
+    video_path: string | null; thumb_path: string | null } | null;
+  if (!it) throw new HttpError(404, "Ad video not found");
+  if (!it.video_path || !it.thumb_path) throw new HttpError(409, "Reel Studio has not sent this video yet");
+  if (!it.strategy_id || !it.creative_key) throw new HttpError(409, "Attach the video to a strategy's video creative first");
+  const { p } = platforms(s);
+  if (!p.meta) throw new HttpError(409, "Meta access token is not set");
+  const w = await rpc("svc_ads_meta_build_work_peek", { p_id: it.strategy_id }) as { account_id: string } | null;
+  if (!w?.account_id) throw new HttpError(409, "Connect the Meta ad account first");
+  const store = admin.storage.from("content");
+  try {
+    const thumb = await store.download(it.thumb_path);
+    if (thumb.error || !thumb.data) throw new Error(`cover picture: ${thumb.error?.message ?? "missing"}`);
+    const b64 = encodeBase64(new Uint8Array(await thumb.data.arrayBuffer()));
+    const hash = await p.meta.uploadImage(w.account_id, b64, `${it.creative_key}_cover.jpg`);
+    const link = await store.createSignedUrl(it.video_path, 3600);
+    if (link.error || !link.data) throw new Error(`video link: ${link.error?.message ?? "none"}`);
+    const vid = await p.meta.uploadVideo(w.account_id, link.data.signedUrl, `${it.title} · CRM S${it.strategy_id}`);
+    let state = "processing";
+    for (let i = 0; i < 8 && state === "processing"; i++) { await new Promise((r) => setTimeout(r, 5000)); state = await p.meta.videoStatus(vid); }
+    if (state === "error") throw new Error("Meta could not process the video");
+    await rpc("svc_ads_meta_build_video", { p_id: it.strategy_id, p_key: it.creative_key, p_video_id: vid, p_thumb_hash: hash, p_name: it.title });
+    await rpc("svc_content_video_meta", { p_id: itemId, p_video_id: vid });
+    return { ok: true, video_id: vid, state };
+  } catch (e) {
+    throw new HttpError(502, scrubSecrets(e instanceof Error ? e.message : String(e), s).slice(0, 300));
+  }
+}
+
 // ------------------------------------------------------------------ speed-to-lead alerts (migration 104)
 async function leadAlerts(s: Record<string, string>) {
   return runJob("lead_alerts", s, async () => {
@@ -960,18 +995,18 @@ Deno.serve(async (req) => {
   const t0 = Date.now();
   try {
     let body: { jobs?: string[]; ops?: { kind: string; payload: unknown }[]; seeds?: string[]; geos?: string[]; subscribe?: boolean; test_event_code?: string;
-      strategy_id?: number; creative_key?: string; image_base64?: string; filename?: string; report?: unknown; force?: boolean } = {};
+      strategy_id?: number; creative_key?: string; image_base64?: string; filename?: string; content_item_id?: number; report?: unknown; force?: boolean } = {};
     try { body = await req.json(); } catch { /* empty body */ }
     const jobs = (body.jobs ?? ["sync"]).filter((j) => ["test", "discover", "sync", "execute", "gcheck", "ideas", "convert",
-      "meta_page", "meta_leads", "meta_leads_reconcile", "meta_convert", "setup", "meta_test_event", "meta_history", "meta_build", "meta_image",
+      "meta_page", "meta_leads", "meta_leads_reconcile", "meta_convert", "setup", "meta_test_event", "meta_history", "meta_build", "meta_image", "meta_video",
       "lead_alerts", "meta_report", "meta_health", "meta_audiences", "site_signals", "meta_actions"].includes(j));
     if (!jobs.length) return json(req, 422, { detail: "jobs must include test, discover, sync or execute" });
     if (!(await cronOk(req))) {
       const access = await asUser(req, "api_ads_access") as { can_view: boolean; can_approve: boolean; is_admin: boolean };
       if (!access?.can_view) throw new HttpError(403, "You do not have access to the ADS section");
       if ((jobs.includes("test") || jobs.includes("discover") || jobs.includes("gcheck") || jobs.includes("ideas") || jobs.includes("meta_page") || jobs.includes("meta_test_event") || jobs.includes("meta_history")) && !access.is_admin) throw new HttpError(403, "Only Admin can test connections or find accounts");
-      if ((jobs.includes("meta_build") || jobs.includes("meta_image")) && !access.is_admin) throw new HttpError(403, "Only Admin can create campaigns in Meta");
-      if ((jobs.includes("execute") || jobs.includes("convert") || jobs.includes("lead_alerts") || jobs.includes("site_signals") || jobs.some((j) => j.startsWith("meta_") && !["meta_page", "meta_test_event", "meta_history", "meta_build", "meta_image", "meta_report"].includes(j))) && !access.can_approve) throw new HttpError(403, "Only approvers can run changes");
+      if ((jobs.includes("meta_build") || jobs.includes("meta_image") || jobs.includes("meta_video")) && !access.is_admin) throw new HttpError(403, "Only Admin can create campaigns in Meta");
+      if ((jobs.includes("execute") || jobs.includes("convert") || jobs.includes("lead_alerts") || jobs.includes("site_signals") || jobs.some((j) => j.startsWith("meta_") && !["meta_page", "meta_test_event", "meta_history", "meta_build", "meta_image", "meta_video", "meta_report"].includes(j))) && !access.can_approve) throw new HttpError(403, "Only approvers can run changes");
     }
     if (jobs.length === 1 && jobs[0] === "setup") return json(req, 200, { results: { setup: await setupCheck() } });   // no keys needed
     const secrets = (await rpc("svc_ads_secrets")) as Record<string, string>;
@@ -1014,6 +1049,7 @@ Deno.serve(async (req) => {
     if (jobs.includes("meta_leads_reconcile")) results.meta_leads_reconcile = await metaReconcile(secrets, t0);
     if (jobs.includes("meta_leads")) results.meta_leads = await metaLeads(secrets, t0);
     if (jobs.includes("meta_convert")) results.meta_convert = await metaConvert(secrets, t0);
+    if (jobs.includes("meta_video")) results.meta_video = await metaVideo(secrets, Number(body.content_item_id));
     if (jobs.includes("meta_image")) results.meta_image = await metaImage(secrets, Number(body.strategy_id), String(body.creative_key ?? ""),
       String(body.image_base64 ?? ""), String(body.filename ?? "").replace(/[^\w. -]/g, "").slice(0, 100));
     if (jobs.includes("meta_build")) results.meta_build = await metaBuild(secrets, Number(body.strategy_id), t0);

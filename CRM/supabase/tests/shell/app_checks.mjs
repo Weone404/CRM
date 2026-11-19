@@ -132,6 +132,12 @@ await page.getByRole('tab', { name: 'Ideas' }).click(); await page.waitForTimeou
 ok(/What people want to know/.test(await body()) && /900 searches for cpl fees in india/.test(await body()) && /Nobody shows the cost breakdown/.test(await body()), 'CN07 Ideas shows the Demand Analyst\'s brief with evidence and gaps');
 await page.getByRole('tab', { name: 'Ad creatives' }).click(); await page.waitForTimeout(400);
 ok(/Cost card/.test(await body()) && /Use in Meta/.test(await body()) && /CPL admissions, Delhi NCR \(v1\)/.test(await body()), 'CN08 Ad creatives lists approved strategies and finished pictures to use in Meta');
+ok(/Pilot after 12th: check this first/.test(await body()) && /Reel Studio/.test(await body()) && /Watch the ad video/.test(await body())
+  && await page.getByTestId('content-video-meta').count() === 0, 'CN11 a finished Reel Studio ad video shows with its cover and link, not sendable before it is attached');
+await page.getByTestId('content-attach').selectOption('900:v1'); await page.waitForTimeout(400);
+let cv = await calls();
+ok(cv.some((x) => x.fn === 'api_content_item_save' && x.args.p?.action === 'attach' && x.args.p.id === 22 && x.args.p.strategy_id === 900 && x.args.p.creative_key === 'v1'),
+  'CN12 attaching sends the item, strategy and video creative');
 await page.getByRole('tab', { name: 'Results' }).click(); await page.waitForTimeout(400);
 ok(/1,200 views and 2 website enquiries/.test(await body()), 'CN09 Results add up views and enquiries');
 await page.setViewportSize({ width: 390, height: 844 }); await page.getByRole('tab', { name: 'This week' }).click(); await page.waitForTimeout(400);
