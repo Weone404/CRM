@@ -66,4 +66,5 @@ SELECT pg_temp.ok((public.svc_ads_meta_build_work(77))->'videos'->'v1'->>'id' = 
   AND NOT has_function_privilege('authenticated', 'public.svc_ads_meta_build_video(bigint,text,text,text,text)', 'EXECUTE'),
   'CV08 Create in Meta gets the video id and cover; the Reel Studio and Meta functions stay private');
 RESET ROLE;
+SELECT pg_temp.ok(has_function_privilege('authenticated', 'crm_private.ads_can_view()', 'EXECUTE'), 'CV09 signed-in users can run the storage read check (ad previews open)');
 SELECT 'ALL VIDEO SQL CHECKS PASSED';
