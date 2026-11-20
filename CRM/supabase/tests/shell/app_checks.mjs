@@ -233,6 +233,26 @@ await page.getByText('Website data is up to date').waitFor({ timeout: 10000 });
 cw = (await calls()).filter((x) => x.fn === 'edge:crm-website' && !(x.args.jobs.length === 1 && x.args.jobs[0] === 'live')).map((x) => x.args.jobs.join('+'));
 ok(cw.join(',') === 'search+visitors,scan,speed+index', 'WS09 Refresh runs search+visitors, then the site check, then speed+indexing');
 
+// Meta Ads > Overview: money and live campaign (121)
+await page.goto(`${APP}#/metaads`); await page.waitForTimeout(1500);
+{ const w = await page.getByTestId('meta-wallet').innerText();
+  ok(/Available to spend\s*₹480/.test(w) && /About 4 days at ₹100\/day \+ GST/.test(w) && /Prepaid balance ₹566/.test(w) && /Spending limit left ₹480/.test(w)
+     && /raise or reset the spending limit/.test(w)
+     && /asset_id=564511644492586/.test(await page.getByTestId('wallet-add').getAttribute('href')),
+    'ML-UI1 the wallet shows money left, days at the budget with GST, both limits, the spending-limit hint and an Add funds link'); }
+{ const c = await page.getByTestId('meta-campaign').innerText();
+  ok(/CPL leads Delhi NCR/.test(c) && /Running/.test(c) && /day 3 of 30/.test(c) && /₹312 of ₹3,000/.test(c) && /Spent today\s*₹104/.test(c) && /Cost per lead\s*₹52/.test(c)
+     && /Qualified\s*2/.test(c) && /Pilot after 12th\s*₹180\s*4,120\s*4\s*₹45/.test(c),
+    'ML-UI2 the campaign shows budget used against the total, today, leads, cost per lead, qualified and a row per ad');
+  ok(/Rohit S · Student \(18\+\) · In 1-3 months\s*Not called · 12 min/.test(c) && /Meena K · Parent \/ guardian\s*Called in 4 min/.test(c),
+    'ML-UI3 latest responses show the answers in plain words and how fast each lead was called'); }
+await page.getByTestId('meta-campaign').getByRole('button', { name: 'Pause' }).click(); await page.waitForTimeout(600);
+{ const cs = await calls();
+  ok(cs.some((x) => x.fn === 'api_ads_meta_action_request' && x.args.p_kind === 'pause' && x.args.p_object_id === '7101')
+     && cs.some((x) => x.fn === 'api_ads_meta_action_decide' && x.args.p_id === 77) && cs.some((x) => x.fn === 'edge:ads-sync' && x.args.jobs?.[0] === 'meta_actions'),
+    'ML-UI4 Pause asks Meta to pause the campaign (approved and sent at once)'); }
+await page.screenshot({ path: '/tmp/meta_money.png', fullPage: false });
+
 // Old "Academy" links still work
 await page.goto(`${APP}#/academy`); await page.waitForTimeout(1200);
 ok(/#\/academy$/.test(page.url()) && await nav.getByRole('button', { name: /^Students/ }).getAttribute('aria-current') === 'page', 'A10 old #/academy link opens a People screen');

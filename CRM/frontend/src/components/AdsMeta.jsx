@@ -10,6 +10,7 @@ import AdsMetaQuality from './AdsMetaQuality';
 import AdsMetaFunnel from './AdsMetaFunnel';
 import AdsMetaAutomate from './AdsMetaAutomate';
 import AdsMetaHealth from './AdsMetaHealth';
+import AdsMetaMoney from './AdsMetaMoney';
 import { SpeedAlerts, LeadArchive } from './AdsMetaLeadTools';
 import { Campaigns, Settings, edge, useSetupFor } from './Ads';
 import { rpc, useLoad, WorkingBar, OfflineBar } from './adsKit';
@@ -44,6 +45,7 @@ function Overview({ access, st, go, edge }) {
   );
   return (
     <div className="space-y-3">
+      <AdsMetaMoney access={access} edge={edge} />
       {access.is_admin && p && (
         <button type="button" onClick={() => go('setup')} className="w-full glass-card p-4 text-left">
           <div className="flex items-center gap-2"><span className="font-bold flex-1">Setup</span>

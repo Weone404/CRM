@@ -180,7 +180,17 @@ http.createServer((req, res) => {
     if (/_save$|_set$|_delete$|_remove$|_rotate$|_toggle$/.test(fn)) return send(res, 200, { saved: true, removed: true, last4: 'new1' });
     if (fn === 'api_leads') return mode.leads === 'down' ? req.socket.destroy() : send(res, 200, LEADS);
     if (fn === 'api_followups_pending') return mode.leads === 'down' ? req.socket.destroy() : send(res, 200, []);
-    if (fn === 'api_ads_access') return send(res, 200, { can_view: true, can_edit: true, role: 'admin' });
+    if (fn === 'api_ads_access') return send(res, 200, { can_view: true, can_edit: true, can_approve: true, is_admin: true, role: 'admin' });
+    if (fn === 'api_ads_meta_live') return send(res, 200, { live: true, numbers_at: new Date(Date.now() - 6 * 60000).toISOString(),
+      wallet: { available: 479.79, prepaid: 566.13, cap_left: 479.79, account: '564511644492586', daily_budget: 100, days_left: 4, low: false, checked_at: new Date(Date.now() - 5 * 60000).toISOString() },
+      campaigns: [{ id: '7101', name: 'CPL leads Delhi NCR', status: 'ACTIVE', budget_total: 3000, horizon_days: 30, day: 3, used: 312, today: 104, meta_leads: 6, qualified: 2, cpl: 52,
+        ads: [{ id: '9101', name: 'Pilot after 12th', status: 'ACTIVE', spend: 180, impressions: 4120, leads: 4, post: 'https://www.instagram.com/reel/A1/' },
+              { id: '9102', name: 'Parents: 3 questions', status: 'ACTIVE', spend: 132, impressions: 2960, leads: 2 }],
+        latest: [{ name: 'Rohit S', answers: [{ q: 'who_is_filling_this_form?', a: 'student_(18+)' }, { q: 'when?', a: 'in_1-3_months' }], wait_min: 12, called_at: null },
+                 { name: 'Meena K', answers: [{ q: 'who', a: 'parent_/_guardian' }], wait_min: 4, called_at: new Date().toISOString() }] }] });
+    if (fn === 'api_ads_lead_alerts') return send(res, 200, { waiting: [], settings: { on: true, minutes: 5, escalate_minutes: 15, from: '09:00', to: '20:00', phones: 1, email_ready: true }, median_first_call_min_30d: 4 });
+    if (fn === 'api_ads_meta_settings') return send(res, 200, { sources: [], config: { webhook_last_at: null, execution_paused: false } });
+    if (fn === 'api_ads_meta_action_request') return send(res, 200, { id: 77, guard: [], self_approve: true });
     if (fn === 'api_amz_access') return send(res, 200, { can_view: false });
     return send(res, 200, []);
   }
