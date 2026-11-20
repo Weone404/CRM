@@ -49,3 +49,15 @@ export function ackOf(b: any): { id?: number; sig?: string | null; state?: strin
   if (state === "scheduled" && !sig) return { problem: "sig is required when scheduled" };
   return { id, sig, state, note: typeof b?.note === "string" ? b.note.slice(0, 300) : null };
 }
+
+// 123: an Instagram DM lead from Reel Studio. Only a valid Indian mobile is accepted; the rest is trimmed text.
+export function dmLeadOf(b: any): { problem?: string; lead?: Record<string, string> } {
+  const digits = String(b?.phone ?? "").replace(/\D/g, "");
+  const n = digits.length === 12 && digits.startsWith("91") ? digits.slice(2) : digits.length === 11 && digits.startsWith("0") ? digits.slice(1) : digits;
+  if (!/^[6-9]\d{9}$/.test(n)) return { problem: "phone must be an Indian mobile number" };
+  const username = String(b?.username ?? "").replace(/[^A-Za-z0-9._]/g, "").slice(0, 30);
+  if (!username) return { problem: "username is required" };
+  const source = b?.source === "dm" ? "dm" : "comment_dm";
+  return { lead: { phone: `+91${n}`, username, name: String(b?.name ?? "").replace(/[<>]/g, "").trim().slice(0, 80), source,
+    text: String(b?.text ?? "").replace(/\s+/g, " ").trim().slice(0, 300) } };
+}

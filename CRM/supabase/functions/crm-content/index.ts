@@ -8,9 +8,10 @@
 //   signals                    -> the Demand Analyst's brief and what worked, for Reel Studio's own Strategist
 //   post_tasks                 -> {tasks}: approved ad videos Reel Studio posts (schedule with time/caption/AI label, or cancel) (120)
 //   post_ack {id, state, sig, note} -> scheduled | cancelled | too_late | failed
+//   dm_lead {username, phone, name?, source, text?} -> a phone number someone sent the Instagram account becomes a CRM lead (123)
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { admin, rpc } from "../_shared/ads_deno.ts";
-import { ackOf, pictureOf, updateOf } from "../_shared/content.ts";
+import { ackOf, dmLeadOf, pictureOf, updateOf } from "../_shared/content.ts";
 
 const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
@@ -35,6 +36,11 @@ Deno.serve(async (req) => {
         const a = ackOf(b);
         if (a.problem) return reply(422, { detail: a.problem });
         return reply(200, await rpc("svc_content_post_ack", { p_id: a.id, p_sig: a.sig, p_state: a.state, p_note: a.note }));
+      }
+      case "dm_lead": {                                  // 123: Instagram comment / DM -> phone number -> Leads
+        const l = dmLeadOf(b);
+        if (l.problem) return reply(422, { detail: l.problem });
+        return reply(200, await rpc("svc_content_dm_lead", { p: l.lead }));
       }
       case "picture": {
         const id = Number(b.id);

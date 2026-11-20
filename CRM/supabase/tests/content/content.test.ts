@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ackOf, pictureOf, updateOf } from "../../functions/_shared/content.ts";
+import { ackOf, dmLeadOf, pictureOf, updateOf } from "../../functions/_shared/content.ts";
 
 const png = btoa(String.fromCharCode(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3));
 const jpg = btoa(String.fromCharCode(0xff, 0xd8, 0xff, 0xe0, 1, 2));
@@ -39,4 +39,12 @@ test("CC05 posting answers: known states only; scheduled needs the signature it 
   assert.match(ackOf({ id: 4, state: "posted" }).problem!, /state/);
   assert.match(ackOf({ state: "cancelled" }).problem!, /id/);
   assert.equal(ackOf({ id: 4, state: "failed", note: "n".repeat(500) }).note!.length, 300);
+});
+
+test("CC06 (123) a DM lead needs an Indian mobile and a handle; the rest is trimmed", () => {
+  assert.deepEqual(dmLeadOf({ username: "kabir_01", phone: "098111 22333", source: "dm", text: "  PDF   please " }).lead,
+    { phone: "+919811122333", username: "kabir_01", name: "", source: "dm", text: "PDF please" });
+  assert.equal(dmLeadOf({ username: "a", phone: "+91 98111 22333" }).lead?.source, "comment_dm");
+  assert.equal(dmLeadOf({ username: "a", phone: "12345" }).problem, "phone must be an Indian mobile number");
+  assert.equal(dmLeadOf({ phone: "9811122333" }).problem, "username is required");
 });

@@ -10,7 +10,7 @@ M=../../../backend/migrations
 ADS="076_ads_module 078_ads_client_wizard 089_ads_leads_phase1 090_ads_leads_board 091_ads_campaign_delivery 092_ads_google_ops 093_ads_autopilot 094_ads_agents 095_ads_hardening 096_ads_supervisor 097_ads_today 098_ads_lead_attribution 099_ads_team 100_ads_meta_signals 101_ads_meta_organic 102_ads_meta_verification 103_ads_meta_insights 104_ads_meta_strategy 105_ads_meta_reports 106_ads_meta_quality 107_ads_meta_funnel 108_ads_site_signals 109_ads_meta_funnel_plan 110_ads_meta_actions 114_ads_meta_premium 115_ads_competitors"
 FILES="../amazon/00_supabase_stub.sql ../ads/01_ads_stub.sql ../vault/05_vault_stub.sql 05_content_stub.sql"
 for m in $ADS; do FILES="$FILES $M/$m.sql"; done
-FILES="$FILES $M/111_crm_vault.sql $M/112_crm_website.sql $M/116_crm_content.sql $M/116_crm_content.sql $M/117_crm_ad_videos.sql $M/117_crm_ad_videos.sql $M/118_crm_content_storage_read.sql $M/119_crm_ad_studio.sql $M/119_crm_ad_studio.sql $M/120_crm_studio_posting.sql $M/120_crm_studio_posting.sql"     # twice: must be re-runnable
+FILES="$FILES $M/111_crm_vault.sql $M/112_crm_website.sql $M/116_crm_content.sql $M/116_crm_content.sql $M/117_crm_ad_videos.sql $M/117_crm_ad_videos.sql $M/118_crm_content_storage_read.sql $M/119_crm_ad_studio.sql $M/119_crm_ad_studio.sql $M/120_crm_studio_posting.sql $M/120_crm_studio_posting.sql $M/123_crm_instagram_dm_leads.sql $M/123_crm_instagram_dm_leads.sql"     # twice: must be re-runnable
 for f in $FILES; do
   psql -q -X -v ON_ERROR_STOP=1 -d $DB -f "$f" >/dev/null 2>&1 || { echo "FAILED applying $f"; psql -X -v ON_ERROR_STOP=1 -d $DB -f "$f" 2>&1 | grep -m3 ERROR; exit 1; }
 done
@@ -18,6 +18,7 @@ psql -X -q -t -v ON_ERROR_STOP=1 -d $DB -f 10_content_tests.sql 2>&1 | grep -E "
 psql -X -q -t -v ON_ERROR_STOP=1 -d $DB -f 20_video_tests.sql 2>&1 | grep -E "PASS|FAIL|ERROR|ALL VIDEO" | sed 's/^.*NOTICE:  //'
 psql -X -q -t -v ON_ERROR_STOP=1 -d $DB -f 30_studio_tests.sql 2>&1 | grep -E "PASS|FAIL|ERROR|ALL STUDIO" | sed 's/^.*NOTICE:  //'
 psql -X -q -t -v ON_ERROR_STOP=1 -d $DB -f 40_studio_posting_tests.sql 2>&1 | grep -E "PASS|FAIL|ERROR|ALL STUDIO POSTING" | sed 's/^.*NOTICE:  //'
+psql -X -q -t -v ON_ERROR_STOP=1 -d $DB -f 50_dm_lead_tests.sql 2>&1 | grep -E "PASS|FAIL|ERROR|ALL DM LEAD" | sed 's/^.*NOTICE:  //'
 psql -q -X -v ON_ERROR_STOP=1 -d $DB -f $M/120_crm_studio_posting_down.sql >/dev/null 2>&1 \
   && psql -q -X -t -A -d $DB -c "SELECT to_regprocedure('public.svc_content_post_tasks()') IS NULL AND to_regprocedure('public.svc_content_update_v119(bigint,jsonb)') IS NULL AND to_regprocedure('public.api_content_overview_v119(date)') IS NULL AND to_regprocedure('public.api_content_overview_v118(date)') IS NOT NULL AND (SELECT value FROM public.ads_config WHERE key = 'ads_schema') = '119'" | grep -q "^t$" \
   && psql -q -X -v ON_ERROR_STOP=1 -d $DB -f $M/120_crm_studio_posting.sql >/dev/null 2>&1 \
