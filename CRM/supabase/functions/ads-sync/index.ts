@@ -53,7 +53,7 @@ import { FIELDS as ACTION_FIELDS, live as liveObj, plan as actionPlan, studyPara
 import { audienceError, engagementRule, lookalikeParams, PREFIX, replaceBatches, seedReady, sizeOf } from "../_shared/meta_audience.ts";
 import { GA_REPORTS, gaBody, googleToken, gscBody, gscSite, parseGa, parseGsc, siteError, windows, type SiteRow } from "../_shared/site_signals.ts";
 import { adParams, adsetParams, bestMatch, campaignParams, countryCode, creativeParams, formParams, geoQueries, imageKind, MAX_IMAGE_B64,
-  planSteps, targeting, audienceSpec, type BuildWork, type Geo } from "../_shared/meta_build.ts";
+  planSteps, targeting, audienceSpec, swapDeprecated, type BuildWork, type Geo } from "../_shared/meta_build.ts";
 
 const DEADLINE_MS = 120_000;
 
@@ -582,9 +582,16 @@ async function metaBuild(s: Record<string, string>, strategyId: number, t0: numb
           // household income: only the options Meta offered this account (saved by the targeting check)
           const offered = ((w as any).targeting_support?.income?.options ?? []) as { id: string; name: string; type: string }[];
           const income = ((a.audience?.income ?? []) as string[]).map((k) => offered.find((o) => o.id === String(k))).filter(Boolean) as { id: string; name: string; type: string }[];
-          id = await meta.create(`${act}/adsets`, adsetParams(w, a._c, a, ids[`campaign:${a._c.key}`], targeting(a, geo, interests, { map: (w as any).audiences ?? {}, defaults: (w as any).default_excludes ?? [] }, income), today));
+          const mk = (ints: { id: string; name: string }[]) => meta.create(`${act}/adsets`, adsetParams(w, a._c, a, ids[`campaign:${a._c.key}`], targeting(a, geo, ints, { map: (w as any).audiences ?? {}, defaults: (w as any).default_excludes ?? [] }, income), today));
+          try { id = await mk(interests); }
+          catch (e) {   // a retired interest: use Meta's own replacement and try once more
+            const swapped = swapDeprecated(e instanceof Error ? e.message : String(e), interests);
+            if (!swapped) throw e;
+            id = await mk(swapped);
+            note = `Meta retired an interest; used its replacement: ${swapped.map((i) => i.name).join(", ")}`;
+          }
           const missingAud = audienceSpec(a, { map: (w as any).audiences ?? {}, defaults: [] }).missing;
-          if (notFound.length || missingAud.length) note = [notFound.length ? `Not found by Meta, left out: ${notFound.join(", ")}` : "",
+          if (notFound.length || missingAud.length) note = [note ?? "", notFound.length ? `Not found by Meta, left out: ${notFound.join(", ")}` : "",
             missingAud.length ? `Audiences not ready in Meta yet, left out: ${missingAud.join(", ")}` : ""].filter(Boolean).join("; ");
         } else if (kind === "creative") {
           id = await meta.create(`${act}/adcreatives`, creativeParams(w, find("creative", k1), ids[`form:${k2}`]));

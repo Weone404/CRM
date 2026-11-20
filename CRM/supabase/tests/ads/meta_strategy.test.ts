@@ -8,7 +8,7 @@ import { MetaAds } from "../../functions/_shared/ads_core.ts";
 import { META_LIMITS, trimMetaContext } from "../../functions/_shared/ads_agents_ctx.ts";
 import {
   adParams, adsetParams, bestMatch, campaignParams, countryCode, creativeParams, formParams, geoQueries, imageKind, minor, planSteps,
-  targeting, type BuildWork,
+  swapDeprecated, targeting, type BuildWork,
 } from "../../functions/_shared/meta_build.ts";
 import { alertText } from "../../functions/_shared/lead_alerts.ts";
 
@@ -186,7 +186,7 @@ test("Ad studio (119): a posted Instagram post becomes the ad itself, with the l
   const c = creativeParams(w, plan.creatives[1], "777");
   assert.equal(c.source_instagram_media_id, "17950000000000001"); assert.equal(c.instagram_user_id, "17841400000000001");
   assert.equal(c.object_id, "100521046017357"); assert.equal(c.object_story_spec, undefined);
-  assert.deepEqual(JSON.parse(c.call_to_action), { type: "LEARN_MORE", value: { lead_gen_form_id: "777" } });
+  assert.deepEqual(JSON.parse(c.call_to_action), { type: "LEARN_MORE", value: { lead_gen_form_id: "777", link: work({}).goal.website_url || "https://weoneaviation.in" } });
   assert.match(planSteps(work({ posts: { v1: { ig_media_id: "1795" } } })).find((x) => x.key === "creative:v1:f1")!.skip!, /attach its video/);   // no account id
 });
 
@@ -216,4 +216,11 @@ test("MetaAds Instagram: container, status, publish, numbers, comments, reply an
   assert.equal((await m.igComments("m1"))[0].id, "18000");
   assert.equal(await m.igReply("18000", "Call us for the fee breakdown"), "r1"); assert.match(calls.at(-1)!.url, /18000\/replies/);
   await m.igHide("18000", true); assert.match(calls.at(-1)!.body!, /hide=true/);
+});
+
+test("Build (121): a retired interest is swapped for Meta's replacement; other errors are left alone", () => {
+  const msg = 'OAuthException 100: Please update the targeting spec to remove them or replace them with alternative options. Relevant alternative options: [{"deprecated_interest_id":"6003089113592","deprecated_interest_name":"Flight training","alternative_interest_id":"6002963523717","alternative_interest_name":"Aviation"},{"deprecated_interest_id":"55"}]';
+  const ints = [{ id: "6003089113592", name: "Flight training" }, { id: "6002963523717", name: "Aviation" }, { id: "55", name: "Old" }, { id: "9", name: "Pilot" }];
+  assert.deepEqual(swapDeprecated(msg, ints), [{ id: "6002963523717", name: "Aviation" }, { id: "9", name: "Pilot" }]);
+  assert.equal(swapDeprecated("OAuthException 100: Invalid parameter", ints), null);
 });

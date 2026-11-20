@@ -173,12 +173,33 @@ export function adsetParams(w: BuildWork, c: any, a: any, campaignId: string, t:
   return out;
 }
 
+// Meta retires interests and names the replacement in the error ("deprecated_interest_id" ... "alternative_interest_id").
+// Returns the interests with each retired one swapped for its replacement (or dropped when none), or null when the error is
+// about something else, so the caller retries once only for this case.
+export function swapDeprecated(msg: string, interests: { id: string; name: string }[]): { id: string; name: string }[] | null {
+  if (!/deprecated_interest_id/.test(msg)) return null;
+  const alts = new Map<string, { id: string; name: string } | null>();
+  for (const m of msg.matchAll(/\{[^{}]*"deprecated_interest_id"\s*:\s*"?(\d+)"?[^{}]*\}/g)) {
+    const alt = /"alternative_interest_id"\s*:\s*"?(\d+)"?/.exec(m[0]);
+    const nm = /"alternative_interest_name"\s*:\s*"([^"]*)"/.exec(m[0]);
+    alts.set(m[1], alt ? { id: alt[1], name: nm?.[1] ?? "" } : null);
+  }
+  if (!alts.size) return null;
+  const out: { id: string; name: string }[] = [];
+  for (const i of interests) {
+    const r = alts.has(i.id) ? alts.get(i.id) : i;
+    if (r && !out.some((o) => o.id === r.id)) out.push(r);
+  }
+  return out;
+}
+
 export function creativeParams(w: BuildWork, cr: any, formId: string): Record<string, string> {
   const post = w.posts?.[cr.key]?.ig_media_id;
   if (post && w.ig_user_id) {                    // the Instagram post itself becomes the ad: likes and comments stay on one post
     return {
       name: nm(w, cr.name), object_id: String(w.page_id), instagram_user_id: String(w.ig_user_id), source_instagram_media_id: String(post),
-      call_to_action: J({ type: cr.cta || "LEARN_MORE", value: { lead_gen_form_id: formId } }),
+      // Meta needs a link next to the form on a creative made from an Instagram post ("The link field is required")
+      call_to_action: J({ type: cr.cta || "LEARN_MORE", value: { lead_gen_form_id: formId, link: w.goal.website_url || "https://weoneaviation.in" } }),
     };
   }
   const v = w.videos?.[cr.key];
