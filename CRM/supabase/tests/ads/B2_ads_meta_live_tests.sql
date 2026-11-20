@@ -60,4 +60,10 @@ UPDATE public.ads_meta_object SET status = 'PAUSED' WHERE level = 'campaign';
 SELECT pg_temp.ok(NOT crm_private.ads_meta_live_tick(), 'ML07b nothing live: the tick does nothing');
 SELECT pg_temp.ok(NOT has_function_privilege('anon', 'public.api_ads_meta_live()', 'EXECUTE')
     AND NOT has_function_privilege('authenticated', 'crm_private.ads_meta_live_tick()', 'EXECUTE'), 'ML08 reading needs sign-in; the tick is internal');
+UPDATE public.ads_config SET value = (now() - interval '3 minutes')::text WHERE key = 'meta_history_recent_at';
+SELECT pg_temp.as_('c'); SET ROLE authenticated;
+CREATE TEMP TABLE lv122 AS SELECT public.api_ads_meta_live() v;
+RESET ROLE;
+SELECT pg_temp.ok((SELECT (v->>'numbers_at')::timestamptz > now() - interval '4 minutes' AND v ? 'wallet' FROM lv122),
+  'ML09 (122) "updated" is when the CRM last read Meta, even with no new spend rows');
 \echo ALL ADS META 121 TESTS PASSED
