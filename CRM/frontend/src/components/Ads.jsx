@@ -292,13 +292,24 @@ export function Campaigns({ ctx, access, platform }) {
   const [rows, load, err] = useLoad(() => rpc('api_ads_campaigns', { p_client: ctx.client || null, p_from: ctx.from, p_to: ctx.to }), [ctx.client, ctx.from, ctx.to]);
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('spend');
+  const [sec, setSec] = useState(null);
+  // Currently running = on and spending in the period; Upcoming = on but nothing spent yet (in the platform's review or not
+  // started); Past = paused, removed or ended. One click on a section shows only those campaigns.
+  const secOf = (r) => (r.status !== 'ENABLED' ? 'past' : Number(r.spend) > 0 ? 'running' : 'upcoming');
+  const counts = useMemo(() => {
+    const n = { running: 0, upcoming: 0, past: 0 };
+    for (const r of rows || []) if (!platform || r.platform === platform) n[secOf(r)]++;
+    return n;
+  }, [rows, platform]);
+  const view = sec || (counts.running ? 'running' : counts.upcoming ? 'upcoming' : 'past');
   const list = useMemo(() => {
     const val = (r) => { const v = sort === 'leads' ? r.crm?.leads : r[sort]; return isNum(v) ? Number(v) : null; };
     const asc = sort === 'cpl';                                   // cheapest first; campaigns with no CPL last
     return (rows || []).filter((r) => !platform || r.platform === platform)
+      .filter((r) => (q ? true : secOf(r) === view))                 // a search looks through all three sections
       .filter((r) => !q || `${r.name} ${r.client} ${r.account}`.toLowerCase().includes(q.toLowerCase()))
       .sort((a, b) => { const x = val(a), y = val(b); if (x === null) return y === null ? 0 : 1; if (y === null) return -1; return asc ? x - y : y - x; });
-  }, [rows, q, sort, platform]);
+  }, [rows, q, sort, platform, view]);
   if (err) return <Err msg={err} />;
   if (!rows) return <Empty>Loading…</Empty>;
   const budget = async (c) => {
@@ -323,6 +334,18 @@ export function Campaigns({ ctx, access, platform }) {
     [(r) => r.crm?.customers, 'Customers (CRM)'], ['cpl', 'CPL'], ['qualified_cpl', 'Qualified CPL'], ['utm_campaign', 'utm_campaign']]));
   return (
     <div className="space-y-3">
+      <div role="tablist" aria-label="Campaign sections" className="glass-card p-1 grid grid-cols-3 gap-1" data-testid="camp-sections">
+        {[['running', 'Currently running', '#1E7B34'], ['upcoming', 'Upcoming', '#0088FF'], ['past', 'Past', '#6B6B70']].map(([id, label, col]) => (
+          <button key={id} role="tab" aria-selected={view === id} onClick={() => { setSec(id); setQ(''); }}
+            className="rounded-xl py-2 px-2 text-sm flex items-center justify-center gap-2"
+            style={view === id ? { background: col, color: '#fff', fontWeight: 600 } : undefined}>
+            <span>{label}</span><span className="text-xs rounded-full px-2" style={{ background: view === id ? 'rgba(255,255,255,0.25)' : 'rgba(118,118,128,0.14)' }}>{counts[id]}</span>
+          </button>))}
+      </div>
+      <div className="text-xs text-glass-muted" data-testid="camp-section-help">
+        {q ? 'Searching all campaigns.' : view === 'running' ? 'Switched on and spending in this period.'
+          : view === 'upcoming' ? 'Switched on, nothing spent yet: waiting for the platform\'s review or the start date.' : 'Paused, removed or ended. Numbers are for the period above.'}
+      </div>
       <div className="flex flex-wrap gap-2 items-center">
         <Input placeholder="Search campaigns" value={q} onChange={(e) => setQ(e.target.value)} className="max-w-xs" aria-label="Search campaigns" />
         <select className="glass-input px-3 py-2 text-sm" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort by">
@@ -330,14 +353,15 @@ export function Campaigns({ ctx, access, platform }) {
         </select>
         <Btn ghost onClick={csv} disabled={!list.length}><Icon name="external" size={14} />Export CSV</Btn>
       </div>
-      {list.length === 0 ? <Empty>{rows.length ? 'No campaign matches.' : 'No campaigns yet. Add accounts and press Sync now on Home.'}</Empty> : (
+      {list.length === 0 ? <Empty>{!rows.length ? 'No campaigns yet. Add accounts and press Sync now on Home.' : q ? 'No campaign matches.'
+        : view === 'running' ? 'Nothing is running right now.' : view === 'upcoming' ? 'Nothing waiting to start.' : 'No past campaigns.'}</Empty> : (
         <div className="space-y-2">
           {list.map((c) => (
             <div key={c.id} className="glass-card p-3">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-semibold text-glass-primary">{c.name}</span>
                 <Chip>{c.platform === 'google' ? 'Google Ads' : 'Meta'}</Chip>
-                <Chip bg={c.status === 'ENABLED' ? 'rgba(52,199,89,0.14)' : undefined} fg={c.status === 'ENABLED' ? '#1E7B34' : undefined}>{c.status === 'ENABLED' ? 'On' : c.status === 'PAUSED' ? 'Paused' : c.status}</Chip>
+                <Chip bg={c.status === 'ENABLED' ? 'rgba(52,199,89,0.14)' : undefined} fg={c.status === 'ENABLED' ? '#1E7B34' : undefined}>{c.status === 'ENABLED' ? (Number(c.spend) > 0 ? 'Running' : 'Starting') : c.status === 'PAUSED' ? 'Paused' : c.status}</Chip>
                 {!ctx.client && <span className="text-xs text-glass-muted">{c.client}</span>}
                 {c.account_status !== 'connected' && <StatusChip s={c.account_status} />}
               </div>

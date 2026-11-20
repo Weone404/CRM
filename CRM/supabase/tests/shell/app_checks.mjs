@@ -252,6 +252,17 @@ await page.getByTestId('meta-campaign').getByRole('button', { name: 'Pause' }).c
      && cs.some((x) => x.fn === 'api_ads_meta_action_decide' && x.args.p_id === 77) && cs.some((x) => x.fn === 'edge:ads-sync' && x.args.jobs?.[0] === 'meta_actions'),
     'ML-UI4 Pause asks Meta to pause the campaign (approved and sent at once)'); }
 await page.screenshot({ path: '/tmp/meta_money.png', fullPage: false });
+await page.getByRole('tab', { name: /Campaigns/ }).first().click(); await page.waitForTimeout(800);
+{ const secs = await page.getByTestId('camp-sections').innerText(); const b = await body();
+  ok(/Currently running\s*1/.test(secs) && /Upcoming\s*1/.test(secs) && /Past\s*2/.test(secs) && /WOA Leads CPL Nov26/.test(b) && !/WhatsApp 2023/.test(b),
+    'CS01 campaigns are split into Currently running, Upcoming and Past; running opens first'); }
+await page.getByRole('tab', { name: /Upcoming/ }).click(); await page.waitForTimeout(300);
+{ const b = await body(); ok(/Parents test Dec/.test(b) && /Starting/.test(b) && !/WOA Leads CPL Nov26/.test(b) && /waiting for the platform's review/.test(b), 'CS02 Upcoming: switched on, nothing spent yet'); }
+await page.getByRole('tab', { name: /^Past/ }).click(); await page.waitForTimeout(300);
+{ const b = await body(); ok(/WhatsApp 2023/.test(b) && /Engagement 2024/.test(b) && !/Parents test Dec/.test(b), 'CS03 Past: paused or ended'); }
+await page.getByLabel('Search campaigns').fill('parents'); await page.waitForTimeout(300);
+ok(/Parents test Dec/.test(await body()), 'CS04 a search looks through all three sections');
+
 
 // Old "Academy" links still work
 await page.goto(`${APP}#/academy`); await page.waitForTimeout(1200);

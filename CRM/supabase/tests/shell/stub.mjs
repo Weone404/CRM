@@ -190,6 +190,11 @@ http.createServer((req, res) => {
                  { name: 'Meena K', answers: [{ q: 'who', a: 'parent_/_guardian' }], wait_min: 4, called_at: new Date().toISOString() }] }] });
     if (fn === 'api_ads_lead_alerts') return send(res, 200, { waiting: [], settings: { on: true, minutes: 5, escalate_minutes: 15, from: '09:00', to: '20:00', phones: 1, email_ready: true }, median_first_call_min_30d: 4 });
     if (fn === 'api_ads_meta_settings') return send(res, 200, { sources: [], config: { webhook_last_at: null, execution_paused: false } });
+    if (fn === 'api_ads_campaigns') return send(res, 200, [
+      { id: 'c1', platform: 'meta', name: 'WOA Leads CPL Nov26', client: 'We One', account: 'A', status: 'ENABLED', spend: 312, currency: 'INR', crm: {}, account_status: 'connected', synced_at: new Date().toISOString() },
+      { id: 'c2', platform: 'meta', name: 'Parents test Dec', client: 'We One', account: 'A', status: 'ENABLED', spend: 0, currency: 'INR', crm: {}, account_status: 'connected' },
+      { id: 'c3', platform: 'meta', name: 'WhatsApp 2023', client: 'We One', account: 'A', status: 'PAUSED', spend: 0, currency: 'INR', crm: {}, account_status: 'connected' },
+      { id: 'c4', platform: 'meta', name: 'Engagement 2024', client: 'We One', account: 'A', status: 'PAUSED', spend: 0, currency: 'INR', crm: {}, account_status: 'connected' }]);
     if (fn === 'api_ads_meta_action_request') return send(res, 200, { id: 77, guard: [], self_approve: true });
     if (fn === 'api_amz_access') return send(res, 200, { can_view: false });
     return send(res, 200, []);
