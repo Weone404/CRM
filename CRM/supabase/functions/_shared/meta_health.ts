@@ -13,6 +13,16 @@ const LEADS = ["lead", "onsite_conversion.lead_grouped", "leadgen_grouped"];
 const leadsOf = (r: any) => (Array.isArray(r?.actions) ? r.actions : []).filter((a: any) => LEADS.includes(a?.action_type)).reduce((s: number, a: any) => s + n(a.value), 0);
 const ZERO_DECIMAL = new Set(["JPY", "KRW", "VND", "CLP", "COP", "HUF", "ISK", "PYG", "TWD", "IDR"]);
 export const units = (minor: unknown, currency: string | null) => n(minor) / (ZERO_DECIMAL.has(String(currency ?? "INR").toUpperCase()) ? 1 : 100);
+// Prepaid accounts: Meta shows the money left as text on the payment method ("Available balance (₹423.73 INR)").
+// Returns the amount in rupees, or null when the account is not prepaid or the text has no amount.
+export function prepaidBalance(account: any): number | null {
+  if (!account?.is_prepay_account) return null;
+  const t = String(account?.funding_source_details?.display_string ?? "");
+  const m = /([\d,]+(?:\.\d+)?)/.exec(t.replace(/\u00a0/g, " "));
+  if (!m) return null;
+  const v = Number(m[1].replace(/,/g, ""));
+  return Number.isFinite(v) ? v : null;
+}
 const rupees = (v: number) => `₹${Math.round(v).toLocaleString("en-IN")}`;
 const ACCOUNT_STATUS: Record<number, string> = { 1: "Active", 2: "Disabled", 3: "Unsettled (payment due)", 7: "Pending risk review", 8: "Pending settlement",
   9: "In grace period", 100: "Pending closure", 101: "Closed", 201: "Any active", 202: "Any closed" };
@@ -27,6 +37,13 @@ export function healthWarnings(i: HealthInput): { data: any; warnings: Warning[]
   const cap = units(i.account?.spend_cap, cur), spent = units(i.account?.amount_spent, cur);
   if (cap > 0 && spent / cap >= 0.9) w.push({ kind: "spend_cap", entity: "account", severity: spent >= cap ? "high" : "medium",
     title: `Account spending limit ${Math.round((spent / cap) * 100)}% used`, detail: `${rupees(spent)} of ${rupees(cap)}. Ads stop at the limit; raise or reset it in Billing.` });
+
+  // money left: the lower of the prepaid balance and the account spending limit decides when ads stop
+  const prepaid = prepaidBalance(i.account);
+  const capLeft = cap > 0 ? Math.max(0, cap - spent) : null;
+  const available = [prepaid, capLeft].filter((v): v is number => v !== null).reduce((a, b) => Math.min(a, b), Infinity);
+  const funds = { prepaid, cap_left: capLeft, available: Number.isFinite(available) ? available : null, prepay: !!i.account?.is_prepay_account,
+    funding_text: i.account?.funding_source_details?.display_string ? String(i.account.funding_source_details.display_string).slice(0, 120) : null };
 
   // delivery problems
   for (const a of i.ads ?? []) {
@@ -52,6 +69,10 @@ export function healthWarnings(i: HealthInput): { data: any; warnings: Warning[]
 
   // budgets and pacing (today, account time)
   const dailyBudget = [...(i.campaigns ?? []).map((c) => units(c.daily_budget, cur)), ...(i.adsets ?? []).map((s) => units(s.daily_budget, cur))].reduce((a, b) => a + b, 0);
+  // GST (18%) is charged on top of ad spend in India, so a day of ads uses about 1.18 × the budget from the balance
+  if (funds.available !== null && dailyBudget > 0 && funds.available < dailyBudget * 1.18 * 3)
+    w.push({ kind: "low_funds", entity: "account", severity: "high",   // high: the owner gets a phone/email alert
+      title: `Ad money low: ${rupees(funds.available)} left`, detail: `About ${Math.max(0, Math.floor(funds.available / (dailyBudget * 1.18)))} day(s) at ${rupees(dailyBudget)}/day plus GST. Add funds in Meta Billing${capLeft !== null && capLeft === funds.available ? " and raise the account spending limit" : ""}.` });
   const byDay = new Map<string, { spend: number; leads: number; clicks: number; impressions: number }>();
   for (const d of i.days ?? []) byDay.set(String(d.date_start), { spend: n(d.spend), leads: leadsOf(d), clicks: n(d.inline_link_clicks), impressions: n(d.impressions) });
   const day = (k: number) => { const t = new Date(Date.parse(`${i.today}T00:00:00Z`) - k * 86400e3).toISOString().slice(0, 10); return byDay.get(t) ?? { spend: 0, leads: 0, clicks: 0, impressions: 0 }; };
@@ -81,7 +102,7 @@ export function healthWarnings(i: HealthInput): { data: any; warnings: Warning[]
   const score = i.opportunity?.opportunity_score;
   const data = {
     account: { name: i.account?.name ?? null, status: status || null, status_text: status ? ACCOUNT_STATUS[status] ?? String(status) : null,
-      spend_cap: cap || null, amount_spent: spent || null, currency: cur },
+      spend_cap: cap || null, amount_spent: spent || null, currency: cur, ...funds },
     opportunity: { score: score === undefined || score === null ? null : n(typeof score === "object" ? score.score ?? score.value : score), recommendations: recs },
     delivery: { campaigns: (i.campaigns ?? []).length, adsets: (i.adsets ?? []).length, ads: (i.ads ?? []).length, learning,
       rejected: (i.ads ?? []).filter((a) => a.effective_status === "DISAPPROVED").length },

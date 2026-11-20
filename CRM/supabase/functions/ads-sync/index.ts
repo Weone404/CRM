@@ -853,7 +853,7 @@ async function metaHealth(s: Record<string, string>) {
     const safe = async <T>(label: string, f: () => Promise<T>, dflt: T): Promise<T> => {
       try { return await f(); } catch (e) { errors.push(`${label}: ${scrubSecrets(e instanceof Error ? e.message : String(e), s).slice(0, 160)}`); return dflt; }
     };
-    const account = await safe("account", () => m.read(act, { fields: "name,account_status,disable_reason,spend_cap,amount_spent,balance,currency,timezone_name" }), {} as any);
+    const account = await safe("account", () => m.read(act, { fields: "name,account_status,disable_reason,spend_cap,amount_spent,balance,currency,timezone_name,is_prepay_account,funding_source_details" }), {} as any);
     const opp = await safe("opportunity score", () => m.read(act, { fields: "opportunity_score" }), {} as any);
     const recs = await safe("recommendations", () => m.readAll(`${act}/recommendations`, {}), [] as any[]);
     const LIVE = JSON.stringify(["ACTIVE", "WITH_ISSUES", "DISAPPROVED", "PENDING_REVIEW", "IN_PROCESS", "CAMPAIGN_PAUSED", "ADSET_PAUSED"]);

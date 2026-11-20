@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { BREAKDOWNS, cacheHours, cacheKey, cleanParams, derived, fieldsFor, insightsQuery, parseRow, previousPeriod, sumRows } from "../../functions/_shared/meta_report.ts";
-import { healthWarnings, units } from "../../functions/_shared/meta_health.ts";
+import { healthWarnings, prepaidBalance, units } from "../../functions/_shared/meta_health.ts";
 
 const TODAY = "2026-11-17";
 const base = { level: "ad", from: "2026-11-01", to: "2026-11-16" };
@@ -93,7 +93,7 @@ test("Health: account, rejected ads, issues, learning limited, no leads, cost pe
       { id: "9002", name: "Image", effective_status: "WITH_ISSUES", issues_info: [{ error_summary: "Image has too much text" }] }],
     days, errors: [] });
   const kinds = warnings.map((w) => w.kind).sort();
-  assert.deepEqual(kinds, ["ad_issue", "ad_rejected", "cpl_up", "learning_limited", "no_leads", "spend_cap", "spend_jump"]);
+  assert.deepEqual(kinds, ["ad_issue", "ad_rejected", "cpl_up", "learning_limited", "low_funds", "no_leads", "spend_cap", "spend_jump"]);
   assert.match(warnings.find((w) => w.kind === "ad_rejected")!.detail!, /Personal attributes: Ad implies age/);
   assert.equal(warnings.find((w) => w.kind === "spend_cap")!.severity, "medium");
   assert.equal(data.opportunity.score, 64);
@@ -104,4 +104,20 @@ test("Health: account, rejected ads, issues, learning limited, no leads, cost pe
   assert.deepEqual([quiet.warnings.length, quiet.data.opportunity.score], [0, null]);
   const off = healthWarnings({ today: "2026-11-17", currency: "INR", account: { account_status: 3 }, opportunity: {}, recommendations: [], campaigns: [], adsets: [], ads: [], days: [], errors: [] });
   assert.match(off.warnings[0].title, /Unsettled/);
+});
+
+test("Health (121): money left is the lower of the prepaid balance and the spending limit; low-money warning includes GST", () => {
+  assert.equal(prepaidBalance({ is_prepay_account: true, funding_source_details: { display_string: "Available balance (₹1,423.73 INR)" } }), 1423.73);
+  assert.equal(prepaidBalance({ is_prepay_account: false, funding_source_details: { display_string: "Visa *1234" } }), null);
+  assert.equal(prepaidBalance({ is_prepay_account: true, funding_source_details: { display_string: "Prepaid funds" } }), null);
+  const base = { today: "2026-11-17", currency: "INR", opportunity: {}, recommendations: [], adsets: [], ads: [], days: [], errors: [] };
+  const a = healthWarnings({ ...base, campaigns: [{ id: "1", name: "CPL", daily_budget: "15000" }],
+    account: { account_status: 1, spend_cap: "4691130", amount_spent: "4643151", is_prepay_account: true, funding_source_details: { display_string: "Available balance (₹423.73 INR)" } } });
+  assert.deepEqual([a.data.account.prepaid, Math.round(a.data.account.cap_left * 100) / 100, a.data.account.available], [423.73, 479.79, 423.73]);
+  const lw = a.warnings.find((w) => w.kind === "low_funds")!;
+  assert.equal(lw.severity, "high"); assert.match(lw.title, /₹424 left/); assert.match(lw.detail!, /About 2 day/); assert.doesNotMatch(lw.detail!, /spending limit/);
+  const b = healthWarnings({ ...base, campaigns: [{ id: "1", name: "CPL", daily_budget: "15000" }], account: { account_status: 1, spend_cap: "4691130", amount_spent: "4643151" } });
+  assert.match(b.warnings.find((w) => w.kind === "low_funds")!.detail!, /raise the account spending limit/);
+  const c = healthWarnings({ ...base, campaigns: [], account: { account_status: 1, spend_cap: "4691130", amount_spent: "4643151" } });
+  assert.equal(c.warnings.some((w) => w.kind === "low_funds"), false);   // nothing running: no alarm
 });
