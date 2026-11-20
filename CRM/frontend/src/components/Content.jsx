@@ -283,7 +283,7 @@ function AdCard({ it, d, reload }) {
       <div className="flex-1 min-w-0 space-y-2">
         <div className="flex flex-wrap items-center gap-1.5">
           <b className="text-sm">{it.title}</b>
-          <Chip color={color} bg={bg}>{st === 'posted' && it.ig?.posted_at ? `Posted · ${ago(it.ig.posted_at)}` : st === 'approved' && it.post_at ? `Posts ${day(it.post_at)}, ${time(it.post_at)}` : label}</Chip>
+          <Chip color={color} bg={bg}>{st === 'posted' && it.ig?.posted_at ? `Posted · ${ago(it.ig.posted_at)}` : st === 'approved' && it.post_at ? `${it.via_studio ? 'Reel Studio posts it' : 'Posts'} ${day(it.post_at)}, ${time(it.post_at)}` : label}</Chip>
           {it.kind === 'ad_image' && <Chip>Picture</Chip>}
         </div>
 
@@ -305,7 +305,8 @@ function AdCard({ it, d, reload }) {
           {it.note && <div className="text-[12px]" style={{ color: C.amber }}>{it.note}</div>}
           {canEdit && (it.post_at
             ? <div className="flex flex-wrap items-center gap-2 justify-end">
-                <span className="text-[13px] text-glass-secondary">{it.post_ai ? 'With the AI info label' : 'No AI label'}</span>
+                <span className="text-[13px] text-glass-secondary">{it.post_ai ? 'With the AI info label' : 'No AI label'}
+                  {it.via_studio && (it.studio_state === 'scheduled' ? ' · Reel Studio has it' : ' · Waiting for Reel Studio to take it (the Mac must be on)')}</span>
                 <Btn ghost onClick={() => save({ action: 'unschedule', id: it.id }, 'Not scheduled').then(reload)}>Change time</Btn>
               </div>
             : <div className="flex flex-wrap items-center gap-2">
@@ -323,7 +324,8 @@ function AdCard({ it, d, reload }) {
           </div>
           {canEdit && <div className="flex flex-wrap items-center gap-2 justify-end">
             {it.ig?.permalink && <a className="text-[13px] mr-auto" href={it.ig.permalink} target="_blank" rel="noreferrer">Open on Instagram</a>}
-            <Btn ghost onClick={() => setOpen(!open)} data-testid="studio-comments-btn">{open ? 'Hide comments' : 'Reply to comments'}</Btn>
+            {it.ig?.via === 'studio' ? <span className="text-[12px] text-glass-secondary">Reply to comments in the Instagram app</span>
+              : <Btn ghost onClick={() => setOpen(!open)} data-testid="studio-comments-btn">{open ? 'Hide comments' : 'Reply to comments'}</Btn>}
             <select className="glass-input px-2.5 py-1.5 text-[13px] max-w-[220px]" value={slot} onChange={(e) => setSlot(e.target.value)} aria-label="Which ad" data-testid="studio-slot">
               <option value="">Which ad?</option>
               {slots.map((x) => <option key={`${x.strategy_id}:${x.key}`} value={`${x.strategy_id}:${x.key}`}>{x.name || x.key} · {x.strategy}{x.taken ? ' (replaces)' : ''}</option>)}
@@ -339,7 +341,7 @@ function AdCard({ it, d, reload }) {
           </div>
           <div className="flex flex-wrap items-center gap-2 justify-end">
             {it.ig?.permalink && <a className="text-[13px] mr-auto" href={it.ig.permalink} target="_blank" rel="noreferrer">Open on Instagram</a>}
-            <Btn ghost onClick={() => setOpen(!open)}>{open ? 'Hide comments' : `Comments${it.new_comments ? ` (${it.new_comments} new)` : ''}`}</Btn>
+            {it.ig?.via !== 'studio' && <Btn ghost onClick={() => setOpen(!open)}>{open ? 'Hide comments' : `Comments${it.new_comments ? ` (${it.new_comments} new)` : ''}`}</Btn>}
             <Btn ghost onClick={() => navigate('metaads', 'leads')}><Icon name="leads" size={14} /> See its leads</Btn>
           </div>
         </>}
@@ -361,7 +363,7 @@ function AdCreatives({ d, reload }) {
     <div className="space-y-3" data-testid="content-ads">
       <StageStrip ads={ads} pick={pick} setPick={setPick} />
       {(d.campaigns || []).slice(0, 2).map((c) => <CampaignBar key={c.strategy_id} c={c} reload={reload} />)}
-      {d.can_edit && (ig.problem || !ig.user_id) && (
+      {d.can_edit && (ig.problem || !ig.user_id) && (d.post_via === 'crm' || ads.some((a) => a.kind === 'ad_image')) && (
         <div className="glass-card px-4 py-2.5 flex flex-wrap items-center gap-2 text-[13px]" data-testid="studio-ig">
           <span style={{ color: ig.problem ? C.amber : undefined }}>{ig.problem ? `Instagram: ${ig.problem}` : 'Connect Instagram posting: the CRM checks the Page’s Instagram account and the token’s permissions.'}</span>
           <span className="flex-1" /><Btn ghost onClick={check}>{ig.checked_at ? 'Check again' : 'Check Instagram'}</Btn>

@@ -29,10 +29,23 @@ export function updateOf(b: any): Record<string, unknown> {
     for (const k of ["permalink", "thumbnail", "video"]) if (typeof b.media[k] === "string" && /^https:\/\//.test(b.media[k])) m[k] = b.media[k].slice(0, 600);
     out.media = m;
   }
+  if (typeof b?.ig_media_id === "string" && /^[0-9]{5,30}$/.test(b.ig_media_id)) out.ig_media_id = b.ig_media_id;   // 120: the post Reel Studio made
+  if (typeof b?.ig_error === "string" && b.ig_error.trim()) out.ig_error = b.ig_error.trim().slice(0, 300);
   if (b?.stats && typeof b.stats === "object") {
     const st: Record<string, number> = {};
     for (const [k, v] of Object.entries(b.stats)) if (/^[a-z_]{2,30}$/.test(k) && Number.isFinite(Number(v))) st[k] = Number(v);
     out.stats = st;
   }
   return out;
+}
+
+// 120: Reel Studio's answer to a posting instruction (scheduled with the signature it acted on, cancelled, too_late, failed)
+export function ackOf(b: any): { id?: number; sig?: string | null; state?: string; note?: string | null; problem?: string } {
+  const id = Number(b?.id);
+  if (!Number.isInteger(id) || id <= 0) return { problem: "id is required" };
+  const state = String(b?.state ?? "");
+  if (!["scheduled", "cancelled", "too_late", "failed"].includes(state)) return { problem: "state must be scheduled, cancelled, too_late or failed" };
+  const sig = typeof b?.sig === "string" && /^[0-9a-f]{32}$/.test(b.sig) ? b.sig : null;
+  if (state === "scheduled" && !sig) return { problem: "sig is required when scheduled" };
+  return { id, sig, state, note: typeof b?.note === "string" ? b.note.slice(0, 300) : null };
 }

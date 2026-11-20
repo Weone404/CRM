@@ -142,7 +142,7 @@ cs = await calls();
 ok(cs.some((x) => x.fn === 'api_content_item_save' && x.args.p?.action === 'schedule' && x.args.p.id === 22 && new Date(x.args.p.post_at).getTime() === new Date('2026-11-21T18:30').getTime() && x.args.p.ai === true),
   'CN12 an approved ad is scheduled for Instagram with its time and the AI info label');
 ok(/4,210/.test(sb) && /186/.test(sb) && /3 new/.test(sb), 'CN13 a posted ad shows views, likes, saves and new comments');
-await page.getByTestId('studio-slot').selectOption('900:v2'); await page.getByTestId('studio-use').click(); await page.waitForTimeout(400);
+await page.getByTestId('studio-slot').first().selectOption('900:v2'); await page.getByTestId('studio-use').first().click(); await page.waitForTimeout(400);
 cs = await calls();
 ok(cs.some((x) => x.fn === 'api_content_item_save' && x.args.p?.action === 'use_in_ads' && x.args.p.id === 23 && x.args.p.strategy_id === 900 && x.args.p.creative_key === 'v2'),
   'CN14 "Use in ads" puts the posted ad into the chosen ad slot (only video slots are offered)');
@@ -153,6 +153,11 @@ ok(/Fees kitni hai\?/.test(await body()) && cs.some((x) => x.fn === 'api_content
   && cs.some((x) => x.fn === 'edge:ads-sync' && x.args.jobs?.[0] === 'ig_comment' && x.args.comment_id === '18000000000000001' && x.args.action === 'reply'),
   'CN15 comments open on the card, are marked read, and a reply goes to Instagram');
 ok(/₹1,840/.test(sb) && /₹263/.test(sb) && /See its leads/.test(sb), 'CN16 an ad in Meta shows spend, leads, cost per lead and qualified leads');
+{ const c25 = await page.locator('[data-testid="studio-card"]', { hasText: 'NIOS route to CPL' }).innerText();
+  const c26 = await page.locator('[data-testid="studio-card"]', { hasText: 'Medical first' }).innerText();
+  ok(/Reel Studio posts it/.test(c25) && /Reel Studio has it/.test(c25) && /Reply to comments in the Instagram app/.test(c26) && !/Reply to comments$/m.test(c26)
+     && !(await page.getByTestId('studio-ig').count()),
+    'CN17 an ad Reel Studio posts says so (and that it has it); its comments are answered in the Instagram app; no Instagram-key warning'); }
 await page.screenshot({ path: '/tmp/content_studio.png', fullPage: true });
 await page.getByRole('tab', { name: 'Results' }).click(); await page.waitForTimeout(400);
 ok(/1,200 views and 2 website enquiries/.test(await body()), 'CN09 Results add up views and enquiries');

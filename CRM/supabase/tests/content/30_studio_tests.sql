@@ -23,6 +23,9 @@ CREATE OR REPLACE FUNCTION pg_temp.v() RETURNS bigint LANGUAGE sql AS $$ SELECT 
 CREATE OR REPLACE FUNCTION pg_temp.save(p jsonb) RETURNS jsonb LANGUAGE sql AS $$ SELECT public.api_content_item_save(p) $$;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pg_temp TO authenticated, anon, service_role;
 
+-- these checks are the CRM posting itself (120 hands Reel Studio's own videos back to it unless content_post_via = crm)
+INSERT INTO public.ads_config (key, value) VALUES ('content_post_via', 'crm') ON CONFLICT (key) DO UPDATE SET value = 'crm';
+
 -- a fresh Reel Studio ad video with its file and cover
 SET ROLE service_role;
 INSERT INTO t_st SELECT 'v', (public.svc_content_adopt('{"studio_job": "96c70ae6", "title": "Parents: 3 questions before fees", "script": "Aapka bachcha pilot banna chahta hai?\nFees dene se pehle, ye teen sawaal poochhiye.\nEk: 12th mein Physics aur Maths hai?"}')->>'id')::bigint;

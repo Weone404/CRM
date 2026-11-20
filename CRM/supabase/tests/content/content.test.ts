@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pictureOf, updateOf } from "../../functions/_shared/content.ts";
+import { ackOf, pictureOf, updateOf } from "../../functions/_shared/content.ts";
 
 const png = btoa(String.fromCharCode(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3));
 const jpg = btoa(String.fromCharCode(0xff, 0xd8, 0xff, 0xe0, 1, 2));
@@ -22,4 +22,21 @@ test("CC02 updates keep only known fields: https links, numeric stats, short not
   assert.deepEqual(u.stats, { views: 1200, shares: 3 });
   assert.equal(u.note.length, 500);
   assert.equal("posted_at" in updateOf({ posted_at: "yesterday" }), false);
+});
+
+test("CC04 Reel Studio's posted ad video: the post id (digits only) and a refusal reason reach the database", () => {
+  const u = updateOf({ status: "posted", ig_media_id: "17960000000000002", ig_error: "  x  " }) as any;
+  assert.equal(u.ig_media_id, "17960000000000002");
+  assert.equal(u.ig_error, "x");
+  assert.equal("ig_media_id" in updateOf({ ig_media_id: "123; drop" }), false);
+  assert.equal("ig_error" in updateOf({ ig_error: "   " }), false);
+});
+
+test("CC05 posting answers: known states only; scheduled needs the signature it acted on", () => {
+  const sig = "0123456789abcdef0123456789abcdef";
+  assert.deepEqual(ackOf({ id: 4, state: "scheduled", sig }), { id: 4, sig, state: "scheduled", note: null });
+  assert.match(ackOf({ id: 4, state: "scheduled" }).problem!, /sig/);
+  assert.match(ackOf({ id: 4, state: "posted" }).problem!, /state/);
+  assert.match(ackOf({ state: "cancelled" }).problem!, /id/);
+  assert.equal(ackOf({ id: 4, state: "failed", note: "n".repeat(500) }).note!.length, 300);
 });

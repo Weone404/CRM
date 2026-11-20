@@ -6,9 +6,11 @@
 //   update {id, status, ...}   -> producing | ready | posted | held | failed, studio_job, media links, stats, note, posted_at
 //   picture {id, size, image_b64} -> an ad picture for a Meta strategy creative (Content > Ad creatives shows it; the owner uses it)
 //   signals                    -> the Demand Analyst's brief and what worked, for Reel Studio's own Strategist
+//   post_tasks                 -> {tasks}: approved ad videos Reel Studio posts (schedule with time/caption/AI label, or cancel) (120)
+//   post_ack {id, state, sig, note} -> scheduled | cancelled | too_late | failed
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { admin, rpc } from "../_shared/ads_deno.ts";
-import { pictureOf, updateOf } from "../_shared/content.ts";
+import { ackOf, pictureOf, updateOf } from "../_shared/content.ts";
 
 const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
@@ -27,6 +29,12 @@ Deno.serve(async (req) => {
         const id = Number(b.id);
         if (!Number.isInteger(id)) return reply(422, { detail: "id is required" });
         return reply(200, await rpc("svc_content_update", { p_id: id, p: updateOf(b) }));
+      }
+      case "post_tasks": return reply(200, { tasks: await rpc("svc_content_post_tasks") ?? [] });   // 120: ad videos Reel Studio posts
+      case "post_ack": {
+        const a = ackOf(b);
+        if (a.problem) return reply(422, { detail: a.problem });
+        return reply(200, await rpc("svc_content_post_ack", { p_id: a.id, p_sig: a.sig, p_state: a.state, p_note: a.note }));
       }
       case "picture": {
         const id = Number(b.id);
@@ -61,7 +69,7 @@ Deno.serve(async (req) => {
         return reply(200, await rpc("svc_content_video", { p_id: id, p_video: `ad/${id}/video.mp4`, p_thumb: `ad/${id}/thumb.jpg`,
           p_seconds: Number.isFinite(secs) && secs > 0 && secs < 600 ? secs : null }));
       }
-      default: return reply(422, { detail: "action must be ping, next, update, picture, signals, adopt, video_upload or video_done" });
+      default: return reply(422, { detail: "action must be ping, next, update, picture, signals, adopt, video_upload, video_done, post_tasks or post_ack" });
     }
   } catch (e) {
     console.error("crm-content error", String(e).slice(0, 300));
