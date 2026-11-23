@@ -1,0 +1,82 @@
+-- 126 NIOS route track for Ads leads.
+--  * A lead whose Meta form answer to "Class 12 status?" is "Passed with other subjects" needs NIOS Physics & Maths before
+--    DGCA CPL, so it gets track 'nios' and is worked as its own list (owner decision, 23 Nov 2026).
+--  * Stored as a column (ads_lead.track), not worked out on every read: the board counts it over all leads with one cheap
+--    query, and the answer is read once, when the enquiry arrives, from the plan the form was built from. A later strategy
+--    version can reorder its questions (q2 may stop being Class 12), which would change what an old coded answer decodes to.
+--  * Set by a trigger on each new enquiry (the latest enquiry with a Class 12 answer decides) and backfilled here. A broken
+--    answer never stops an enquiry from being saved.
+--  * api_ads_lead_board: new optional p_track ('nios'), row.track and stats.nios. Wrapper-by-rename over 125 (_v125).
+--  * "Qualified" on Meta Ads > Overview (121) and on the board is a stage a person sets after a call, so it is not changed:
+--    the track is shown next to it so nobody marks a NIOS-route lead as a CPL-qualified lead by mistake.
+
+ALTER TABLE public.ads_lead ADD COLUMN IF NOT EXISTS track text;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ads_lead_track_check' AND conrelid = 'public.ads_lead'::regclass) THEN
+    ALTER TABLE public.ads_lead ADD CONSTRAINT ads_lead_track_check CHECK (track IS NULL OR track IN ('nios'));
+  END IF;
+END $$;
+
+-- the track a lead's form answers put it on (NULL = the normal CPL track)
+CREATE OR REPLACE FUNCTION crm_private.ads_lead_track(p_lead uuid) RETURNS text
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+  SELECT CASE WHEN replace(x->>'a', '_', ' ') ~* 'other\s+subjects?' THEN 'nios' END
+    FROM public.ads_enquiry e,
+         jsonb_array_elements(crm_private.ads_meta_answer_text(coalesce(e.touch->>'form_id', e.reported_first_touch->>'form_id',
+           (SELECT r.form_id FROM public.ads_meta_lead_raw r WHERE r.lead_id = p_lead LIMIT 1)), e.payload_extra->'meta_answers')) x
+   WHERE e.ads_lead_id = p_lead AND e.payload_extra ? 'meta_answers' AND replace(x->>'q', '_', ' ') ~* '(class\s*12|12th)'
+   ORDER BY e.received_at DESC LIMIT 1 $$;
+
+CREATE OR REPLACE FUNCTION crm_private.ads_lead_track_set() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE t text;
+BEGIN
+  IF NEW.ads_lead_id IS NULL OR NOT (NEW.payload_extra ? 'meta_answers') THEN RETURN NULL; END IF;
+  BEGIN
+    t := crm_private.ads_lead_track(NEW.ads_lead_id);
+    UPDATE public.ads_lead SET track = t WHERE id = NEW.ads_lead_id AND track IS DISTINCT FROM t;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'ads_lead_track_set: %', SQLERRM;   -- the enquiry is kept either way
+  END;
+  RETURN NULL;
+END $$;
+DROP TRIGGER IF EXISTS trg_ads_lead_track ON public.ads_enquiry;
+CREATE TRIGGER trg_ads_lead_track AFTER INSERT ON public.ads_enquiry FOR EACH ROW EXECUTE FUNCTION crm_private.ads_lead_track_set();
+
+-- leads that came in before this migration
+UPDATE public.ads_lead l SET track = crm_private.ads_lead_track(l.id)
+ WHERE EXISTS (SELECT 1 FROM public.ads_enquiry e WHERE e.ads_lead_id = l.id AND e.payload_extra ? 'meta_answers')
+   AND l.track IS DISTINCT FROM crm_private.ads_lead_track(l.id);
+
+DO $$ BEGIN
+  IF to_regprocedure('public.api_ads_lead_board_v125(text,text,boolean,text,integer,text)') IS NULL THEN
+    ALTER FUNCTION public.api_ads_lead_board(text, text, boolean, text, integer, text) RENAME TO api_ads_lead_board_v125;
+  END IF;
+END $$;
+CREATE OR REPLACE FUNCTION public.api_ads_lead_board(p_pipeline text DEFAULT 'pilot_training', p_stage text DEFAULT NULL, p_quarantined boolean DEFAULT false,
+  p_search text DEFAULT NULL, p_limit integer DEFAULT 100, p_platform text DEFAULT NULL, p_track text DEFAULT NULL) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+DECLARE o jsonb; rows jsonb := '[]'; r jsonb; t text; n int := 0; lim int := least(greatest(coalesce(p_limit, 100), 1), 300);
+BEGIN
+  IF p_track IS NOT NULL AND p_track NOT IN ('nios') THEN RAISE EXCEPTION 'Unknown track' USING ERRCODE = 'PT400'; END IF;
+  -- with a track filter, read the most recent 300 and keep that track's rows (the board never shows more than 300)
+  o := public.api_ads_lead_board_v125(p_pipeline, p_stage, p_quarantined, p_search, CASE WHEN p_track IS NULL THEN lim ELSE 300 END, p_platform);
+  IF o IS NULL OR jsonb_typeof(o->'rows') <> 'array' THEN RETURN o; END IF;
+  FOR r IN SELECT value FROM jsonb_array_elements(o->'rows') LOOP
+    SELECT l.track INTO t FROM public.ads_lead l WHERE l.id = (r->>'id')::uuid;
+    CONTINUE WHEN p_track IS NOT NULL AND t IS DISTINCT FROM p_track;
+    EXIT WHEN n >= lim;
+    rows := rows || jsonb_build_array(r || jsonb_build_object('track', t));
+    n := n + 1;
+  END LOOP;
+  RETURN o || jsonb_build_object('rows', rows, 'stats', coalesce(o->'stats', '{}') || jsonb_build_object('nios',
+    (SELECT count(*) FROM public.ads_lead l
+      WHERE l.pipeline = coalesce(p_pipeline, 'pilot_training') AND l.track = 'nios' AND NOT l.quarantined
+        AND l.deleted_at IS NULL AND l.anonymised_at IS NULL
+        AND (p_platform IS NULL OR p_platform = ANY (crm_private.ads_lead_platforms(l))))));
+END $$;
+REVOKE ALL ON FUNCTION crm_private.ads_lead_track(uuid), crm_private.ads_lead_track_set() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.api_ads_lead_board_v125(text, text, boolean, text, integer, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.api_ads_lead_board(text, text, boolean, text, integer, text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.api_ads_lead_board(text, text, boolean, text, integer, text, text) TO authenticated;
+INSERT INTO public.ads_config (key, value) VALUES ('ads_schema', '126') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
