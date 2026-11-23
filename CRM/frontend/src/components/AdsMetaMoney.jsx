@@ -73,7 +73,7 @@ function BudgetSplit({ edge }) {
         <div className="text-sm text-glass-muted mt-1">{d.why || `₹${total} a day is too little to split (at least ₹${min} each side)`}</div>
       </section>);
   }
-  // a split under the minimum (e.g. ₹70 / ₹30 with ₹40 each) starts at the nearest allowed one, saying what Meta has now
+  // a split under the minimum (e.g. ₹70 / ₹30 below the minimum) starts at the nearest allowed one, saying what Meta has now
   const cur = Number(a.daily), near = Math.min(total - min, Math.max(min, cur)), v = pick ?? near, other = total - v;
   const waiting = a.waiting || b.waiting;
   const big = [[cur, v], [Number(b.daily), other]].some(([o, n]) => o > 0 && Math.abs(n - o) / o >= 0.2);

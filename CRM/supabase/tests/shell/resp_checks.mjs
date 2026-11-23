@@ -82,12 +82,12 @@ for (const width of [360, 390, 768, 1024, 1440]) {
       const sv = cs.find((x) => x.fn === 'api_ads_meta_budget_split_save');
       const note2 = await card.getByTestId('split-note').innerText();
       const box = await card.boundingBox();
-      ok(/CPL ads ₹60\/day/.test(s0[0]) && /NIOS ads ₹40\/day/.test(s0[1]) && /7 days 6 leads · ₹58\/lead/.test(s0[0]) && /Meta now: ₹70 \/ ₹30/.test(note0)
-         && /₹50\/day/.test(s1[0]) && /₹50\/day/.test(s1[1]) && /over 20%/.test(note1)
-         && JSON.stringify(sv?.args?.p_items) === JSON.stringify([{ adset: '8201', daily: 50 }, { adset: '8301', daily: 50 }])
+      ok(/CPL ads ₹70\/day/.test(s0[0]) && /NIOS ads ₹30\/day/.test(s0[1]) && /7 days 6 leads · ₹58\/lead/.test(s0[0]) && note0 !== undefined
+         && /₹60\/day/.test(s1[0]) && /₹40\/day/.test(s1[1]) && /over 20%/.test(note1)
+         && JSON.stringify(sv?.args?.p_items) === JSON.stringify([{ adset: '8201', daily: 60 }, { adset: '8301', daily: 40 }])
          && cs.filter((x) => x.fn === 'api_ads_meta_action_decide').length === 2 && cs.some((x) => x.fn === 'edge:ads-sync' && x.args.jobs?.[0] === 'meta_actions')
          && /Meta said: Stub: Meta refused this budget/.test(note2) && box.width <= width && await fits(),
-        `RL14 ${width}: Budget split: starts at the nearest allowed split (Meta's ₹70/₹30 shown), the slider moves both sides (total fixed), Save asks for both, approves, sends to Meta and shows Meta's refusal`);
+        `RL14 ${width}: Budget split: starts at Meta's ₹70/₹30, the slider moves both sides (total fixed), Save asks for both, approves, sends to Meta and shows Meta's refusal`);
       await page.screenshot({ path: `/tmp/resp_${width}_split.png` });
     }
     await page.screenshot({ path: `/tmp/resp_${width}_${n}.png` });

@@ -13,7 +13,7 @@
 -- Wrapper-by-rename (_v128) over 110's ads_meta_action_guard, api_ads_meta_action_request, svc_ads_meta_action_work and
 -- svc_ads_meta_action_done.
 
-INSERT INTO public.ads_config (key, value) VALUES ('meta_split_min_daily', '40') ON CONFLICT (key) DO NOTHING;
+INSERT INTO public.ads_config (key, value) VALUES ('meta_split_min_daily', '30') ON CONFLICT (key) DO NOTHING;
 
 DO $$ BEGIN
   IF to_regprocedure('crm_private.ads_meta_action_guard_v128(text,text,jsonb,numeric)') IS NULL THEN
@@ -32,7 +32,7 @@ END $$;
 
 CREATE OR REPLACE FUNCTION crm_private.ads_meta_split_min() RETURNS numeric
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
-  SELECT coalesce(nullif(crm_private.ads_cfg('meta_split_min_daily'), '')::numeric, 40) $$;
+  SELECT coalesce(nullif(crm_private.ads_cfg('meta_split_min_daily'), '')::numeric, 30) $$;
 
 -- a split request is checked against the split minimum; then 110's checks run on its change (%), with its warnings
 CREATE OR REPLACE FUNCTION crm_private.ads_meta_action_guard(p_level text, p_kind text, p_params jsonb, p_current numeric)

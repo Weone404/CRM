@@ -34,19 +34,19 @@ UPDATE public.ads_meta_object SET status = 'ACTIVE' WHERE level = 'adset' AND ex
 SELECT pg_temp.as_('c'); SET ROLE authenticated;
 CREATE TEMP TABLE bs2 AS SELECT public.api_ads_meta_budget_split() v;
 RESET ROLE;
-SELECT pg_temp.ok((SELECT (v->>'ready')::boolean AND (v->>'total')::numeric = 100 AND (v->>'step')::int = 10 AND (v->>'min')::numeric = 40
+SELECT pg_temp.ok((SELECT (v->>'ready')::boolean AND (v->>'total')::numeric = 100 AND (v->>'step')::int = 10 AND (v->>'min')::numeric = 30
       AND NOT (v->>'can_approve')::boolean
       AND v->'items'->0->>'label' = 'CPL ads' AND v->'items'->0->>'id' = '8201' AND (v->'items'->0->>'daily')::numeric = 70 AND v->'items'->0->>'budget_from' = 'meta'
       AND (v->'items'->0->>'today_spend')::numeric = 50 AND (v->'items'->0->>'leads_7d')::int = 2 AND (v->'items'->0->>'cpl_7d')::numeric = 35
       AND v->'items'->1->>'label' = 'NIOS ads' AND (v->'items'->1->>'daily')::numeric = 30 AND v->'items'->1->>'budget_from' = 'plan'
       AND (v->'items'->1->>'leads_7d')::int = 1 AND (v->'items'->1->>'cpl_7d')::numeric = 12 FROM bs2),
-  'BS02 CPL and NIOS sides: daily budget (Meta''s, else the plan''s), today''s spend, 7-day leads and cost per lead; total ₹100, step ₹10, minimum ₹40');
+  'BS02 CPL and NIOS sides: daily budget (Meta''s, else the plan''s), today''s spend, 7-day leads and cost per lead; total ₹100, step ₹10, minimum ₹30');
 
 SELECT pg_temp.as_('c'); SET ROLE authenticated;
 SELECT pg_temp.fails($q$SELECT public.api_ads_meta_budget_split_save('[{"adset": "8201", "daily": 60}, {"adset": "8301", "daily": 40}]')$q$, '%Only approvers%', 'BS03 a viewer cannot change the split');
 SELECT pg_temp.as_('d');
 SELECT pg_temp.fails($q$SELECT public.api_ads_meta_budget_split_save('[{"adset": "8201", "daily": 60}, {"adset": "8301", "daily": 50}]')$q$, '%total must stay ₹100%', 'BS04 the total cannot change');
-SELECT pg_temp.fails($q$SELECT public.api_ads_meta_budget_split_save('[{"adset": "8201", "daily": 65}, {"adset": "8301", "daily": 35}]')$q$, '%at least ₹40%', 'BS05 no side below the split minimum');
+SELECT pg_temp.fails($q$SELECT public.api_ads_meta_budget_split_save('[{"adset": "8201", "daily": 80}, {"adset": "8301", "daily": 20}]')$q$, '%at least ₹30%', 'BS05 no side below the split minimum');
 SELECT pg_temp.fails($q$SELECT public.api_ads_meta_budget_split_save('[{"adset": "8201", "daily": 60}, {"adset": "8101", "daily": 40}]')$q$, '%both ad sets%', 'BS05b only the two running ad sets');
 CREATE TEMP TABLE bs3 AS SELECT public.api_ads_meta_budget_split_save('[{"adset": "8301", "daily": 40}, {"adset": "8201", "daily": 60}]') r;
 RESET ROLE;
@@ -67,7 +67,7 @@ GRANT SELECT ON bs4 TO PUBLIC;
 SELECT public.svc_ads_meta_action_done((r->'ids'->>0)::bigint, 'done', '{"daily_budget": 70}', '{"daily_budget": 60, "status": "ACTIVE"}', NULL) FROM bs3;
 SELECT public.svc_ads_meta_budgets_save('[{"id": "8301", "daily_budget": 30}, {"id": "999999", "daily_budget": 5}]');
 RESET ROLE;
-SELECT pg_temp.ok((SELECT (w->>'split_min_daily')::numeric = 40 AND (w->>'min_daily')::numeric = 100 AND w->'items' @> '[{"kind": "budget", "object_id": "8201"}]' FROM bs4),
+SELECT pg_temp.ok((SELECT (w->>'split_min_daily')::numeric = 30 AND (w->>'min_daily')::numeric = 100 AND w->'items' @> '[{"kind": "budget", "object_id": "8201"}]' FROM bs4),
   'BS09 the action job gets the split minimum for split requests (the normal minimum stays ₹100)');
 SELECT pg_temp.as_('c'); SET ROLE authenticated;
 CREATE TEMP TABLE bs5 AS SELECT public.api_ads_meta_budget_split() v;
