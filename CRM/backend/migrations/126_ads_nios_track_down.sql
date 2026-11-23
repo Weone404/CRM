@@ -15,7 +15,6 @@ END $$;
 DROP TRIGGER IF EXISTS trg_ads_lead_track ON public.ads_enquiry;
 DROP FUNCTION IF EXISTS crm_private.ads_lead_track_set();
 DROP FUNCTION IF EXISTS crm_private.ads_lead_track(uuid);
-DROP FUNCTION IF EXISTS crm_private.ads_meta_nios_object(text, text);
 ALTER TABLE public.ads_lead DROP CONSTRAINT IF EXISTS ads_lead_track_check;
 ALTER TABLE public.ads_lead DROP COLUMN IF EXISTS track;
 UPDATE public.ads_config SET value = '125', updated_at = now() WHERE key = 'ads_schema';
