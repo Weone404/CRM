@@ -36,6 +36,11 @@ export function plan(kind: string, level: string, params: any, now: Live, curren
   return { error: `Unknown action ${kind}` };
 }
 
+// The lowest daily budget an action may set: the Budget split card's own minimum (migration 129) for its requests,
+// the normal minimum (meta_action_min_daily) for everything else.
+export const actionFloor = (params: any, lo: number, splitLo?: number | null): number =>
+  params?.split === true && splitLo !== null && splitLo !== undefined && Number.isFinite(Number(splitLo)) ? Number(splitLo) : lo;
+
 // Did Meta end up where we asked?
 export function verified(kind: string, after: Live, daily?: number): boolean {
   if (kind === "pause") return after.status === "PAUSED";

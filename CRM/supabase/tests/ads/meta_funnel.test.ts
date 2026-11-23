@@ -127,7 +127,7 @@ test("FT11 new-people ad sets: seed audiences are hints only with Advantage+ aud
 });
 
 // 110: Automate helpers.
-import { live as liveObj, plan as actionPlan, studyParams, verified as actionVerified } from "../../functions/_shared/meta_actions.ts";
+import { actionFloor, live as liveObj, plan as actionPlan, studyParams, verified as actionVerified } from "../../functions/_shared/meta_actions.ts";
 
 test("FT12 actions: pause / on are skipped when already there; budgets in minor units within limits; ads have no budget", () => {
   const now = liveObj({ status: "ACTIVE", effective_status: "ACTIVE", daily_budget: "150000", name: "A" }, "INR");
@@ -158,4 +158,15 @@ test("FT14 premium: PIN codes go to geo_locations.zips; offered income options n
   assert.deepEqual(t.geo_locations, { zips: [{ key: "IN:110021" }] });
   assert.deepEqual(t.flexible_spec, [{ interests: [{ id: "6003", name: "Aviation" }] }, { income: [{ id: "6002714898572", name: "Top 10%" }] }]);
   assert.equal((targeting({ audience: {} }, { countries: ["IN"], regions: [], cities: [] }, []) as any).flexible_spec, undefined);
+});
+
+test("Budget split (129): split requests may go down to the split minimum, nothing else may", () => {
+  const now = liveObj({ status: "ACTIVE", effective_status: "ACTIVE", daily_budget: "7000" }, "INR");
+  assert.equal(actionFloor({ daily: 40, split: true }, 100, 40), 40);
+  assert.equal(actionFloor({ daily: 40 }, 100, 40), 100);
+  assert.equal(actionFloor({ daily: 40, split: "true" }, 100, 40), 100);
+  assert.equal(actionFloor({ daily: 40, split: true }, 100, undefined), 100);
+  assert.deepEqual(actionPlan("budget", "adset", { daily: 40, split: true }, now, "INR", actionFloor({ daily: 40, split: true }, 100, 40), 50000),
+    { path: "object", send: { daily_budget: "4000" }, daily: 40 });
+  assert.equal(actionPlan("budget", "adset", { daily: 40 }, now, "INR", actionFloor({ daily: 40 }, 100, 40), 50000).daily, 100);
 });

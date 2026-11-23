@@ -38,7 +38,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { admin, asUser, cors, cronOk, json, HttpError, rpc } from "../_shared/ads_deno.ts";
 import { encodeBase64 } from "jsr:@std/encoding@1/base64";
-import { AdsError, GoogleAds, MetaAds, dateRange, discover, executeOne, scrubSecrets, todayIn, verify, type Platforms, type WorkItem } from "../_shared/ads_core.ts";
+import { AdsError, GoogleAds, MetaAds, dateRange, discover, executeOne, metaMinorToUnits, scrubSecrets, todayIn, verify, type Platforms, type WorkItem } from "../_shared/ads_core.ts";
 import { buildOps, convertOutcome, dmRequest, executeGoogleOp, googleSnapshot, resultNames, type ConvItem, type GoogleOp } from "../_shared/ads_google_ops.ts";
 import { ADS_BUILD, buildEvent, crmEvent, ctwaPayload, deployState, EventError, isTestLead, metaLeadPayload, organicPayload, serializeEvents, type CapiItem } from "../_shared/ads_meta.ts";
 import { URL_ } from "../_shared/ads_deno.ts";
@@ -49,7 +49,7 @@ import * as webpush from "jsr:@negrel/webpush@0.5.0";
 import { alertText, type DueAlert } from "../_shared/lead_alerts.ts";
 import { BREAKDOWNS as REPORT_BREAKDOWNS, cacheHours, cacheKey, cleanParams, insightsQuery, parseRow, previousPeriod, ReportError } from "../_shared/meta_report.ts";
 import { healthWarnings } from "../_shared/meta_health.ts";
-import { FIELDS as ACTION_FIELDS, live as liveObj, plan as actionPlan, studyParams, verified as actionVerified } from "../_shared/meta_actions.ts";
+import { actionFloor, FIELDS as ACTION_FIELDS, live as liveObj, plan as actionPlan, studyParams, verified as actionVerified } from "../_shared/meta_actions.ts";
 import { audienceError, engagementRule, lookalikeParams, PREFIX, replaceBatches, seedReady, sizeOf } from "../_shared/meta_audience.ts";
 import { GA_REPORTS, gaBody, googleToken, gscBody, gscSite, parseGa, parseGsc, siteError, windows, type SiteRow } from "../_shared/site_signals.ts";
 import { adParams, adsetParams, bestMatch, campaignParams, countryCode, creativeParams, formAttempts, geoQueries, imageKind, MAX_IMAGE_B64,
@@ -867,6 +867,10 @@ async function metaHealth(s: Record<string, string>) {
       filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: ["ACTIVE", "WITH_ISSUES", "PENDING_REVIEW", "IN_PROCESS"] }]), limit: "200" }), [] as any[]);
     const ads = await safe("ads", () => m.readAll(`${act}/ads`, { fields: "id,name,adset_id,campaign_id,effective_status,ad_review_feedback,issues_info",
       filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: JSON.parse(LIVE) }]), limit: "300" }), [] as any[]);
+    // the running ad sets' daily budgets, for Overview > Budget split (129)
+    const budgets = adsets.map((x: any) => ({ id: String(x?.id ?? ""), daily_budget: metaMinorToUnits(x?.daily_budget, acct.currency) }))
+      .filter((x) => /^\d{3,25}$/.test(x.id) && x.daily_budget !== null);
+    if (budgets.length) await safe("ad set budgets", () => rpc("svc_ads_meta_budgets_save", { p_items: budgets }), null);
     const days = await safe("daily numbers", () => m.insights(acct.id, { level: "account", fields: "spend,impressions,inline_link_clicks,actions",
       time_range: JSON.stringify({ since: [addDaysIso(today, -17), `${today.slice(0, 8)}01`].sort()[0], until: today }), time_increment: "1", limit: "100" }), [] as any[]);
     const { data, warnings } = healthWarnings({ today, currency: acct.currency, account, opportunity: opp, recommendations: recs, campaigns, adsets, ads, days, errors });
@@ -1048,7 +1052,7 @@ async function siteSignals(s: Record<string, string>, t0: number) {
 async function metaActions(s: Record<string, string>, t0: number) {
   return runJob("meta_actions", s, async () => {
     const { p } = platforms(s);
-    const w = await rpc("svc_ads_meta_action_work") as { paused: boolean; currency: string | null; account_id: string | null; min_daily: number; max_daily: number;
+    const w = await rpc("svc_ads_meta_action_work") as { paused: boolean; currency: string | null; account_id: string | null; min_daily: number; max_daily: number; split_min_daily?: number;
       items: { id: number; level: string; object_id: string; kind: string; params: any }[] };
     if (w.paused) return { items: 0, status: "ok", detail: "Meta emergency stop is on: nothing was changed" };
     if (!p.meta) {
@@ -1063,7 +1067,7 @@ async function metaActions(s: Record<string, string>, t0: number) {
       let before: any = null;
       try {
         before = liveObj(await m.read(a.object_id, { fields: ACTION_FIELDS[a.level] }), w.currency);
-        const pl = actionPlan(a.kind, a.level, a.params, before, w.currency, w.min_daily, w.max_daily);
+        const pl = actionPlan(a.kind, a.level, a.params, before, w.currency, actionFloor(a.params, w.min_daily, w.split_min_daily), w.max_daily);
         if (pl.error) { await finish("failed", before, null, pl.error); failed++; continue; }
         if (pl.skip) { await finish("done", before, { note: pl.skip }, null); done++; continue; }
         if (pl.path === "copies") {

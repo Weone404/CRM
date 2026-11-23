@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import Icon from './icons';
 import { rpc, run, useLoad, Btn } from './adsKit';
 
 // CRM > Meta Ads > Overview (migration 121): money left to spend and each live campaign at a glance: budget used against
 // the strategy's total, today, leads, cost per lead, qualified, one row per ad and the latest form answers with call speed.
 // Numbers refresh every 15 minutes while ads run (cron crm-ads-meta-live); this view reloads every minute.
+// Budget split (129): the CPL / NIOS ad set budgets on one slider; the total stays fixed; changes go through approval.
 
 const C = { green: '#1E7B34', red: '#C4261D', amber: '#B25E00', blue: '#0088FF', track: 'rgba(118,118,128,0.16)', soft: 'rgba(118,118,128,0.08)' };
 const inr = (v) => (v === null || v === undefined ? '–' : `₹${Math.round(Number(v)).toLocaleString('en-IN')}`);
@@ -41,6 +43,67 @@ function Wallet({ w }) {
       </div>
       {limitBinds && <div className="text-xs mt-2" style={{ color: C.amber }}>The account spending limit runs out before the balance. In Billing, raise or reset the spending limit, or added money cannot be spent.</div>}
       <div className="text-[11px] text-glass-muted mt-2">From Meta, checked {ago(w.checked_at)}.</div>
+    </section>);
+}
+
+// Budget split (migration 129): one slider between the CPL and the NIOS ad set; the total stays as it is. Save asks for the
+// two budget changes through the approval flow (approved at once when one approver may do it) and sends them to Meta.
+function SplitSide({ x, daily }) {
+  return (
+    <div className="rounded-xl px-3 py-2 min-w-0" style={{ background: C.soft }} data-testid="split-side">
+      <div className="text-[11px] text-glass-muted truncate">{x.label}</div>
+      <div className="text-lg font-bold">{inr(daily)}<span className="text-xs font-normal text-glass-muted">/day</span></div>
+      <div className="text-[11px] text-glass-muted leading-snug">Today {inr(x.today_spend)} · 7 days {num(x.leads_7d)} lead{Number(x.leads_7d) === 1 ? '' : 's'} · {x.cpl_7d ? `${inr(x.cpl_7d)}/lead` : 'no ₹/lead yet'}</div>
+    </div>);
+}
+
+function BudgetSplit({ edge }) {
+  const [d, reload] = useLoad(() => rpc('api_ads_meta_budget_split').catch(() => null), [], { refreshMs: 60000 });
+  const [pick, setPick] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+  if (!d) return null;
+  const a = (d.items || []).find((x) => !x.nios), b = (d.items || []).find((x) => x.nios);
+  const total = Number(d.total) || 0, min = Number(d.min) || 0, step = Number(d.step) || 10;
+  const fits = d.ready && a && b && total - min >= min;
+  if (!fits) {
+    return (
+      <section className="glass-card p-4" style={{ opacity: 0.55 }} data-testid="budget-split">
+        <div className="flex items-center gap-2"><b className="flex-1">Budget split</b>{total > 0 && <span className="text-xs text-glass-muted">{inr(total)}/day</span>}</div>
+        <div className="text-sm text-glass-muted mt-1">{d.why || `₹${total} a day is too little to split (at least ₹${min} each side)`}</div>
+      </section>);
+  }
+  // a split under the minimum (e.g. ₹70 / ₹30 with ₹40 each) starts at the nearest allowed one, saying what Meta has now
+  const cur = Number(a.daily), near = Math.min(total - min, Math.max(min, cur)), v = pick ?? near, other = total - v;
+  const waiting = a.waiting || b.waiting;
+  const big = [[cur, v], [Number(b.daily), other]].some(([o, n]) => o > 0 && Math.abs(n - o) / o >= 0.2);
+  const save = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await rpc('api_ads_meta_budget_split_save', { p_items: [{ adset: a.id, daily: v }, { adset: b.id, daily: other }] });
+      if (r?.self_approve) for (const id of r.ids || []) await rpc('api_ads_meta_action_decide', { p_id: id, p_approve: true, p_note: 'Budget split' });
+      if (r?.self_approve) await edge({ jobs: ['meta_actions'] }).catch(() => null);
+      const done = r?.self_approve ? ((await rpc('api_ads_meta_actions', { p_days: 1 }).catch(() => null))?.items || []).filter((x) => (r.ids || []).includes(x.id)) : [];
+      const errs = done.filter((x) => x.status === 'failed' && x.error).map((x) => x.error);
+      setMsg(errs.length ? { bad: true, text: `Meta said: ${errs.join(' · ')}` }
+        : { text: [r?.self_approve ? 'Sent to Meta.' : 'Waiting for another approver.', ...(r?.guard || [])].join(' ') });
+      setPick(null); reload();
+    } catch (e) { setMsg({ bad: true, text: e.message }); } finally { setBusy(false); }
+  };
+  return (
+    <section className="glass-card p-4 space-y-3" data-testid="budget-split">
+      <div className="flex items-center gap-2"><b className="flex-1">Budget split</b><span className="text-xs text-glass-muted">{inr(total)}/day in all</span></div>
+      <div className="grid grid-cols-2 gap-2"><SplitSide x={a} daily={v} /><SplitSide x={b} daily={other} /></div>
+      <input type="range" className="w-full" min={min} max={total - min} step={step} value={v}
+        aria-label={`${a.label} daily budget`} data-testid="split-slider" disabled={!d.can_approve || busy || waiting}
+        onChange={(e) => { setPick(Number(e.target.value)); setMsg(null); }} />
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="flex-1 min-w-[160px] text-[11px]" style={{ color: msg?.bad ? C.red : big && !msg ? C.amber : undefined }} data-testid="split-note">
+          {msg ? msg.text : waiting ? 'A budget change is waiting for approval or for Meta.'
+            : pick === null && near !== cur ? `Meta now: ${inr(cur)} / ${inr(b.daily)}. At least ₹${min} each side here.`
+            : big ? 'A change over 20% can restart Meta\'s learning.' : `At least ₹${min} each side, in ₹${step} steps.`}</span>
+        {d.can_approve && <Btn onClick={save} disabled={busy || waiting || v === cur} data-testid="split-save">{busy ? 'Saving…' : 'Save'}</Btn>}
+      </div>
     </section>);
 }
 
@@ -101,6 +164,7 @@ export default function AdsMetaMoney({ access, edge }) {
   return (
     <div className="space-y-3" data-testid="meta-money">
       <Wallet w={d.wallet || {}} />
+      <BudgetSplit edge={edge} />
       {(d.campaigns || []).map((c) => <Campaign key={c.id} c={c} access={access} edge={edge} reload={reload} />)}
       {(d.campaigns || []).length > 0 && <div className="text-[11px] text-glass-muted">Spend and views from Meta, updated {ago(d.numbers_at)}{d.live ? ', every 15 minutes while ads run' : ''}. Leads and calls are live from the CRM.</div>}
     </div>);

@@ -161,6 +161,13 @@ http.createServer((req, res) => {
     });
   }
   function answer(fn) {
+    // Meta Ads > Overview > Budget split (129)
+    if (fn === 'api_ads_meta_budget_split') return send(res, 200, { ready: true, total: 100, step: 10, min: 40, can_approve: true, items: [
+      { id: '8201', name: 'India | f2', nios: false, label: 'CPL ads', daily: 70, today_spend: 41, leads_7d: 6, cpl_7d: 58, waiting: false },
+      { id: '8301', name: 'India | NIOS route', nios: true, label: 'NIOS ads', daily: 30, today_spend: 17, leads_7d: 3, cpl_7d: 49, waiting: false }] });
+    if (fn === 'api_ads_meta_budget_split_save') return send(res, 200, { ids: [91, 92], guard: ['A 33% change is a big edit: Meta may restart the learning phase for this ad set.'], self_approve: true });
+    if (fn === 'api_ads_meta_actions') return send(res, 200, { items: [{ id: 91, status: 'done', error: null },
+      { id: 92, status: 'failed', error: 'Stub: Meta refused this budget as too low for the ad set' }] });
     if (fn === 'api_vault_overview') return send(res, 200, VAULT);
     if (fn === 'api_web_access') return send(res, 200, { can_view: true, can_run: true, is_admin: true });
     if (fn === 'api_web_overview') return send(res, 200, WEB);

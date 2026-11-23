@@ -70,6 +70,26 @@ for (const width of [360, 390, 768, 1024, 1440]) {
     const act = await page.evaluate(() => { const b = document.querySelector('[data-testid="meta-tabs"] [aria-selected="true"]'); const r = b.getBoundingClientRect(); const p = b.parentElement.getBoundingClientRect(); return r.left >= p.left - 1 && r.right <= p.right + 1; });
     ok(act, `RL10 ${width} ${n}: the open tab is in view`);
     ok(await fits(), `RL11 ${width} ${n}: fits the screen`);
+    if (n === 'metaads' && (width === 390 || width === 1440)) {
+      const card = page.getByTestId('budget-split'); await card.waitFor();
+      const sides = async () => (await card.getByTestId('split-side').allInnerTexts()).map((t) => t.replace(/\s+/g, ' '));
+      const s0 = await sides(); const note0 = await card.getByTestId('split-note').innerText();
+      await card.getByTestId('split-slider').focus(); await page.keyboard.press('ArrowLeft'); await page.waitForTimeout(200);
+      const s1 = await sides(); const note1 = await card.getByTestId('split-note').innerText();
+      const before = (await (await fetch(`${STUB}/__calls`)).json()).length;
+      await card.getByTestId('split-save').click(); await page.waitForTimeout(900);
+      const cs = (await (await fetch(`${STUB}/__calls`)).json()).slice(before);
+      const sv = cs.find((x) => x.fn === 'api_ads_meta_budget_split_save');
+      const note2 = await card.getByTestId('split-note').innerText();
+      const box = await card.boundingBox();
+      ok(/CPL ads ₹60\/day/.test(s0[0]) && /NIOS ads ₹40\/day/.test(s0[1]) && /7 days 6 leads · ₹58\/lead/.test(s0[0]) && /Meta now: ₹70 \/ ₹30/.test(note0)
+         && /₹50\/day/.test(s1[0]) && /₹50\/day/.test(s1[1]) && /over 20%/.test(note1)
+         && JSON.stringify(sv?.args?.p_items) === JSON.stringify([{ adset: '8201', daily: 50 }, { adset: '8301', daily: 50 }])
+         && cs.filter((x) => x.fn === 'api_ads_meta_action_decide').length === 2 && cs.some((x) => x.fn === 'edge:ads-sync' && x.args.jobs?.[0] === 'meta_actions')
+         && /Meta said: Stub: Meta refused this budget/.test(note2) && box.width <= width && await fits(),
+        `RL14 ${width}: Budget split: starts at the nearest allowed split (Meta's ₹70/₹30 shown), the slider moves both sides (total fixed), Save asks for both, approves, sends to Meta and shows Meta's refusal`);
+      await page.screenshot({ path: `/tmp/resp_${width}_split.png` });
+    }
     await page.screenshot({ path: `/tmp/resp_${width}_${n}.png` });
   }
   await ctx.close();
