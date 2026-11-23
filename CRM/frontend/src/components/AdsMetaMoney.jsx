@@ -82,9 +82,10 @@ function BudgetSplit({ edge }) {
     try {
       const r = await rpc('api_ads_meta_budget_split_save', { p_items: [{ adset: a.id, daily: v }, { adset: b.id, daily: other }] });
       if (r?.self_approve) for (const id of r.ids || []) await rpc('api_ads_meta_action_decide', { p_id: id, p_approve: true, p_note: 'Budget split' });
-      if (r?.self_approve) await edge({ jobs: ['meta_actions'] }).catch(() => null);
+      // the decrease runs first; the increase only after it is done in Meta (129), so the job runs twice
+      if (r?.self_approve) { await edge({ jobs: ['meta_actions'] }).catch(() => null); await edge({ jobs: ['meta_actions'] }).catch(() => null); }
       const done = r?.self_approve ? ((await rpc('api_ads_meta_actions', { p_days: 1 }).catch(() => null))?.items || []).filter((x) => (r.ids || []).includes(x.id)) : [];
-      const errs = done.filter((x) => x.status === 'failed' && x.error).map((x) => x.error);
+      const errs = done.filter((x) => ['failed', 'cancelled'].includes(x.status) && x.error).map((x) => x.error);
       setMsg(errs.length ? { bad: true, text: `Meta said: ${errs.join(' · ')}` }
         : { text: [r?.self_approve ? 'Sent to Meta.' : 'Waiting for another approver.', ...(r?.guard || [])].join(' ') });
       setPick(null); reload();

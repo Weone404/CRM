@@ -1,4 +1,4 @@
--- 129: Meta Ads > Overview > Budget split (BS01-BS10). Runs after B5_ (live campaign 7101, account from A2_).
+-- 129: Meta Ads > Overview > Budget split (BS01-BS12). Runs after B5_ (live campaign 7101, account from A2_).
 RESET ROLE;
 UPDATE public.ads_meta_object SET status = 'PAUSED' WHERE level = 'adset' AND campaign_ext = '7101';
 UPDATE public.ads_meta_object SET status = 'ACTIVE' WHERE level = 'campaign' AND external_id = '7101';
@@ -61,18 +61,49 @@ SELECT pg_temp.fails($q$SELECT public.api_ads_meta_budget_split_save('[{"adset":
 SELECT pg_temp.fails($q$SELECT public.api_ads_meta_action_request('adset', '8101', 'budget', '{"daily": 40, "split": true}', 'x')$q$, '%Budget split on Overview%', 'BS08 other budget requests cannot borrow the split minimum ...');
 SELECT pg_temp.fails($q$SELECT public.api_ads_meta_action_request('adset', '8101', 'budget', '{"daily": 60}', 'x')$q$, '%between ₹100%', 'BS08b ... and still need ₹100 a day');
 SELECT public.api_ads_meta_action_decide((r->'ids'->>0)::bigint, true, 'ok') FROM bs3;
+SELECT public.api_ads_meta_action_decide((r->'ids'->>1)::bigint, true, 'ok') FROM bs3;
 RESET ROLE; SET ROLE service_role;
 CREATE TEMP TABLE bs4 AS SELECT public.svc_ads_meta_action_work() w;
 GRANT SELECT ON bs4 TO PUBLIC;
 SELECT public.svc_ads_meta_action_done((r->'ids'->>0)::bigint, 'done', '{"daily_budget": 70}', '{"daily_budget": 60, "status": "ACTIVE"}', NULL) FROM bs3;
 SELECT public.svc_ads_meta_budgets_save('[{"id": "8301", "daily_budget": 30}, {"id": "999999", "daily_budget": 5}]');
 RESET ROLE;
-SELECT pg_temp.ok((SELECT (w->>'split_min_daily')::numeric = 30 AND (w->>'min_daily')::numeric = 100 AND w->'items' @> '[{"kind": "budget", "object_id": "8201"}]' FROM bs4),
-  'BS09 the action job gets the split minimum for split requests (the normal minimum stays ₹100)');
+SELECT pg_temp.ok((SELECT (w->>'split_min_daily')::numeric = 30 AND (w->>'min_daily')::numeric = 100 AND w->'items' @> '[{"kind": "budget", "object_id": "8201"}]'
+      AND NOT w->'items' @> '[{"object_id": "8301"}]' FROM bs4)
+    AND (SELECT a.params->>'after' = r->'ids'->>0 AND a.status = 'approved' FROM bs3, public.ads_meta_action a WHERE a.id = (r->'ids'->>1)::bigint),
+  'BS09 the action job gets the split minimum; the increase (after: the decrease) waits while the decrease runs');
 SELECT pg_temp.as_('c'); SET ROLE authenticated;
 CREATE TEMP TABLE bs5 AS SELECT public.api_ads_meta_budget_split() v;
 RESET ROLE;
 SELECT pg_temp.ok((SELECT (v->'items'->0->>'daily')::numeric = 60 AND NOT (v->'items'->0->>'waiting')::boolean AND v->'items'->1->>'budget_from' = 'meta'
       AND (v->'items'->1->>'waiting')::boolean AND (v->>'total')::numeric = 90 FROM bs5),
   'BS10 the budget Meta reads back (and meta_health''s) shows at once; the side still waiting is marked');
+SET ROLE service_role;
+CREATE TEMP TABLE bs6 AS SELECT public.svc_ads_meta_action_work() w;
+GRANT SELECT ON bs6 TO PUBLIC;
+SELECT public.svc_ads_meta_action_done((r->'ids'->>1)::bigint, 'done', '{"daily_budget": 30}', '{"daily_budget": 40, "status": "ACTIVE"}', NULL) FROM bs3;
+RESET ROLE;
+SELECT pg_temp.ok((SELECT w->'items' @> '[{"object_id": "8301", "kind": "budget"}]' FROM bs6)
+    AND (SELECT (v->>'total')::numeric = 100 FROM (SELECT public.api_ads_meta_budget_split() v) z),
+  'BS11 once the decrease is done in Meta the increase runs; the total is back to ₹100');
+-- Meta refuses the decrease of the next split: its increase is never sent
+SELECT pg_temp.as_('d'); SET ROLE authenticated;
+CREATE TEMP TABLE bs7 AS SELECT public.api_ads_meta_budget_split_save('[{"adset": "8201", "daily": 50}, {"adset": "8301", "daily": 50}]') r;
+SELECT public.api_ads_meta_action_decide((r->'ids'->>0)::bigint, true, 'ok') FROM bs7;
+SELECT public.api_ads_meta_action_decide((r->'ids'->>1)::bigint, true, 'ok') FROM bs7;
+RESET ROLE;
+GRANT SELECT ON bs7 TO PUBLIC;
+SET ROLE service_role;
+CREATE TEMP TABLE bs8 AS SELECT public.svc_ads_meta_action_work() w;
+GRANT SELECT ON bs8 TO PUBLIC;
+SELECT public.svc_ads_meta_action_done((r->'ids'->>0)::bigint, 'failed', '{"daily_budget": 60}', NULL, 'Meta: the budget is too low for this ad set') FROM bs7;
+CREATE TEMP TABLE bs9 AS SELECT public.svc_ads_meta_action_work() w;
+GRANT SELECT ON bs9 TO PUBLIC;
+RESET ROLE;
+SELECT pg_temp.ok((SELECT w->'items' @> '[{"object_id": "8201"}]' AND NOT w->'items' @> '[{"object_id": "8301"}]' FROM bs8)
+    AND (SELECT NOT w->'items' @> '[{"object_id": "8301"}]' FROM bs9)
+    AND (SELECT a.status = 'cancelled' AND a.error LIKE 'Not sent: its paired decrease (request %) failed: Meta: the budget is too low%'
+         FROM bs7, public.ads_meta_action a WHERE a.id = (r->'ids'->>1)::bigint)
+    AND (SELECT (v->>'total')::numeric = 100 AND NOT (v->'items'->1->>'waiting')::boolean FROM (SELECT public.api_ads_meta_budget_split() v) z),
+  'BS12 when Meta refuses the decrease, its paired increase is cancelled with the reason, so the total never goes over ₹100');
 \echo ALL ADS META 129 TESTS PASSED

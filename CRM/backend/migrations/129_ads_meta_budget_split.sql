@@ -3,10 +3,12 @@
 --    ads-sync meta_health and every finished budget action keep ads_meta_object.info.daily_budget; else the plan's),
 --    today's spend, 7-day CRM leads (first_touch adset_id, or an ad of the ad set) and 7-day cost per lead, plus the
 --    total (fixed: the sum of the two), the slider step (₹10) and the per-side minimum (ads_config meta_split_min_daily,
---    default ₹40). Ready only with exactly one CPL and one NIOS ad set (NIOS: the ad set's or its plan ad set's name says NIOS).
+--    default ₹30). Ready only with exactly one CPL and one NIOS ad set (NIOS: the ad set's or its plan ad set's name says NIOS).
 --  * api_ads_meta_budget_split_save(p_items [{adset, daily}]): approvers only; the total must not change and no side may go
---    under the minimum. One budget request per changed ad set through the approval flow (110), the lower one first, with
---    params {daily, pct, split: true}. Returns ids, guard warnings and self_approve like api_ads_meta_action_request.
+--    under the minimum. One budget request per changed ad set through the approval flow (110), the decrease first, with
+--    params {daily, pct, split: true}; the increase also carries {after: <decrease id>} and the action job runs it only after
+--    the decrease is done (cancelled, with the reason, if it is not). Returns ids, guard warnings and self_approve like
+--    api_ads_meta_action_request.
 --  * Only these split requests may go down to the split minimum; every other budget action keeps meta_action_min_daily
 --    (default ₹100): the guard, the action worker (svc_ads_meta_action_work.split_min_daily) and api_ads_meta_action_request
 --    (which refuses a 'split' flag) all check it.
@@ -57,11 +59,30 @@ BEGIN
   RETURN public.api_ads_meta_action_request_v128(p_level, p_object_id, p_kind, p_params, p_reason);
 END $$;
 
+-- 110's action job (its definition, kept as _v128 for rollback) plus the split pairing: the increase of a budget split runs
+-- only after its paired decrease (params.after) is done in Meta, and is cancelled, with the reason, if the decrease failed,
+-- was rejected or expired. So the two ad sets never add up to more than the fixed total, even for a moment.
 CREATE OR REPLACE FUNCTION public.svc_ads_meta_action_work() RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
-DECLARE w jsonb := public.svc_ads_meta_action_work_v128();
+DECLARE acc public.ads_accounts := crm_private.ads_meta_acct(); items jsonb;
 BEGIN
-  RETURN w || jsonb_build_object('split_min_daily', crm_private.ads_meta_split_min());
+  UPDATE public.ads_meta_action SET status = 'expired' WHERE status IN ('pending', 'approved') AND expires_at < now();
+  UPDATE public.ads_meta_action a SET status = 'cancelled', executed_at = now(),
+         error = left(format('Not sent: its paired decrease (request %s) %s%s', d.id, d.status, CASE WHEN d.error IS NOT NULL THEN ': ' || d.error ELSE '' END), 600)
+    FROM public.ads_meta_action d
+   WHERE a.status IN ('pending', 'approved') AND a.params ? 'after' AND d.id = (a.params->>'after')::bigint
+     AND d.status IN ('failed', 'rejected', 'cancelled', 'stale', 'expired');
+  IF crm_private.ads_platform_paused('meta') THEN RETURN jsonb_build_object('paused', true, 'items', '[]'::jsonb); END IF;
+  WITH x AS (UPDATE public.ads_meta_action SET status = 'executing' WHERE id IN (
+               SELECT w.id FROM public.ads_meta_action w WHERE w.status = 'approved'
+                  AND (NOT (w.params ? 'after') OR EXISTS (SELECT 1 FROM public.ads_meta_action d WHERE d.id = (w.params->>'after')::bigint AND d.status = 'done'))
+                ORDER BY w.decided_at LIMIT 20 FOR UPDATE SKIP LOCKED)
+             RETURNING id, level, object_id, kind, params)
+  SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY x.id), '[]') INTO items FROM x;
+  RETURN jsonb_build_object('paused', false, 'currency', acc.currency, 'account_id', acc.external_id,
+    'min_daily', coalesce(nullif(crm_private.ads_cfg('meta_action_min_daily'), '')::numeric, 100),
+    'max_daily', coalesce(nullif(crm_private.ads_cfg('meta_action_max_daily'), '')::numeric, 50000),
+    'split_min_daily', crm_private.ads_meta_split_min(), 'items', items);
 END $$;
 
 -- the budget Meta reads back after a change is kept on the ad set
@@ -132,6 +153,7 @@ END $$;
 CREATE OR REPLACE FUNCTION public.api_ads_meta_budget_split_save(p_items jsonb) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE sp jsonb; it jsonb; x jsonb; nd numeric; cur numeric; ids jsonb := '[]'; g jsonb := '[]'; nid bigint; total numeric := 0; txt text;
+        dec bigint;
 BEGIN
   PERFORM crm_private.ads_require_view();
   IF NOT crm_private.ads_can_approve() THEN RAISE EXCEPTION 'Only approvers can ask for changes' USING ERRCODE = 'PT403'; END IF;
@@ -158,9 +180,11 @@ BEGIN
     nd := (x->>'daily')::numeric; cur := (it->>'daily')::numeric;
     CONTINUE WHEN nd = cur;
     nid := crm_private.ads_meta_action_add('adset', it->>'id', 'budget',
-      jsonb_build_object('daily', nd, 'pct', round(100 * (nd - cur) / nullif(cur, 0), 1), 'split', true),
+      jsonb_build_object('daily', nd, 'pct', round(100 * (nd - cur) / nullif(cur, 0), 1), 'split', true)
+        || CASE WHEN nd > cur AND dec IS NOT NULL THEN jsonb_build_object('after', dec) ELSE '{}' END,
       'Budget split from Overview: ' || txt, 'user', NULL, NULL, auth.uid());
     IF nid IS NULL THEN RAISE EXCEPTION 'A budget change is already waiting for %', it->>'label' USING ERRCODE = 'PT409'; END IF;
+    IF nd < cur THEN dec := nid; END IF;
     ids := ids || to_jsonb(nid);
     g := g || (SELECT guard FROM public.ads_meta_action WHERE id = nid);
   END LOOP;
