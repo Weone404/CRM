@@ -1,4 +1,4 @@
-// Layout at 5 screen widths (360 / 390 phones, 768 tablet, 1024 / 1440 laptops) + Leads > Meta Leads.
+// Layout at 5 screen widths (360 / 390 phones, 768 tablet, 1024 / 1440 laptops) + Leads > Meta Leads (with the NIOS route filter).
 // The real CRM app (main.jsx + App.jsx) against the stub server: new layout, Home as the start page,
 // and "keep showing data when a refresh fails" instead of an error wall or a logout.
 import { createRequire } from 'node:module';
@@ -53,6 +53,15 @@ for (const width of [360, 390, 768, 1024, 1440]) {
   if (phone) ok(rowOf((await tops('[data-testid="ads-lead-answers"] > div')).slice(0, 2)) === 1, `RL07 ${width}: two answers per row on a phone`);
   ok(await fits(), `RL08 ${width}: Meta Leads fits the screen`);
   await page.screenshot({ path: `/tmp/resp_${width}_metaleads.png` });
+  const niosChip = page.getByTestId('ads-lead-nios');
+  const raj = await page.getByTestId('ads-lead-card').filter({ hasText: 'Raj' }).innerText();
+  await niosChip.click(); await page.waitForTimeout(600);
+  const niosCards = await page.getByTestId('ads-lead-card').allInnerTexts();
+  const lastBoard = (await (await fetch(`${STUB}/__calls`)).json()).filter((c) => c.fn === 'api_ads_lead_board').pop();
+  ok(/NIOS route \(1\)/.test(await niosChip.innerText()) && /NIOS route/.test(raj) && !/NIOS route/.test(card) && await niosChip.getAttribute('aria-pressed') === 'true'
+     && niosCards.length === 1 && /Raj/.test(niosCards[0]) && lastBoard?.args?.p_track === 'nios' && await fits(),
+    `RL13 ${width}: NIOS route chip next to Quarantine (with its count) lists only NIOS-route leads; their cards say NIOS route`);
+  await niosChip.click(); await page.waitForTimeout(300);
 
   for (const [n, h] of [['metaads', '#/metaads'], ['campaigns', '#/metaads/campaigns']]) {
     await page.goto(`${APP}${h}`); await page.getByTestId('meta-tabs').waitFor(); await page.waitForTimeout(1200);

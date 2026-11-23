@@ -56,6 +56,7 @@ export default function AdsLeads({ access, platform, inLeads }) {
   const [pipe, setPipe] = useState('pilot_training');
   const [stage, setStage] = useState('');
   const [quar, setQuar] = useState(false);
+  const [nios, setNios] = useState(false);   // NIOS route: Class 12 without Physics & Maths (migration 126)
   const [q, setQ] = useState('');
   const [board, setBoard] = useState(null);
   const [err, setErr] = useState('');
@@ -65,13 +66,13 @@ export default function AdsLeads({ access, platform, inLeads }) {
 
   const load = useCallback(async () => {
     try {
-      const args = { p_pipeline: pipe, p_stage: stage || null, p_quarantined: quar, p_search: q || null, p_limit: 200 };
+      const args = { p_pipeline: pipe, p_stage: stage || null, p_quarantined: quar, p_search: q || null, p_limit: 200, ...(nios ? { p_track: 'nios' } : {}) };
       // per-platform list (migration 100); until that update is run, the combined list is shown
       setBoard(await rpc('api_ads_lead_board', platform ? { ...args, p_platform: platform } : args)
         .catch((e) => (platform && /Could not find the function|PGRST202|42883|does not exist/i.test(`${e?.code || ''} ${e?.message}`) ? rpc('api_ads_lead_board', args) : Promise.reject(e))));
       setErr('');
     } catch (e) { setErr(e.message); }
-  }, [pipe, stage, quar, q, platform]);
+  }, [pipe, stage, quar, nios, q, platform]);
   useEffect(() => { const t = setTimeout(load, q ? 250 : 0); return () => clearTimeout(t); }, [load, q]);
   useEffect(() => { rpc('api_ads_staff').then(setStaff, () => setStaff([])); }, []);
   useEffect(() => { const i = setInterval(() => tick((n) => n + 1), 60000); return () => clearInterval(i); }, []);   // timers
@@ -101,7 +102,7 @@ export default function AdsLeads({ access, platform, inLeads }) {
       <div className="glass-card p-2 flex flex-wrap items-center gap-2" data-testid="ads-lead-filters">
         <div role="tablist" aria-label="Pipeline" className="flex w-full sm:w-auto sm:inline-flex rounded-xl p-0.5" style={{ background: 'rgba(118,118,128,0.12)' }}>
           {PIPES.map(([k, l]) => (
-            <button key={k} role="tab" aria-selected={pipe === k} type="button" onClick={() => { setPipe(k); setStage(''); }}
+            <button key={k} role="tab" aria-selected={pipe === k} type="button" onClick={() => { setPipe(k); setStage(''); setNios(false); }}
               className="flex-1 sm:flex-none px-3 py-1.5 rounded-[10px] text-sm font-semibold" style={pipe === k ? { background: '#fff', color: '#007AFF', boxShadow: '0 1px 3px rgba(0,0,0,0.12)' } : { color: '#3C3C43' }}>{l}</button>))}
         </div>
         <select aria-label="Stage" className="glass-input px-3 py-2 text-sm flex-1 sm:flex-none min-w-0" value={stage} onChange={(e) => setStage(e.target.value)}>
@@ -113,13 +114,19 @@ export default function AdsLeads({ access, platform, inLeads }) {
           style={quar ? { background: '#FF9500', color: '#fff' } : { background: 'rgba(118,118,128,0.12)', color: '#1C1C1E' }}>
           <Icon name="shield" size={16} />Quarantine{s.quarantined ? ` (${s.quarantined})` : ''}
         </button>
+        {(s.nios !== undefined || nios) && pipe === 'pilot_training' && (
+          <button type="button" onClick={() => setNios(!nios)} aria-pressed={nios} data-testid="ads-lead-nios" title="Passed Class 12 without Physics & Maths: NIOS Physics & Maths first, then CPL"
+            className="px-3 py-2 rounded-xl text-sm font-semibold inline-flex items-center justify-center gap-1.5 shrink-0"
+            style={nios ? { background: '#0A7A8A', color: '#fff' } : { background: 'rgba(118,118,128,0.12)', color: '#1C1C1E' }}>
+            NIOS route{s.nios ? ` (${s.nios})` : ''}
+          </button>)}
       </div>
 
       {err && <div className="glass-card p-3 text-sm" style={{ color: '#C4261D' }}>{err} <button type="button" className="underline ml-1" onClick={load}>Try again</button></div>}
       {!board && !err && <div className="text-center text-glass-muted py-10 text-sm">Loading…</div>}
       {board && !board.rows.length && (
         <div className="text-center text-glass-muted py-10 text-sm">
-          {quar ? 'Nothing in quarantine.' : q || stage ? 'No Ads leads match.' : 'No Ads leads yet. They appear here when someone fills a form after clicking an ad.'}
+          {quar ? 'Nothing in quarantine.' : nios && !q && !stage ? 'No NIOS-route leads.' : q || stage ? 'No Ads leads match.' : 'No Ads leads yet. They appear here when someone fills a form after clicking an ad.'}
         </div>)}
 
       <div className="space-y-2">
@@ -141,6 +148,7 @@ export default function AdsLeads({ access, platform, inLeads }) {
               </span>
               <span className="flex flex-col items-end gap-1 shrink-0 max-w-[45%]">
                 <Chip fg={(STAGE_TONE[r.stage] || [])[0]} bg={(STAGE_TONE[r.stage] || [])[1]}>{label[r.stage] || r.stage}</Chip>
+                {r.track === 'nios' && <Chip fg="#0A6E7A" bg="rgba(48,176,199,0.14)">NIOS route</Chip>}
                 <Wait row={r} />
                 <span className="text-[11px] text-glass-muted truncate max-w-full">{r.owner_name || 'Unassigned'}</span>
               </span>
