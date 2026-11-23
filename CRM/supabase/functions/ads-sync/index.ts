@@ -52,7 +52,7 @@ import { healthWarnings } from "../_shared/meta_health.ts";
 import { actionFloor, FIELDS as ACTION_FIELDS, live as liveObj, plan as actionPlan, studyParams, verified as actionVerified } from "../_shared/meta_actions.ts";
 import { audienceError, engagementRule, lookalikeParams, PREFIX, replaceBatches, seedReady, sizeOf } from "../_shared/meta_audience.ts";
 import { GA_REPORTS, gaBody, googleToken, gscBody, gscSite, parseGa, parseGsc, siteError, windows, type SiteRow } from "../_shared/site_signals.ts";
-import { adParams, adsetParams, bestMatch, campaignParams, countryCode, creativeParams, formAttempts, geoQueries, imageKind, MAX_IMAGE_B64,
+import { adParams, adsetParams, bestMatch, campaignParams, countryCode, createLeadForm, creativeParams, geoQueries, imageKind, MAX_IMAGE_B64,
   planSteps, targeting, audienceSpec, swapDeprecated, type BuildWork, type Geo } from "../_shared/meta_build.ts";
 
 const DEADLINE_MS = 120_000;
@@ -537,7 +537,7 @@ async function metaBuild(s: Record<string, string>, strategyId: number, t0: numb
       : kind === "adset" ? P.campaigns.flatMap((c: any) => (c.adsets ?? []).map((a: any) => ({ ...a, _c: c }))).find((a: any) => a.key === key)
       : P.creatives.find((c: any) => c.key === key);
     const save = (key: string, step: Record<string, unknown>) => rpc("svc_ads_meta_build_step", { p_id: strategyId, p_key: key, p_step: step });
-    let made = 0, waiting = 0, failed = 0, manual = 0, stopped = false;
+    let made = 0, waiting = 0, failed = 0, manual = 0, warned = 0, stopped = false;
     for (const st of steps) {
       if (ids[st.key]) continue;
       if (Date.now() - t0 > DEADLINE_MS - 15_000) { stopped = true; break; }
@@ -546,20 +546,19 @@ async function metaBuild(s: Record<string, string>, strategyId: number, t0: numb
       if (missing.length) { waiting++; await save(st.key, { status: "waiting", note: `Needs ${missing.join(", ")} first` }); continue; }
       const [kind, k1, k2] = st.key.split(":");
       let note: string | undefined;
+      let warn = false;
       try {
         let id: string;
         if (kind === "form") {
           page ??= await pageApi(s, w.page_id);
           const f = find("form", k1);
           // the intro / thank-you screens are extras: retry with the call button (WhatsApp refused), then without them,
-          // rather than fail the form
-          const tries = formAttempts(w, f);
-          for (let i = 0; ; i++) {
-            try { id = await page.create(`${w.page_id}/leadgen_forms`, tries[i]); break; }
-            catch (e) {
-              if ((e instanceof AdsError && (e.status === "auth_required" || e.status === "rate_limited")) || i === tries.length - 1) throw e;
-            }
-          }
+          // rather than fail the form; a fallback is kept as a warning on the step and in the result
+          const pg = page;
+          const r = await createLeadForm(w, f, (prm) => pg.create(`${w.page_id}/leadgen_forms`, prm),
+            (e) => e instanceof AdsError && (e.status === "auth_required" || e.status === "rate_limited"));
+          id = r.id;
+          if (r.warning) { note = scrubSecrets(r.warning, s).slice(0, 400); warn = true; warned++; }
         } else if (kind === "campaign") {
           id = await meta.create(`${act}/campaigns`, campaignParams(w, find("campaign", k1)));
         } else if (kind === "adset") {
@@ -603,7 +602,7 @@ async function metaBuild(s: Record<string, string>, strategyId: number, t0: numb
           const cr = find("creative", k2);
           id = await meta.create(`${act}/ads`, adParams(w, cr?.name ?? k2, ids[`adset:${k1}`], ids[`creative:${k2}:${find("adset", k1).form}`]));
         }
-        await save(st.key, { id, status: "done", ...(note ? { note } : {}) });
+        await save(st.key, { id, status: "done", ...(note ? { note } : {}), ...(warn ? { warning: true } : {}) });
         ids[st.key] = id; made++;
       } catch (e) {
         failed++;
@@ -616,7 +615,8 @@ async function metaBuild(s: Record<string, string>, strategyId: number, t0: numb
     const status = left === 0 ? "done" : stopped || failed ? "error" : "partial";
     const detail = `${made} created now, ${Object.keys(ids).length} of ${steps.length} in Meta (all paused)`
       + (manual ? `, ${manual} to add in Ads Manager` : "") + (failed ? `, ${failed} failed` : "") + (waiting ? `, ${waiting} waiting on those` : "")
-      + (stopped && !failed ? ", more to do: press Create in Meta again" : "");
+      + (stopped && !failed ? ", more to do: press Create in Meta again" : "")
+      + (warned ? `. WARNING: ${warned} lead form${warned > 1 ? "s were" : " was"} made without what the plan asked (see the step); check before switching on` : "");
     await rpc("svc_ads_meta_build_end", { p_id: strategyId, p_status: status, p_detail: detail });
     return { items: made, detail, status: failed ? "error" : "ok" };
   });

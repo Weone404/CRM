@@ -115,6 +115,29 @@ export function formAttempts(w: BuildWork, f: any): Record<string, string>[] {
   return [formParams(w, f), ...(f?.thank_you?.title && thankYouButton(f) === "whatsapp" ? [formParams(w, f, false, "call")] : []), formParams(w, f, true)];
 }
 
+// Creates a lead form, falling back as above. A fallback is never silent: the warning says what Meta refused and what the
+// form lacks, and ads-sync keeps it on the build step (shown in Strategy > Create in Meta) and in the build result.
+export async function createLeadForm(w: BuildWork, f: any, create: (p: Record<string, string>) => Promise<string>,
+  fatal: (e: unknown) => boolean): Promise<{ id: string; attempt: number; warning: string | null }> {
+  const tries = formAttempts(w, f);
+  const errs: string[] = [];
+  for (let i = 0; ; i++) {
+    try {
+      const id = await create(tries[i]);
+      if (i === 0) return { id, attempt: 0, warning: null };
+      const why = (errs[errs.length - 1] ?? "no reason given").slice(0, 200);
+      const button = thankYouButton(f) === "whatsapp" ? "WhatsApp" : thankYouButton(f) === "call" ? "Call" : "website";
+      const warning = i === tries.length - 1
+        ? `Meta refused the form's intro / thank-you screens (${why}), so it was made WITHOUT them: no intro text and no ${button} button. Check it in Ads Manager before switching the ad set on.`
+        : `Meta refused the WhatsApp button (${why}), so the form has the Call button instead. Check it in Ads Manager before switching the ad set on.`;
+      return { id, attempt: i, warning };
+    } catch (e) {
+      if (fatal(e) || i === tries.length - 1) throw e;
+      errs.push(e instanceof Error ? e.message : String(e));
+    }
+  }
+}
+
 export function campaignParams(w: BuildWork, c: any): Record<string, string> {
   const out: Record<string, string> = { name: nm(w, c.name), objective: "OUTCOME_LEADS", status: "PAUSED", special_ad_categories: "[]", buying_type: "AUCTION" };
   if (c.budget_level === "campaign") {

@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { MetaAds } from "../../functions/_shared/ads_core.ts";
 import { META_LIMITS, trimMetaContext } from "../../functions/_shared/ads_agents_ctx.ts";
 import {
-  adParams, adsetParams, bestMatch, businessPhone, campaignParams, countryCode, creativeParams, formAttempts, formParams, geoQueries, imageKind, minor, planSteps,
+  adParams, adsetParams, bestMatch, businessPhone, campaignParams, countryCode, createLeadForm, creativeParams, formAttempts, formParams, geoQueries, imageKind, minor, planSteps,
   swapDeprecated, targeting, type BuildWork,
 } from "../../functions/_shared/meta_build.ts";
 import { alertText } from "../../functions/_shared/lead_alerts.ts";
@@ -64,6 +64,29 @@ test("Lead form thank-you button: website by default, call the counsellor, Whats
   assert.equal(ty({ title: "T", button_type: "DOWNLOAD" }).button_type, "VIEW_WEBSITE");
   assert.equal(businessPhone("12345"), null); assert.equal(businessPhone(""), null);
   assert.deepEqual(businessPhone("+1 415 555 0100"), { number: "+14155550100", country: null });
+});
+
+test("Lead form fallback is never silent: the warning says what Meta refused and what the form lacks (QA S10)", async () => {
+  const f2 = { ...plan.forms[0], thank_you: { title: "Thanks", button_type: "CALL_BUSINESS", phone: "+919355566991" } };
+  const seen: string[] = [];
+  const ok = await createLeadForm(work(), f2, async (p) => { seen.push(JSON.parse(p.thank_you_page ?? "null")?.button_type ?? "none"); return "111"; }, () => false);
+  assert.deepEqual([ok.id, ok.attempt, ok.warning, seen], ["111", 0, null, ["CALL_BUSINESS"]]);
+  // Meta refuses the call button: the form is made without the extra screens, with a warning
+  const calls: string[] = [];
+  const r = await createLeadForm(work(), f2, async (p) => {
+    calls.push(p.thank_you_page ? "full" : "minimal");
+    if (p.thank_you_page) throw new Error("(#100) Invalid parameter: business_phone_number");
+    return "222";
+  }, () => false);
+  assert.deepEqual([r.id, r.attempt, calls], ["222", 1, ["full", "minimal"]]);
+  assert.match(r.warning!, /refused the form's intro \/ thank-you screens \(\(#100\) Invalid parameter: business_phone_number\)/);
+  assert.match(r.warning!, /WITHOUT them: no intro text and no Call button\. Check it in Ads Manager/);
+  // WhatsApp refused: the Call button is used, and said so
+  const fw = { ...plan.forms[0], thank_you: { title: "Thanks", button_type: "WHATSAPP", phone: "+919355566991" } };
+  const rw = await createLeadForm(work(), fw, async (p) => { if (JSON.parse(p.thank_you_page ?? "{}").button_type === "WHATSAPP") throw new Error("WhatsApp not linked"); return "333"; }, () => false);
+  assert.equal(rw.attempt, 1); assert.match(rw.warning!, /refused the WhatsApp button \(WhatsApp not linked\), so the form has the Call button instead/);
+  // a login / rate-limit error is not retried
+  await assert.rejects(createLeadForm(work(), f2, async () => { throw new Error("token expired"); }, () => true), /token expired/);
 });
 
 test("Create in Meta: forms, campaigns, ad sets, one creative per creative and form, then ads, in that order", () => {

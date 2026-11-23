@@ -263,7 +263,8 @@ function Build({ d, edge, reload }) {
       {b.detail && <div className="text-sm"><b>{b.status === 'done' ? 'Done: ' : b.status === 'error' ? 'Stopped: ' : ''}</b>{b.detail} {b.ended_at && <span className="text-glass-muted">· {ago(b.ended_at)}</span>}</div>}
       {steps.length > 0 && <div className="space-y-0.5 text-xs">{steps.map(([k, st]) => (
         <div key={k} className="flex gap-2"><span className="w-40 truncate font-mono">{k}</span><span style={{ color: tone[st.status] || C.ink }}>{st.status}</span>
-          <span className="flex-1 text-glass-muted truncate">{st.id ? `id ${st.id}` : ''} {st.note || st.error || ''}</span></div>))}</div>}
+          <span className={`flex-1 ${st.warning ? '' : 'text-glass-muted truncate'}`} style={st.warning ? { color: C.amber } : undefined} data-testid={st.warning ? 'build-warning' : undefined}>
+            {st.id ? `id ${st.id}` : ''} {st.warning ? 'Warning: ' : ''}{st.note || st.error || ''}</span></div>))}</div>}
       {steps.some(([, st]) => st.id) && <a className="text-xs underline" href="https://adsmanager.facebook.com/adsmanager/manage/campaigns" target="_blank" rel="noreferrer">Open Ads Manager</a>}
     </Card>);
 }
