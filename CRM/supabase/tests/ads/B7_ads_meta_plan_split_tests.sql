@@ -13,4 +13,13 @@ SELECT pg_temp.ok((SELECT r @> '["Ad set a2: budget of at least ₹100 a day.", 
 CREATE TEMP TABLE ps3 AS SELECT crm_private.ads_meta_plan_check('{"objective": "leads", "monthly_budget": 3000}',
   jsonb_set(p, '{campaigns,0,adsets}', '[{"key": "a2", "name": "CPL ads", "daily_budget": 70}]')) r FROM ps_plan;
 SELECT pg_temp.ok((SELECT r @> '["Ad set a2: budget of at least ₹100 a day."]' FROM ps3), 'PS03 a single ad set under ₹100 a day is still refused');
+CREATE TEMP TABLE ps4 AS SELECT crm_private.ads_meta_plan_check('{"objective": "leads", "monthly_budget": 3000, "premium": true}',
+  p || '{"creatives": [{"key": "v1", "primary_text": "Pilot after 12th"}], "forms": [{"key": "f2", "questions": [{"type": "CUSTOM", "label": "Class 12 status?"}]}]}') r,
+  crm_private.ads_meta_plan_check('{"objective": "leads", "monthly_budget": 3000, "premium": true}',
+  p || '{"fee_line": "owner_declined", "creatives": [{"key": "v1", "primary_text": "Pilot after 12th"}], "forms": [{"key": "f2", "questions": [{"type": "CUSTOM", "label": "Class 12 status?"}]}]}') r2
+  FROM ps_plan;
+SELECT pg_temp.ok((SELECT EXISTS (SELECT 1 FROM jsonb_array_elements_text(r) m WHERE m LIKE 'State the training investment%')
+    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(r2) m WHERE m LIKE 'State the training investment%')
+    AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(r2) m WHERE m LIKE 'Form f2: add a question on how training will be funded%') FROM ps4),
+  'PS04 fee_line owner_declined drops only the fee-wording rule; the funding question is still required');
 \echo ALL ADS META 130 TESTS PASSED

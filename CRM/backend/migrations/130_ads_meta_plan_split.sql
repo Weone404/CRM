@@ -1,6 +1,8 @@
 -- 130 Plan check for a split budget: a campaign may run 2+ ad sets below ₹100 a day each (the owner's CPL / NIOS split, e.g.
 -- ₹70 / ₹30) when every one of them is at least the split minimum (ads_config meta_split_min_daily, 129) and together they make at
--- least ₹100 a day. A single ad set under ₹100 is still refused. Wrapper-by-rename over the 114 check.
+-- least ₹100 a day. A single ad set under ₹100 is still refused. Also: plan.fee_line = 'owner_declined' (the owner said no fee wording
+-- in ads until the fees are settled, 23 Nov 2026) drops the premium check's "State the training investment" rule; the funding
+-- question in every form stays. Wrapper-by-rename over the 114 check.
 DO $$ BEGIN
   IF to_regprocedure('crm_private.ads_meta_plan_check_v129(jsonb,jsonb)') IS NULL THEN
     ALTER FUNCTION crm_private.ads_meta_plan_check(jsonb, jsonb) RENAME TO ads_meta_plan_check_v129;
@@ -29,6 +31,9 @@ BEGIN
         INTO daily FROM jsonb_array_elements(c->'adsets') x;
     END IF;
   END LOOP;
+  IF p->>'fee_line' = 'owner_declined' THEN
+    SELECT coalesce(jsonb_agg(x), '[]') INTO pr FROM jsonb_array_elements(pr) x WHERE x #>> '{}' NOT LIKE 'State the training investment%';
+  END IF;
   IF cardinality(ok_sets) = 0 THEN RETURN pr; END IF;
   monthly := CASE WHEN jsonb_typeof(p->'budget'->'monthly_total') = 'number' THEN (p->'budget'->>'monthly_total')::numeric END;
   -- the 114 check leaves budgets under ₹100 out of its daily sum: recompute that message with the split ad sets counted
