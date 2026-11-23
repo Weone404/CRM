@@ -9,6 +9,9 @@
 --  * api_ads_lead_board: new optional p_track ('nios'), row.track and stats.nios. Wrapper-by-rename over 125 (_v125).
 --  * "Qualified" on Meta Ads > Overview (121) and on the board is a stage a person sets after a call, so it is not changed:
 --    the track is shown next to it so nobody marks a NIOS-route lead as a CPL-qualified lead by mistake.
+--  * Conversions API: a NIOS-route lead is never reported to Meta at Qualified Lead or a later stage (Meta would learn to
+--    find more people who cannot start CPL yet). Those events are kept as 'skipped' with the reason; earlier stages
+--    (Lead Created, Contacted, Interested) are still reported. Wrapper-by-rename over 100's ads_meta_capi_queue (_v125).
 
 ALTER TABLE public.ads_lead ADD COLUMN IF NOT EXISTS track text;
 DO $$ BEGIN
@@ -47,6 +50,26 @@ CREATE TRIGGER trg_ads_lead_track AFTER INSERT ON public.ads_enquiry FOR EACH RO
 UPDATE public.ads_lead l SET track = crm_private.ads_lead_track(l.id)
  WHERE EXISTS (SELECT 1 FROM public.ads_enquiry e WHERE e.ads_lead_id = l.id AND e.payload_extra ? 'meta_answers')
    AND l.track IS DISTINCT FROM crm_private.ads_lead_track(l.id);
+
+DO $$ BEGIN
+  IF to_regprocedure('crm_private.ads_meta_capi_queue_v125()') IS NULL THEN
+    ALTER FUNCTION crm_private.ads_meta_capi_queue() RENAME TO ads_meta_capi_queue_v125;
+  END IF;
+END $$;
+CREATE OR REPLACE FUNCTION crm_private.ads_meta_capi_queue() RETURNS int
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+BEGIN
+  PERFORM crm_private.ads_meta_capi_queue_v125();
+  UPDATE public.ads_meta_capi_uploads u
+     SET status = 'skipped', error = 'NIOS route lead (Class 12 without Physics & Maths): not reported to Meta as a CPL-qualified stage.'
+    FROM public.ads_lead l, public.ads_stage_def d
+   WHERE u.status = 'pending' AND l.id = u.lead_id AND l.track = 'nios'
+     AND d.pipeline = l.pipeline AND d.stage = u.stage AND d.ord >= 40 AND d.stage <> 'lost';
+  IF crm_private.ads_platform_paused('meta') THEN RETURN 0; END IF;
+  RETURN (SELECT count(*) FROM public.ads_meta_capi_uploads u WHERE u.status = 'pending'
+            AND (u.last_try_at IS NULL OR u.last_try_at < now() - interval '1 hour'));
+END $$;
+REVOKE ALL ON FUNCTION crm_private.ads_meta_capi_queue(), crm_private.ads_meta_capi_queue_v125() FROM PUBLIC, anon, authenticated;
 
 DO $$ BEGIN
   IF to_regprocedure('public.api_ads_lead_board_v125(text,text,boolean,text,integer,text)') IS NULL THEN

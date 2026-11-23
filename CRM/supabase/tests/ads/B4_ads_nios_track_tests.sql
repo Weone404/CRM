@@ -1,4 +1,4 @@
--- 126: the NIOS route track (NT01-NT08). Runs after B3_ (its 'Live test' form 777100: q1 who is filling, q2 Class 12 status).
+-- 126: the NIOS route track (NT01-NT09). Runs after B3_ (its 'Live test' form 777100: q1 who is filling, q2 Class 12 status).
 RESET ROLE;
 INSERT INTO public.ads_lead (id, pipeline, name, phone_e164, stage, created_at) VALUES
   ('5b000000-0000-0000-0000-000000000126', 'pilot_training', 'Kavya N', '+919811400126', 'lead_created', now() - interval '20 minutes'),
@@ -42,6 +42,19 @@ VALUES (now(), 'b4-enq-4', 'pilot_training', 'ads', 'Arjun P', '+919811400127', 
   '5b000000-0000-0000-0000-000000000127', '{"status": "repeat"}', '{"meta_answers": {"q2": "q2o1"}}') ON CONFLICT (idempotency_key) DO NOTHING;
 SELECT pg_temp.ok((SELECT track FROM public.ads_lead WHERE id = '5b000000-0000-0000-0000-000000000127') IS NULL,
   'NT07 a later enquiry with "Passed with Physics & Maths" moves the lead back to the CPL track');
+
+-- Conversions API: a NIOS-route lead is reported as Contacted, never as Qualified Lead
+UPDATE public.ads_lead SET first_touch = '{"meta_source": "instant_form", "leadgen_id": "1260000000001"}', created_at = now() - interval '2 hours'
+ WHERE id = '5b000000-0000-0000-0000-000000000126';
+SELECT pg_temp.src('instant_form', '{"report_enabled": true, "consent_mode": "not_required"}');
+SELECT pg_temp.stage('5b000000-0000-0000-0000-000000000126', 'contacted', '90 minutes');
+SELECT pg_temp.stage('5b000000-0000-0000-0000-000000000126', 'qualified', '60 minutes');
+SELECT pg_temp.mq();
+SELECT pg_temp.ok((SELECT status FROM pg_temp.ups('5b000000-0000-0000-0000-000000000126') WHERE stage = 'contacted') = 'pending'
+    AND (SELECT status = 'skipped' AND error LIKE 'NIOS route lead%' FROM pg_temp.ups('5b000000-0000-0000-0000-000000000126') WHERE stage = 'qualified')
+    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(pg_temp.mw()->'items') i WHERE i->>'event_id' = '5b000000-0000-0000-0000-000000000126:qualified')
+    AND EXISTS (SELECT 1 FROM jsonb_array_elements(pg_temp.mw()->'items') i WHERE i->>'event_id' = '5b000000-0000-0000-0000-000000000126:contacted'),
+  'NT09 a NIOS-route lead is never sent to Meta as Qualified Lead (kept as skipped, with the reason); Contacted still is');
 
 -- leads from before 126: re-running the migration fills the track in
 UPDATE public.ads_lead SET track = NULL WHERE id = '5b000000-0000-0000-0000-000000000126';
