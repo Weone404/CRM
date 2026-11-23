@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { MetaAds } from "../../functions/_shared/ads_core.ts";
 import { META_LIMITS, trimMetaContext } from "../../functions/_shared/ads_agents_ctx.ts";
 import {
-  adParams, adsetParams, bestMatch, campaignParams, countryCode, creativeParams, formParams, geoQueries, imageKind, minor, planSteps,
+  adParams, adsetParams, bestMatch, businessPhone, campaignParams, countryCode, creativeParams, formAttempts, formParams, geoQueries, imageKind, minor, planSteps,
   swapDeprecated, targeting, type BuildWork,
 } from "../../functions/_shared/meta_build.ts";
 import { alertText } from "../../functions/_shared/lead_alerts.ts";
@@ -32,6 +32,32 @@ const plan = {
 const work = (over: Partial<BuildWork> = {}): BuildWork => ({ strategy_id: 12, version: 1, account_id: "564511644492586", currency: "INR",
   page_id: "100521046017357", goal: { website_url: "https://weoneaviation.in", privacy_url: "https://weoneaviation.in/privacy", start_date: "2026-12-01" },
   plan, steps: {}, images: {}, ...over });
+
+test("Lead form thank-you button: website by default, call the counsellor, WhatsApp, and what to retry when Meta refuses", () => {
+  const ty = (thank_you: any, over: Partial<BuildWork> = {}) => JSON.parse(formParams(work(over), { ...plan.forms[0], thank_you }).thank_you_page);
+  const web = ty(plan.forms[0].thank_you);
+  assert.equal(web.button_type, "VIEW_WEBSITE"); assert.equal(web.website_url, "https://weoneaviation.in"); assert.equal(web.business_phone_number, undefined);
+  // "call": the number from the form, else the plan's goal, else the strategy goal; always in full international form
+  const call = ty({ title: "Thanks", body: "A counsellor will call you.", button: "call", phone: "+91 93555 66991" });
+  assert.deepEqual([call.button_type, call.button_text, call.business_phone_number, call.country_code], ["CALL_BUSINESS", "Call now", "+919355566991", "IN"]);
+  assert.equal(call.website_url, "https://weoneaviation.in");
+  const fromPlan = ty({ title: "Thanks", button: "CALL", button_text: "Call counsellor" }, { plan: { ...plan, goal: { phone: "93555 66991" } } });
+  assert.deepEqual([fromPlan.button_type, fromPlan.button_text, fromPlan.business_phone_number], ["CALL_BUSINESS", "Call counsellor", "+919355566991"]);
+  const fromGoal = ty({ title: "Thanks", button: "call" }, { goal: { ...work().goal, phone: "+91-93555-66991" } });
+  assert.equal(fromGoal.business_phone_number, "+919355566991");
+  const noNumber = ty({ title: "Thanks", button: "call", button_text: "Call now" });
+  assert.deepEqual([noNumber.button_type, noNumber.button_text], ["VIEW_WEBSITE", "Visit website"]);   // no number: never a dead call button
+  const wa = ty({ title: "Thanks", button: "whatsapp", phone: "+919355566991" });
+  assert.deepEqual([wa.button_type, wa.button_text, wa.business_phone_number], ["WHATSAPP", "Chat on WhatsApp", undefined]);
+  assert.equal(ty({ title: "Thanks", button: "telegram" }).button_type, "VIEW_WEBSITE");
+  // retries: WhatsApp -> call -> no extra screens; call or website -> no extra screens
+  const waForm = { ...plan.forms[0], thank_you: { title: "Thanks", button: "whatsapp", phone: "+919355566991" } };
+  const tries = formAttempts(work(), waForm);
+  assert.deepEqual(tries.map((t) => t.thank_you_page ? JSON.parse(t.thank_you_page).button_type : null), ["WHATSAPP", "CALL_BUSINESS", null]);
+  assert.deepEqual(formAttempts(work(), plan.forms[0]).map((t) => t.thank_you_page ? JSON.parse(t.thank_you_page).button_type : null), ["VIEW_WEBSITE", null]);
+  assert.equal(businessPhone("12345"), null); assert.equal(businessPhone(""), null);
+  assert.deepEqual(businessPhone("+1 415 555 0100"), { number: "+14155550100", country: null });
+});
 
 test("Create in Meta: forms, campaigns, ad sets, one creative per creative and form, then ads, in that order", () => {
   const s = planSteps(work({ images: { i1: { hash: "h1" } } }));

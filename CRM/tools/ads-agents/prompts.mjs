@@ -173,7 +173,7 @@ const META_PLAN = `Plan format (numbers are plain numbers in INR, never strings;
      "form": "f1", "ads": ["v1", "i1"], "reason": "..."}]}],
  "forms": [{"key": "f1", "name": "...", "type": "higher_intent"|"more_volume", "headline": "...", "intro": "...",
    "questions": [{"type": "FULL_NAME"}, {"type": "PHONE"}, {"type": "EMAIL"|"CITY"|"STATE"}, {"type": "CUSTOM", "label": "3-80 chars", "options": ["2-10 options"]}],
-   "thank_you": {"title": "...", "body": "...", "button_text": "..."}}],
+   "thank_you": {"title": "...", "body": "...", "button": "call"|"whatsapp"|"website" (call or WhatsApp starts contact while the person is keen; WhatsApp falls back to call if the Page has no WhatsApp linked), "button_text": "..."}}],
  "creatives": [{"key": "v1", "name": "...", "format": "image"|"video"|"carousel", "angle": "...", "primary_text": "20-600 chars, the point in the first 125",
    "headline": "3-60 chars (40 is better)", "description": "up to 60 chars", "cta": "APPLY_NOW|DOWNLOAD|GET_QUOTE|LEARN_MORE|SIGN_UP|SUBSCRIBE",
    "visual_brief": "what to shoot or design, frame by frame for video", "why": "the evidence behind it",

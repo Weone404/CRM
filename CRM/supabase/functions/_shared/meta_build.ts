@@ -10,7 +10,7 @@
 
 export interface BuildWork {
   strategy_id: number; version: number; account_id: string; currency: string | null; page_id: string;
-  goal: { website_url?: string; privacy_url?: string; start_date?: string; languages?: string[] };
+  goal: { website_url?: string; privacy_url?: string; start_date?: string; languages?: string[]; phone?: string };
   plan: any; steps: Record<string, { id?: string; status?: string; error?: string }>; images: Record<string, { hash?: string }>;
   videos?: Record<string, { id?: string; thumb_hash?: string }>;
   posts?: Record<string, { ig_media_id?: string }>; ig_user_id?: string | null;
@@ -59,7 +59,7 @@ export function planSteps(w: BuildWork): Step[] {
 // ------------------------------------------------------------------ request bodies (form-urlencoded values)
 const J = (o: unknown) => JSON.stringify(o);
 
-export function formParams(w: BuildWork, f: any, minimal = false): Record<string, string> {
+export function formParams(w: BuildWork, f: any, minimal = false, button?: "call" | "whatsapp" | "website"): Record<string, string> {
   let n = 0;
   const questions = (f.questions ?? []).map((q: any) => q.type === "CUSTOM"
     ? { type: "CUSTOM", key: `q${++n}`, label: String(q.label).slice(0, 80),
@@ -74,10 +74,41 @@ export function formParams(w: BuildWork, f: any, minimal = false): Record<string
   };
   if (!minimal) {
     if (f.intro || f.headline) out.context_card = J({ title: String(f.headline || f.name).slice(0, 60), style: "PARAGRAPH_STYLE", content: [String(f.intro || "").slice(0, 700)] });
-    if (f.thank_you?.title) out.thank_you_page = J({ title: String(f.thank_you.title).slice(0, 60), body: String(f.thank_you.body || "").slice(0, 300),
-      button_type: "VIEW_WEBSITE", button_text: String(f.thank_you.button_text || "Visit website").slice(0, 30), website_url: site });
+    if (f.thank_you?.title) out.thank_you_page = J(thankYouPage(w, f, site, button));
   }
   return out;
+}
+
+// Thank-you screen button (plan forms[].thank_you.button): "call" -> CALL_BUSINESS with the counsellor number
+// (thank_you.phone, else the plan's or the strategy's goal.phone), "whatsapp" -> WHATSAPP (Meta uses the WhatsApp number
+// connected to the Page; no number field), anything else -> VIEW_WEBSITE. Enum from the Graph API leadgen_forms reference.
+// website_url is always sent (the Lead Ads guide says the API needs it). No number for "call" -> website.
+export const thankYouButton = (f: any): "call" | "whatsapp" | "website" => {
+  const b = String(f?.thank_you?.button ?? "").toLowerCase();
+  return b === "call" || b === "whatsapp" ? b : "website";
+};
+export function businessPhone(raw: unknown): { number: string; country: string | null } | null {
+  const d = String(raw ?? "").replace(/[^\d+]/g, "").replace(/(?!^)\+/g, "");
+  const digits = d.replace(/\D/g, "");
+  if (!d.startsWith("+") && digits.length === 10) return { number: `+91${digits}`, country: "IN" };   // Indian mobile without code
+  if (!d.startsWith("+") || digits.length < 8 || digits.length > 15) return null;
+  return { number: `+${digits}`, country: digits.startsWith("91") && digits.length === 12 ? "IN" : null };
+}
+function thankYouPage(w: BuildWork, f: any, site: string, button?: "call" | "whatsapp" | "website") {
+  const t = f.thank_you;
+  const base = { title: String(t.title).slice(0, 60), body: String(t.body || "").slice(0, 300), website_url: site };
+  const want = button ?? thankYouButton(f);
+  const ph = businessPhone(t.phone ?? w.plan?.goal?.phone ?? w.goal.phone);
+  if (want === "whatsapp") return { ...base, button_type: "WHATSAPP", button_text: String(t.button_text || "Chat on WhatsApp").slice(0, 30) };
+  if (want === "call" && ph) return { ...base, button_type: "CALL_BUSINESS", button_text: String(t.button_text || "Call now").slice(0, 30),
+    business_phone_number: ph.number, ...(ph.country ? { country_code: ph.country } : {}) };
+  return { ...base, button_type: "VIEW_WEBSITE", button_text: String(want === "website" ? t.button_text || "Visit website" : "Visit website").slice(0, 30) };
+}
+
+// What to send when Meta refuses a form: the WhatsApp button needs a WhatsApp number linked to the Page, so try the call
+// button next, then the form without the intro / thank-you screens.
+export function formAttempts(w: BuildWork, f: any): Record<string, string>[] {
+  return [formParams(w, f), ...(f?.thank_you?.title && thankYouButton(f) === "whatsapp" ? [formParams(w, f, false, "call")] : []), formParams(w, f, true)];
 }
 
 export function campaignParams(w: BuildWork, c: any): Record<string, string> {

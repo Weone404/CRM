@@ -52,7 +52,7 @@ import { healthWarnings } from "../_shared/meta_health.ts";
 import { FIELDS as ACTION_FIELDS, live as liveObj, plan as actionPlan, studyParams, verified as actionVerified } from "../_shared/meta_actions.ts";
 import { audienceError, engagementRule, lookalikeParams, PREFIX, replaceBatches, seedReady, sizeOf } from "../_shared/meta_audience.ts";
 import { GA_REPORTS, gaBody, googleToken, gscBody, gscSite, parseGa, parseGsc, siteError, windows, type SiteRow } from "../_shared/site_signals.ts";
-import { adParams, adsetParams, bestMatch, campaignParams, countryCode, creativeParams, formParams, geoQueries, imageKind, MAX_IMAGE_B64,
+import { adParams, adsetParams, bestMatch, campaignParams, countryCode, creativeParams, formAttempts, geoQueries, imageKind, MAX_IMAGE_B64,
   planSteps, targeting, audienceSpec, swapDeprecated, type BuildWork, type Geo } from "../_shared/meta_build.ts";
 
 const DEADLINE_MS = 120_000;
@@ -551,10 +551,14 @@ async function metaBuild(s: Record<string, string>, strategyId: number, t0: numb
         if (kind === "form") {
           page ??= await pageApi(s, w.page_id);
           const f = find("form", k1);
-          try { id = await page.create(`${w.page_id}/leadgen_forms`, formParams(w, f)); }
-          catch (e) {   // the intro / thank-you screens are extras: retry without them rather than fail the form
-            if (e instanceof AdsError && (e.status === "auth_required" || e.status === "rate_limited")) throw e;
-            id = await page.create(`${w.page_id}/leadgen_forms`, formParams(w, f, true));
+          // the intro / thank-you screens are extras: retry with the call button (WhatsApp refused), then without them,
+          // rather than fail the form
+          const tries = formAttempts(w, f);
+          for (let i = 0; ; i++) {
+            try { id = await page.create(`${w.page_id}/leadgen_forms`, tries[i]); break; }
+            catch (e) {
+              if ((e instanceof AdsError && (e.status === "auth_required" || e.status === "rate_limited")) || i === tries.length - 1) throw e;
+            }
           }
         } else if (kind === "campaign") {
           id = await meta.create(`${act}/campaigns`, campaignParams(w, find("campaign", k1)));
