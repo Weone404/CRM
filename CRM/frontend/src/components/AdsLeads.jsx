@@ -47,7 +47,12 @@ function Wait({ row }) {
   return <Chip fg={fg} bg={bg}>Not called · {span(m)}</Chip>;
 }
 
-export default function AdsLeads({ access, platform }) {
+// What the person answered on the Meta form, with short labels so two fit a phone row.
+const SHORT_Q = [[/who is filling/i, 'Filled by'], [/class 12/i, 'Class 12'], [/when do you want to start/i, 'Start'], [/fund/i, 'Funding'], [/^city$/i, 'City']];
+const shortQ = (q) => (SHORT_Q.find(([re]) => re.test(q || '')) || [])[1] || String(q || '').replace(/\?$/, '');
+const waLink = (p) => `https://wa.me/${String(p || '').replace(/\D/g, '')}`;
+
+export default function AdsLeads({ access, platform, inLeads }) {
   const [pipe, setPipe] = useState('pilot_training');
   const [stage, setStage] = useState('');
   const [quar, setQuar] = useState(false);
@@ -70,6 +75,8 @@ export default function AdsLeads({ access, platform }) {
   useEffect(() => { const t = setTimeout(load, q ? 250 : 0); return () => clearTimeout(t); }, [load, q]);
   useEffect(() => { rpc('api_ads_staff').then(setStaff, () => setStaff([])); }, []);
   useEffect(() => { const i = setInterval(() => tick((n) => n + 1), 60000); return () => clearInterval(i); }, []);   // timers
+  // New form fills arrive from Meta every few minutes: refresh quietly while the board is open (not while a lead is open).
+  useEffect(() => { if (open) return undefined; const i = setInterval(() => { if (!document.hidden) load(); }, 30000); return () => clearInterval(i); }, [load, open]);
 
   const s = board?.stats || {};
   const stages = board?.stages || [];
@@ -86,18 +93,23 @@ export default function AdsLeads({ access, platform }) {
             <div className="text-2xl font-bold" style={{ color: c || 'var(--glass-primary, #1C1C1E)' }}>{v ?? '—'}</div></div>))}
       </div>
 
-      <div className="glass-card p-2 flex flex-wrap items-center gap-2">
-        <div role="tablist" aria-label="Pipeline" className="inline-flex rounded-xl p-0.5" style={{ background: 'rgba(118,118,128,0.12)' }}>
+      {inLeads && (
+        <div className="flex items-center gap-2 text-xs text-glass-muted" data-testid="meta-leads-live">
+          <span className="h-2 w-2 rounded-full shrink-0" style={{ background: '#34C759' }} aria-hidden="true" />
+          <span className="flex-1 min-w-0">Straight from your Meta ad forms · updates every 30 seconds · same list as Meta Ads › Leads</span>
+        </div>)}
+      <div className="glass-card p-2 flex flex-wrap items-center gap-2" data-testid="ads-lead-filters">
+        <div role="tablist" aria-label="Pipeline" className="flex w-full sm:w-auto sm:inline-flex rounded-xl p-0.5" style={{ background: 'rgba(118,118,128,0.12)' }}>
           {PIPES.map(([k, l]) => (
             <button key={k} role="tab" aria-selected={pipe === k} type="button" onClick={() => { setPipe(k); setStage(''); }}
-              className="px-3 py-1.5 rounded-[10px] text-sm font-semibold" style={pipe === k ? { background: '#fff', color: '#007AFF', boxShadow: '0 1px 3px rgba(0,0,0,0.12)' } : { color: '#3C3C43' }}>{l}</button>))}
+              className="flex-1 sm:flex-none px-3 py-1.5 rounded-[10px] text-sm font-semibold" style={pipe === k ? { background: '#fff', color: '#007AFF', boxShadow: '0 1px 3px rgba(0,0,0,0.12)' } : { color: '#3C3C43' }}>{l}</button>))}
         </div>
-        <select aria-label="Stage" className="glass-input px-3 py-2 text-sm" value={stage} onChange={(e) => setStage(e.target.value)}>
+        <select aria-label="Stage" className="glass-input px-3 py-2 text-sm flex-1 sm:flex-none min-w-0" value={stage} onChange={(e) => setStage(e.target.value)}>
           <option value="">All stages</option>{stages.map((d) => <option key={d.stage} value={d.stage}>{d.label}</option>)}
         </select>
-        <input aria-label="Search" className="glass-input px-3 py-2 text-sm flex-1 min-w-[140px]" placeholder="Search name, phone, email" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input aria-label="Search" className="glass-input px-3 py-2 text-sm order-last sm:order-none basis-full sm:basis-auto flex-1 min-w-[140px]" placeholder="Search name, phone, email" value={q} onChange={(e) => setQ(e.target.value)} />
         <button type="button" onClick={() => setQuar(!quar)} aria-pressed={quar}
-          className="px-3 py-2 rounded-xl text-sm font-semibold inline-flex items-center gap-1.5"
+          className="px-3 py-2 rounded-xl text-sm font-semibold inline-flex items-center justify-center gap-1.5 shrink-0"
           style={quar ? { background: '#FF9500', color: '#fff' } : { background: 'rgba(118,118,128,0.12)', color: '#1C1C1E' }}>
           <Icon name="shield" size={16} />Quarantine{s.quarantined ? ` (${s.quarantined})` : ''}
         </button>
@@ -111,25 +123,42 @@ export default function AdsLeads({ access, platform }) {
         </div>)}
 
       <div className="space-y-2">
-        {board?.rows.map((r) => (
-          <div key={r.id} className="glass-card p-3">
-            <button type="button" onClick={() => setOpen(r.id)} className="w-full text-left flex flex-wrap items-start gap-x-3 gap-y-1">
+        {board?.rows.map((r) => {
+          const ans = (r.answers || []).filter((x) => x?.a && !/^city$/i.test(x.q || ''));
+          const city = (r.answers || []).find((x) => /^city$/i.test(x?.q || ''))?.a;
+          return (
+          <div key={r.id} className="glass-card p-3" data-testid="ads-lead-card">
+            <button type="button" onClick={() => setOpen(r.id)} className="w-full text-left flex items-start gap-3">
               <span className="min-w-0 flex-1">
                 <span className="block font-semibold text-glass-primary truncate">{r.name}</span>
                 <span className="block text-xs text-glass-secondary truncate">
-                  {formatPhone(r.phone_e164)}{r.course_interest ? ` · ${r.course_interest}` : ''}
+                  {formatPhone(r.phone_e164)}{city ? ` · ${city}` : ''}{r.course_interest && !ans.length ? ` · ${r.course_interest}` : ''}
                   {r.charter_details?.from ? ` · ${r.charter_details.from} → ${r.charter_details.to}` : ''}
                 </span>
-                <span className="block text-[11px] text-glass-muted truncate">{sourceLabel(r)}{(r.platforms || []).length > 1 ? ' · also via ' + (platform === 'meta' ? 'Google' : 'Meta') : ''}{r.campaign ? ` · ${r.campaign}` : ''}{r.enquiry_count > 1 ? ` · ${r.enquiry_count} enquiries` : ''}{r.organic_lead_id ? ' · also in Leads' : ''}</span>
+                <span className="block text-[11px] text-glass-muted truncate">
+                  {r.ad_name ? `Ad: ${r.ad_name}` : sourceLabel(r)}{r.app ? ` · ${r.app}` : ''}{(r.platforms || []).length > 1 ? ' · also via ' + (platform === 'meta' ? 'Google' : 'Meta') : ''}{!r.ad_name && r.campaign ? ` · ${r.campaign}` : ''}{r.enquiry_count > 1 ? ` · ${r.enquiry_count} enquiries` : ''}{r.organic_lead_id ? ' · also in Leads' : ''}
+                </span>
               </span>
-              <span className="flex flex-col items-end gap-1 shrink-0">
+              <span className="flex flex-col items-end gap-1 shrink-0 max-w-[45%]">
                 <Chip fg={(STAGE_TONE[r.stage] || [])[0]} bg={(STAGE_TONE[r.stage] || [])[1]}>{label[r.stage] || r.stage}</Chip>
                 <Wait row={r} />
-                <span className="text-[11px] text-glass-muted">{r.owner_name || 'Unassigned'}</span>
+                <span className="text-[11px] text-glass-muted truncate max-w-full">{r.owner_name || 'Unassigned'}</span>
               </span>
             </button>
+            {ans.length > 0 && (
+              <dl className="grid grid-cols-2 lg:grid-cols-4 gap-x-3 gap-y-1 mt-2 pt-2 text-xs border-t" style={{ borderColor: 'rgba(60,60,67,0.12)' }} data-testid="ads-lead-answers">
+                {ans.slice(0, 4).map((x) => (
+                  <div key={x.q} className="min-w-0"><dt className="text-[10px] uppercase tracking-wide text-glass-muted truncate">{shortQ(x.q)}</dt><dd className="text-glass-primary leading-snug break-words">{x.a}</dd></div>))}
+              </dl>)}
             {r.quarantined && <div className="text-[11px] mt-1" style={{ color: '#8A5A00' }}>Quarantined: {(r.quarantine_reasons || []).join(', ')}</div>}
-          </div>))}
+            {r.phone_e164 && (
+              <div className="grid grid-cols-3 sm:flex sm:justify-end gap-2 mt-2" data-testid="ads-lead-actions">
+                <a href={`tel:${r.phone_e164}`} onClick={() => canEdit && setOpen(r.id)} className="min-h-[40px] sm:px-5 rounded-xl text-sm font-semibold inline-flex items-center justify-center gap-1.5" style={{ background: '#34C759', color: '#fff' }}><Icon name="phone" size={16} />Call</a>
+                <a href={waLink(r.phone_e164)} target="_blank" rel="noreferrer" className="min-h-[40px] sm:px-5 rounded-xl text-sm font-semibold inline-flex items-center justify-center gap-1.5" style={{ background: 'rgba(37,211,102,0.14)', color: '#1E7B34' }}><Icon name="send" size={16} />WhatsApp</a>
+                <button type="button" onClick={() => setOpen(r.id)} className="min-h-[40px] sm:px-5 rounded-xl text-sm font-semibold inline-flex items-center justify-center gap-1.5" style={{ background: 'rgba(0,122,255,0.10)', color: '#007AFF' }}><Icon name="form" size={16} />Update</button>
+              </div>)}
+          </div>);
+        })}
       </div>
 
       {open && <LeadPanel id={open} pipe={pipe} stages={stages} staff={staff} canEdit={canEdit} isAdmin={board?.role === 'admin' || access?.is_admin}

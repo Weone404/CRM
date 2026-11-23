@@ -44,6 +44,7 @@ const Content = lazy(() => import('./components/Content'));
 const Amazon = lazy(() => import('./components/Amazon'));
 const Ads = lazy(() => import('./components/Ads'));
 const AdsMeta = lazy(() => import('./components/AdsMeta'));
+const AdsLeads = lazy(() => import('./components/AdsLeads'));
 
 // Tabs the birthday popup is allowed to appear over: the landing tab plus the
 // two people-facing views. Anywhere else it would be an interruption.
@@ -97,7 +98,7 @@ export default function App() {
   // browser so a charter desk stays on Charter; falls back safely if storage
   // is unavailable.
   const [segment, setSegmentState] = useState(() => {
-    try { return localStorage.getItem('lead_segment') === 'charter' ? 'charter' : 'aviation'; } catch { return 'aviation'; }
+    try { const v = localStorage.getItem('lead_segment'); return v === 'charter' || v === 'meta' ? v : 'aviation'; } catch { return 'aviation'; }
   });
   const setSegment = (value) => { setSegmentState(value); try { localStorage.setItem('lead_segment', value); } catch { /* ignore */ } };
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -139,6 +140,16 @@ export default function App() {
     return loadAccess('api_ads_access', employee, setAdsAccess);
   }, [employee]);
   const canAccessAds = USE_SUPABASE && !!adsAccess?.can_view;
+  // Leads > Meta Leads: the same records as Meta Ads > Leads (people who filled the Meta lead form), counted here for the tab.
+  const [metaCount, setMetaCount] = useState(null);
+  useEffect(() => {
+    if (!canAccessAds || routeTab !== 'leads') return undefined;
+    let live = true;
+    const pull = () => import('./components/adsKit').then((m) => m.rpc('api_ads_lead_board', { p_platform: 'meta', p_limit: 1 }))
+      .then((b) => { if (live) setMetaCount(b?.stats || null); }, () => {});
+    pull(); const i = setInterval(pull, 60000);
+    return () => { live = false; clearInterval(i); };
+  }, [canAccessAds, routeTab]);
   const canAccessLeads = department === 'Admin' || department === 'Sales';
   const canAccessDirectory = department === 'Admin';
   const canAccessAllTasks = department === 'Admin';
@@ -428,7 +439,10 @@ export default function App() {
         )}
 
         {activeTab === 'leads' && canAccessLeads && !leadsError && (() => {
-          const segmentLeads = leads.filter(l => segmentOf(l) === segment);
+          const segTabs = canAccessAds ? [...SEGMENTS, { id: 'meta', label: 'Meta Leads', icon: '📣' }] : SEGMENTS;
+          const seg = segment === 'meta' && !canAccessAds ? 'aviation' : segment;
+          const SHORT = { aviation: 'Aviation', charter: 'Charter', meta: 'Meta' };
+          const segmentLeads = leads.filter(l => segmentOf(l) === seg);
           const segmentIds = new Set(segmentLeads.map(l => l.id));
           const segmentFollowups = followups.filter(f => segmentIds.has(f.lead_id));
           const untouched = (list) => list.filter(l => !l.first_contacted_at).length;
@@ -436,27 +450,33 @@ export default function App() {
           <>
             {/* Aviation / Charter switch. Each segment has its own counts,
                 follow-ups, filters and Add Query form. */}
-            <div className="grid grid-cols-2 gap-1 mb-4 p-1 rounded-xl" style={{ background: 'rgba(118,118,128,0.12)' }} role="tablist" aria-label="Lead segment">
-              {SEGMENTS.map(s => {
-                const list = leads.filter(l => segmentOf(l) === s.id);
-                const active = segment === s.id;
-                const fresh = untouched(list);
+            <div className={`grid ${segTabs.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-1 mb-4 p-1 rounded-xl`} style={{ background: 'rgba(118,118,128,0.12)' }} role="tablist" aria-label="Lead segment" data-testid="lead-segments">
+              {segTabs.map(s => {
+                const isMeta = s.id === 'meta';
+                const list = isMeta ? null : leads.filter(l => segmentOf(l) === s.id);
+                const active = seg === s.id;
+                const total = isMeta ? metaCount?.total : list.length;
+                const fresh = isMeta ? (metaCount?.not_contacted || 0) : untouched(list);
                 return (
                   <button key={s.id} role="tab" aria-selected={active} onClick={() => setSegment(s.id)}
-                    className={`flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 px-2 sm:px-3 rounded-lg text-[13px] sm:text-base font-semibold transition min-w-0 ${active ? 'bg-white text-glass-primary shadow-[0_3px_8px_rgba(0,0,0,0.12),0_3px_1px_rgba(0,0,0,0.04)]' : 'text-glass-secondary hover:text-glass-primary hover:bg-white/50'}`}>
-                    <span aria-hidden="true" className="hidden sm:inline">{s.icon}</span><span className="truncate">{s.label}</span>
-                    <span className="text-xs font-medium opacity-80 shrink-0">({list.length})</span>
-                    {fresh > 0 && <span className="ml-0.5 shrink-0 min-w-[1.25rem] px-1.5 rounded-full bg-orange-500 text-white text-xs leading-5">{fresh}</span>}
+                    className={`flex items-center justify-center gap-1 sm:gap-2 py-2.5 px-1.5 sm:px-3 rounded-lg text-[13px] sm:text-base font-semibold transition min-w-0 ${active ? 'bg-white text-glass-primary shadow-[0_3px_8px_rgba(0,0,0,0.12),0_3px_1px_rgba(0,0,0,0.04)]' : 'text-glass-secondary hover:text-glass-primary hover:bg-white/50'}`}>
+                    <span aria-hidden="true" className="hidden sm:inline">{s.icon}</span>
+                    <span className="truncate"><span className="md:hidden">{SHORT[s.id]}</span><span className="hidden md:inline">{s.label}</span></span>
+                    {total !== undefined && total !== null && <span className="text-xs font-medium opacity-80 shrink-0">({total})</span>}
+                    {fresh > 0 && <span className="shrink-0 min-w-[1.25rem] px-1.5 rounded-full bg-orange-500 text-white text-xs leading-5">{fresh}</span>}
                   </button>
                 );
               })}
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <LinkTile to={['leads', '', { filter: 'all' }]} className="glass-stat p-4" title="Show every lead"><div className="text-sm text-glass-secondary">{segment === 'charter' ? 'Charter Enquiries' : 'Total Leads'}</div><div className="text-2xl font-bold text-glass-primary">{segmentLeads.length}</div></LinkTile>
-              <LinkTile to={['leads', '', { filter: 'pending' }]} className="glass-stat p-4" title="Show leads nobody has contacted yet"><div className="text-sm text-glass-secondary">Untouched</div><div className="text-2xl font-bold text-orange-600">{untouched(segmentLeads)}</div></LinkTile>
-              <button type="button" className="tile-link glass-stat p-4 text-left" title="Show the follow-ups due"
+            {seg === 'meta' ? (
+              <Suspense fallback={<LoadingSpinner />}><AdsLeads access={adsAccess} platform="meta" inLeads /></Suspense>
+            ) : <>
+            <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-4" data-testid="lead-counters">
+              <LinkTile to={['leads', '', { filter: 'all' }]} className="glass-stat p-3 sm:p-4" title="Show every lead"><div className="text-xs sm:text-sm text-glass-secondary truncate">{seg === 'charter' ? 'Enquiries' : 'Total'}<span className="hidden sm:inline">{seg === 'charter' ? '' : ' Leads'}</span></div><div className="text-xl sm:text-2xl font-bold text-glass-primary">{segmentLeads.length}</div></LinkTile>
+              <LinkTile to={['leads', '', { filter: 'pending' }]} className="glass-stat p-3 sm:p-4" title="Show leads nobody has contacted yet"><div className="text-xs sm:text-sm text-glass-secondary truncate">Untouched</div><div className="text-xl sm:text-2xl font-bold text-orange-600">{untouched(segmentLeads)}</div></LinkTile>
+              <button type="button" className="tile-link glass-stat p-3 sm:p-4 text-left min-w-0" title="Show the follow-ups due"
                 onClick={() => document.getElementById('lead-followups')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>
-                <div className="text-sm text-glass-secondary">Pending Follow-ups</div><div className="text-2xl font-bold text-blue-600">{segmentFollowups.length}</div>
+                <div className="text-xs sm:text-sm text-glass-secondary truncate"><span className="hidden sm:inline">Pending </span>Follow-ups</div><div className="text-xl sm:text-2xl font-bold text-blue-600">{segmentFollowups.length}</div>
               </button>
             </div>
             {segmentFollowups.length > 0 && (
@@ -474,14 +494,15 @@ export default function App() {
             )}
             <div className="glass-card p-4">
               <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
-                <h2 className="text-lg font-semibold text-glass-primary">{segment === 'charter' ? 'Book My Charter Leads' : 'We One Aviation Leads'}</h2>
-                <div className="flex gap-2">
-                  <button onClick={() => setShowAddQuery(true)} className="glass-btn px-4 py-2 inline-flex items-center gap-1.5 min-h-[40px]" style={{ background: '#248A3D' }}><Icon name="plus" size={16} />{segment === 'charter' ? 'Add Enquiry' : 'Add Query'}</button>
-                  <button onClick={syncNow} className="glass-btn px-4 py-2 inline-flex items-center gap-1.5 min-h-[40px]"><Icon name="refresh" size={16} />Sync</button>
+                <h2 className="text-lg font-semibold text-glass-primary">{seg === 'charter' ? 'Book My Charter Leads' : 'We One Aviation Leads'}</h2>
+                <div className="flex gap-2 w-full sm:w-auto">
+                  <button onClick={() => setShowAddQuery(true)} className="glass-btn px-4 py-2 inline-flex items-center justify-center gap-1.5 min-h-[40px] flex-1 sm:flex-none" style={{ background: '#248A3D' }}><Icon name="plus" size={16} />{seg === 'charter' ? 'Add Enquiry' : 'Add Query'}</button>
+                  <button onClick={syncNow} className="glass-btn px-4 py-2 inline-flex items-center justify-center gap-1.5 min-h-[40px] flex-1 sm:flex-none"><Icon name="refresh" size={16} />Sync</button>
                 </div>
               </div>
-              <LeadList leads={segmentLeads} segment={segment} onSelectLead={setSelectedLead} />
+              <LeadList leads={segmentLeads} segment={seg} onSelectLead={setSelectedLead} />
             </div>
+            </>}
           </>
           );
         })()}

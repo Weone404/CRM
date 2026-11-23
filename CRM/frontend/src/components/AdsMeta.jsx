@@ -32,6 +32,12 @@ const TABS = [
   { id: 'setup', label: 'Setup', icon: 'checkCircle', admin: true },
   { id: 'settings', label: 'Settings', icon: 'settings', admin: true },
 ];
+// Phones: the tab row scrolls sideways; keep the open tab visible without moving the page up or down.
+const keepInRow = (el) => {
+  const row = el?.parentElement; if (!row || row.scrollWidth <= row.clientWidth) return;
+  const a = el.getBoundingClientRect(); const b = row.getBoundingClientRect();
+  if (a.left < b.left) row.scrollLeft -= b.left - a.left + 8; else if (a.right > b.right) row.scrollLeft += a.right - b.right + 8;
+};
 const ago = (t) => { if (!t) return 'never'; const m = Math.round((Date.now() - new Date(t).getTime()) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
 
 function Overview({ access, st, go, edge }) {
@@ -104,16 +110,16 @@ export default function AdsMeta({ access }) {
           </div>)}
       </div>
       {access.is_admin && view !== 'setup' && <SetupBanner platform="meta" st={st} onOpen={() => go('setup')} />}
-      <div role="tablist" aria-label="Meta Ads" className="glass-card p-1 grid gap-1" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
+      <div role="tablist" aria-label="Meta Ads" className="glass-card p-1 flex gap-1 overflow-x-auto no-scrollbar" data-testid="meta-tabs">
         {tabs.map((t) => {
           const active = view === t.id;
           return (
-            <button key={t.id} role="tab" aria-selected={active} onClick={() => go(t.id)}
-              className="relative flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 rounded-xl py-2 px-1 text-[11px] sm:text-sm min-h-[52px]"
+            <button key={t.id} role="tab" aria-selected={active} onClick={() => go(t.id)} ref={active ? keepInRow : undefined}
+              className="relative flex-1 shrink-0 min-w-[74px] flex flex-col xl:flex-row items-center justify-center gap-0.5 xl:gap-1.5 rounded-xl py-2 px-2 text-[11px] sm:text-xs xl:text-sm min-h-[52px] whitespace-nowrap"
               style={active ? { background: '#0088FF', color: '#fff', fontWeight: 600 } : undefined}>
               <Icon name={t.icon} size={18} /><span className="leading-tight text-center">{t.label}</span>
               {t.id === 'setup' && st && !st.loading && progress('meta', st).first && (
-                <span aria-label="steps left" className="absolute top-1 right-1 sm:static h-2.5 w-2.5 rounded-full" style={{ background: active ? '#fff' : '#FF9500' }} />)}
+                <span aria-label="steps left" className="absolute top-1 right-1 xl:static h-2.5 w-2.5 rounded-full" style={{ background: active ? '#fff' : '#FF9500' }} />)}
             </button>);
         })}
       </div>

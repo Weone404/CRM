@@ -195,6 +195,15 @@ http.createServer((req, res) => {
       { id: 'c2', platform: 'meta', name: 'Parents test Dec', client: 'We One', account: 'A', status: 'ENABLED', spend: 0, currency: 'INR', crm: {}, account_status: 'connected' },
       { id: 'c3', platform: 'meta', name: 'WhatsApp 2023', client: 'We One', account: 'A', status: 'PAUSED', spend: 0, currency: 'INR', crm: {}, account_status: 'connected' },
       { id: 'c4', platform: 'meta', name: 'Engagement 2024', client: 'We One', account: 'A', status: 'PAUSED', spend: 0, currency: 'INR', crm: {}, account_status: 'connected' }]);
+    if (fn === 'api_ads_lead_board') return send(res, 200, { role: 'admin', stats: { total: 2, new_today: 1, not_contacted: 1, quarantined: 0, qualified_month: 0, customers_month: 0 },
+      stages: [{ stage: 'lead_created', label: 'New' }, { stage: 'contacted', label: 'Contacted' }],
+      rows: calls[calls.length - 1]?.args?.p_limit === 1 ? [] : [
+        { id: 'al1', name: 'Minali Sawhney', phone_e164: '+919812345678', stage: 'lead_created', created_at: new Date(Date.now() - 40 * 60000).toISOString(), platforms: ['meta'], app: 'Instagram',
+          ad_name: 'Pilot after 12th: check this before paying fees', first_touch: { ad_id: '9101' },
+          answers: [{ q: 'City', a: 'Delhi' }, { q: 'Who is filling this form?', a: 'Parent / guardian' }, { q: 'Class 12 status?', a: 'Passed with Physics & Maths' }, { q: 'When do you want to start?', a: 'Within 1 month' }, { q: 'How do you plan to fund the training?', a: 'Family + education loan' }] },
+        { id: 'al2', name: 'Raj', phone_e164: '+919811111111', stage: 'contacted', first_response_at: new Date().toISOString(), created_at: new Date(Date.now() - 26 * 3600000).toISOString(), platforms: ['meta'], app: 'Instagram', owner_name: 'Asha',
+          ad_name: 'Parents: 3 questions before paying pilot training fees', answers: [{ q: 'Who is filling this form?', a: 'Student (18+)' }, { q: 'Class 12 status?', a: 'Passed with other subjects' }] }] });
+    if (fn === 'api_ads_staff') return send(res, 200, []);
     if (fn === 'api_ads_meta_action_request') return send(res, 200, { id: 77, guard: [], self_approve: true });
     if (fn === 'api_amz_access') return send(res, 200, { can_view: false });
     return send(res, 200, []);

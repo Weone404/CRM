@@ -32,4 +32,13 @@ SELECT pg_temp.ok((SELECT count(*) = 2 FROM public.ads_meta_lesson WHERE active)
   'LL05 the Strategist''s lessons from a test are kept (too-short ones ignored) next to the owner''s');
 SELECT pg_temp.ok((SELECT c->'lessons' @> '[{"source": "owner"}]' AND c ? 'last_test' FROM (SELECT crm_private.ads_meta_agent_ctx(r) c FROM public.ads_agent_runs r WHERE id = (SELECT max(id) FROM public.ads_agent_runs)) z),
   'LL06 every Strategist and Reviewer run reads the lessons and the last test');
+UPDATE public.ads_lead SET first_touch = coalesce(first_touch, '{}') || '{"ad_id": "9101", "meta_platform": "ig"}' WHERE id = '5b000000-0000-0000-0000-000000000121';
+INSERT INTO public.ads_meta_object (account_id, level, external_id, campaign_ext, adset_ext, name, status)
+SELECT pg_temp.acct(), 'ad', '9555', '7101', '8101', 'Old ad · CRM S1', 'ACTIVE' WHERE NOT EXISTS (SELECT 1 FROM public.ads_meta_object WHERE external_id = '9555');
+SELECT pg_temp.as_('c'); SET ROLE authenticated;
+CREATE TEMP TABLE bd125 AS SELECT public.api_ads_lead_board('pilot_training', NULL, false, 'Meena', 50, NULL) b;
+RESET ROLE;
+SELECT pg_temp.ok((SELECT r->'answers' @> '[{"a": "Parent / guardian"}]' AND r->>'ad_name' = 'Pilot after 12th' AND r->>'app' = 'Instagram'
+    FROM bd125, jsonb_array_elements(b->'rows') r WHERE r->>'name' = 'Meena K'), 'LB01 (125) a lead on the board shows its answers in words, the ad (headline) and the app');
+SELECT pg_temp.ok(crm_private.ads_meta_ad_label('9555') = 'Old ad', 'LB02 an ad the CRM did not build shows Meta''s name, without the CRM tag');
 \echo ALL ADS META 124 TESTS PASSED

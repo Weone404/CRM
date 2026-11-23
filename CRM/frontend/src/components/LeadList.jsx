@@ -47,7 +47,7 @@ export default function LeadList({ leads, onSelectLead, segment = 'aviation' }) 
 
   const tab = (key, label, activeClass) => (
     (isCharter && TRACK_TABS.has(key)) ? null :
-    <button key={key} onClick={() => setFilter(key)} className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition ${filter === key ? activeClass : 'glass-subtle text-glass-secondary hover:text-glass-primary'}`}>{label}</button>
+    <button key={key} onClick={() => setFilter(key)} className={`shrink-0 whitespace-nowrap px-3.5 py-1.5 rounded-full text-sm font-medium transition ${filter === key ? activeClass : 'glass-subtle text-glass-secondary hover:text-glass-primary'}`}>{label}</button>
   );
 
   const badgeClass = (lead) => {
@@ -62,7 +62,7 @@ export default function LeadList({ leads, onSelectLead, segment = 'aviation' }) 
 
   return (
     <div>
-      <div className="flex gap-2 mb-4 flex-wrap">
+      <div className="flex gap-2 mb-4 -mx-1 px-1 overflow-x-auto no-scrollbar md:flex-wrap md:overflow-visible" data-testid="lead-filter-chips">
         {tab('all', `All (${leads.length})`, 'bg-indigo-600 text-white')}
         {tab('pending', `Pending (${count('pending')})`, 'bg-orange-600 text-white')}
         {tab('in-progress', `In Progress (${count('in-progress')})`, 'bg-sky-600 text-white')}

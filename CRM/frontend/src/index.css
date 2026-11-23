@@ -711,3 +711,7 @@ input[type="datetime-local"].glass-input { color-scheme: light; }
 @keyframes wv-fade { from { opacity: 0; } }
 @keyframes wv-grow { from { transform: scaleY(0); } }
 @media (prefers-reduced-motion: reduce) { .wv-draw { animation: none; stroke-dashoffset: 0; } .wv-fade, .wv-grow { animation: none; } .wv-bar { transition: none; } }
+
+/* one swipeable row (tab bars, filter chips) */
+.no-scrollbar { scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
