@@ -125,6 +125,10 @@ gender, region, placement, device, hour, weekday, ad fatigue) joined with CRM re
 admissions). CONTEXT.patterns are the proven/early patterns the CRM computed from it: the strongest evidence you have.
 CONTEXT.crm and CONTEXT.lead_archive show lead quality and what leads answered; CONTEXT.past_strategies and
 CONTEXT.this_strategy_checks show plans and how they did against reality.
+CONTEXT.lessons are what this account's own Meta tests taught and what the owner decided (source owner): follow every one; owner
+lessons are binding; if newer data in CONTEXT contradicts a test lesson, say so in "changes" and why. CONTEXT.last_test is the plan
+now running, per ad (spend, views, cost per 1,000 views, click rate, leads, cost per lead) and per lead (answers, called, hours to
+the first call): start every revision from it, and with small numbers say how sure you can be.
 FUNNEL TARGETING (2026): Meta treats only location, minimum age, languages and custom-audience EXCLUSIONS as hard limits;
 age, gender, interests and included custom / lookalike audiences are only hints for Advantage+ audience, and interest
 exclusions no longer exist. So target with (1) the funnel stage, (2) hard exclusions, (3) a distinct message and form per
@@ -240,7 +244,8 @@ and patterns first) and INPUT.research (current Meta guidance, benchmarks, timin
 - INPUT.fix_these set: your previous answer (INPUT.previous_answer) was sent back for exactly those reasons; fix every one.
 ${META_PLAN}
 Reply: {"answer": "3-6 lines for the owner in plain words: the plan, the budget, what to expect, anything they must decide or provide",
- "changes": ["each change against the version before (empty for a first plan)"], "plan": {...}}`,
+ "changes": ["each change against the version before (empty for a first plan)"], "plan": {...},
+ "lessons": [at most 5 NEW lessons from CONTEXT.last_test or this.week's data: {"lesson": "one rule an agent can follow", "evidence": "dates and numbers"}]}`,
 
   meta_reviewer: `${META_COMMON}
 You are the REVIEWER. You did not write this plan and have no stake in it. You have no tools. Check INPUT.strategist.plan against
@@ -248,6 +253,7 @@ CONTEXT, INPUT.research and INPUT.request with fresh eyes:
 - Numbers: the forecast follows from the account's history and the research (not the best month ever, not a guess); cost per lead,
   qualified and admission rates are traceable to a named source; the budget can carry the structure (results per ad set per week).
 - Goal: it aims at CONTEXT.goal and stays inside the budget limit; if the target is out of reach, the answer says so honestly.
+- Lessons: the plan follows every CONTEXT.lessons entry (owner lessons always); a test lesson is only set aside with newer data named in "changes".
 - Truth and policy: every claim is supported by CONTEXT.brand_facts or a research fact with a URL; nothing in CONTEXT.banned_claims;
   no personal-attribute wording, no job or salary promises, no fake urgency; under-18s are never targeted or addressed.
 - Premium (CONTEXT.goal.premium): the fee stated in a creative matches INPUT.research.fees or brand facts exactly; it is written as a
