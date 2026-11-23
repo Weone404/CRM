@@ -55,6 +55,13 @@ test("Lead form thank-you button: website by default, call the counsellor, Whats
   const tries = formAttempts(work(), waForm);
   assert.deepEqual(tries.map((t) => t.thank_you_page ? JSON.parse(t.thank_you_page).button_type : null), ["WHATSAPP", "CALL_BUSINESS", null]);
   assert.deepEqual(formAttempts(work(), plan.forms[0]).map((t) => t.thank_you_page ? JSON.parse(t.thank_you_page).button_type : null), ["VIEW_WEBSITE", null]);
+  // plan v5 form f2 says it in Meta's own names
+  const v5 = ty({ title: "Thank you! Talk to a counsellor now", body: "Tap Call now.", button_text: "Call now", button_type: "CALL_BUSINESS", phone: "+919355566991" });
+  assert.deepEqual([v5.button_type, v5.button_text, v5.business_phone_number, v5.country_code], ["CALL_BUSINESS", "Call now", "+919355566991", "IN"]);
+  assert.equal(ty({ title: "T", button_type: "call_business", business_phone_number: "+91 93555 66991" }).business_phone_number, "+919355566991");
+  assert.equal(ty({ title: "T", button_type: "WHATSAPP" }).button_type, "WHATSAPP");
+  assert.equal(ty({ title: "T", button_type: "VIEW_WEBSITE", button: "call", phone: "+919355566991" }).button_type, "VIEW_WEBSITE");
+  assert.equal(ty({ title: "T", button_type: "DOWNLOAD" }).button_type, "VIEW_WEBSITE");
   assert.equal(businessPhone("12345"), null); assert.equal(businessPhone(""), null);
   assert.deepEqual(businessPhone("+1 415 555 0100"), { number: "+14155550100", country: null });
 });

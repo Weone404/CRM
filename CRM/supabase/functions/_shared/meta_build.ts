@@ -79,11 +79,15 @@ export function formParams(w: BuildWork, f: any, minimal = false, button?: "call
   return out;
 }
 
-// Thank-you screen button (plan forms[].thank_you.button): "call" -> CALL_BUSINESS with the counsellor number
-// (thank_you.phone, else the plan's or the strategy's goal.phone), "whatsapp" -> WHATSAPP (Meta uses the WhatsApp number
-// connected to the Page; no number field), anything else -> VIEW_WEBSITE. Enum from the Graph API leadgen_forms reference.
-// website_url is always sent (the Lead Ads guide says the API needs it). No number for "call" -> website.
+// Thank-you screen button. The plan says it as forms[].thank_you.button_type (Meta's own names: CALL_BUSINESS, WHATSAPP,
+// VIEW_WEBSITE) or .button ("call" / "whatsapp" / "website"). CALL_BUSINESS carries the counsellor number
+// (thank_you.business_phone_number or .phone, else the plan's or the strategy's goal.phone); WHATSAPP has no number field
+// (Meta uses the WhatsApp number connected to the Page); anything else -> VIEW_WEBSITE. Enum from the Graph API
+// leadgen_forms reference. website_url is always sent (the Lead Ads guide says the API needs it). No number -> website.
+const BUTTON_TYPES: Record<string, "call" | "whatsapp" | "website"> = { CALL_BUSINESS: "call", WHATSAPP: "whatsapp", VIEW_WEBSITE: "website" };
 export const thankYouButton = (f: any): "call" | "whatsapp" | "website" => {
+  const bt = BUTTON_TYPES[String(f?.thank_you?.button_type ?? "").toUpperCase()];
+  if (bt) return bt;
   const b = String(f?.thank_you?.button ?? "").toLowerCase();
   return b === "call" || b === "whatsapp" ? b : "website";
 };
@@ -98,7 +102,7 @@ function thankYouPage(w: BuildWork, f: any, site: string, button?: "call" | "wha
   const t = f.thank_you;
   const base = { title: String(t.title).slice(0, 60), body: String(t.body || "").slice(0, 300), website_url: site };
   const want = button ?? thankYouButton(f);
-  const ph = businessPhone(t.phone ?? w.plan?.goal?.phone ?? w.goal.phone);
+  const ph = businessPhone(t.business_phone_number ?? t.phone ?? w.plan?.goal?.phone ?? w.goal.phone);
   if (want === "whatsapp") return { ...base, button_type: "WHATSAPP", button_text: String(t.button_text || "Chat on WhatsApp").slice(0, 30) };
   if (want === "call" && ph) return { ...base, button_type: "CALL_BUSINESS", button_text: String(t.button_text || "Call now").slice(0, 30),
     business_phone_number: ph.number, ...(ph.country ? { country_code: ph.country } : {}) };
