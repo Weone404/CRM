@@ -183,11 +183,12 @@ RESET ROLE;
 SELECT pg_temp.ok((SELECT build->>'status' = 'partial' AND build->'steps'->'campaign:c1'->>'id' = '120200000000001' AND build->'images'->'i1'->>'hash' = 'abc123hash'
     AND crm_private.ads_meta_strategy_campaigns(s) = ARRAY['120200000000001'] FROM public.ads_meta_strategy s WHERE id = pg_temp.sid()),
   'SG20 each step is saved as it happens, so a retry never makes a second copy');
-UPDATE public.ads_meta_strategy SET approved_version = 2 WHERE id = pg_temp.sid();
+-- (128: a NEWER approved version is built incrementally on top, see B5_; an older one is still refused)
+UPDATE public.ads_meta_strategy SET build = jsonb_set(build, '{version}', '2') WHERE id = pg_temp.sid();
 SELECT pg_temp.as_('a'); SET ROLE authenticated;
-SELECT pg_temp.fails($q$SELECT public.api_ads_meta_strategy_build(pg_temp.sid())$q$, '%Version 1 was already created%', 'SG21 a different version is never built on top of one already in Meta');
+SELECT pg_temp.fails($q$SELECT public.api_ads_meta_strategy_build(pg_temp.sid())$q$, '%Version 2 was already created%', 'SG21 an older version is never built on top of a newer one already in Meta');
 RESET ROLE;
-UPDATE public.ads_meta_strategy SET approved_version = 1 WHERE id = pg_temp.sid();
+UPDATE public.ads_meta_strategy SET build = jsonb_set(build, '{version}', '1') WHERE id = pg_temp.sid();
 
 -- ---------------------------------------------------------------- plan vs actual
 SELECT pg_temp.as_('a'); SET ROLE authenticated;
