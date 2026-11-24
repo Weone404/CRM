@@ -77,7 +77,7 @@ Deno.test("one DM per person: a second comment by the same person gets only the 
   assertEquals(m.log.get("c2")!.state, "public");
 });
 
-Deno.test("spam and angry comments get nothing; own comments and posts older than 7 days are ignored", async () => {
+Deno.test("spam and angry comments get nothing; own comments and comments older than 7 days are ignored", async () => {
   const f = fakeIG({ media, comments: {
     m1: [c("s1", "x", "follow www.promo.xyz for followers"), c("n1", "y", "scam hai ye"), c("o1", OWN, "Thanks!", 10, UID)],
     m_old: [c("old", "z", "hello", 8 * 1440)] } });
@@ -85,7 +85,6 @@ Deno.test("spam and angry comments get nothing; own comments and posts older tha
   assertEquals(f.dms.length, 0); assertEquals(f.replies.length, 0);
   assertEquals(m.log.get("s1")!.reason, "spam"); assertEquals(m.log.get("n1")!.reason, "negative");
   assert(!m.log.has("o1") && !m.log.has("old")); assertEquals([r.spam, r.negative], [1, 1]);
-  assert(!f.calls.includes("GET m_old/comments"), "posts older than 7 days are not read");
 });
 
 Deno.test("a comment the account already answered (Reel Studio, before the move) is imported, not messaged", async () => {
@@ -192,4 +191,25 @@ Deno.test("brochure: someone who writes first gets the welcome and the PDF toget
   const r = await tick(work(PDF), f.ig, m.st, NOW);
   assertEquals(f.dms.length, 2); assertEquals(f.dms[1].message.attachment, { type: "file", payload: { url: PDF.pdf_url } });
   assertEquals([r.inbox.welcomed, r.inbox.pdf], [1, 1]); assertEquals(m.sends.filter((k) => k === "pdf").length, 1);
+});
+
+Deno.test("an older post still gets its new comments answered; posts with no comments are not read", async () => {
+  const f = fakeIG({ media: [{ id: "m_new", timestamp: ago(60), comments_count: 0 }, { id: "m_old", timestamp: ago(30 * 1440), comments_count: 2 }],
+                     comments: { m_old: [c("o1", "kabir", "fees kitni hai?", 20), c("o2", "old_one", "hi", 8 * 1440)] } });
+  const m = memStore(); const r = await tick(work(), f.ig, m.st, NOW);
+  assertEquals(r.sent, 1, "the 20-minute-old comment on a 30-day-old post is answered; the 8-day-old comment is too late");
+  assert(!f.calls.includes("GET m_new/comments"), "a post with no comments is skipped");
+});
+
+Deno.test("custom texts: welcome for people who write first, brochure invite and brochure intro", async () => {
+  const T = { ...PDF, pdf_name: "prospectus", welcome: "Namaste {name}! Ask us anything.", pdf_invite: "Reply YES for our {brochure}.", pdf_intro: "Our {brochure} 👇" };
+  const f = fakeIG({ media, comments: { m1: [c("c1", "riya", "fees?")] } }); const m = memStore();
+  await tick(work(T), f.ig, m.st, NOW);
+  assert(f.dms[0].message.text.endsWith("\n\nReply YES for our prospectus."));
+  const msgs = { cv1: [{ id: "m1x", created_time: ago(2), from: { id: "sid_c1", username: "riya" }, message: "yes" }] };
+  const f2 = fakeIG({ media: [], convs: [{ id: "cv1", updated_time: ago(2) }], msgs }); await tick(work({ ...T, inbox_at: m.cfg.inbox_at }), f2.ig, m.st, NOW);
+  assertEquals(f2.dms[0].message.text, "Our prospectus 👇");
+  const f3 = fakeIG({ media: [], convs: [{ id: "cv9", updated_time: ago(3) }], msgs: { cv9: [{ id: "z1", created_time: ago(3), from: { id: "p9", username: "meera" }, message: "hello" }] } });
+  await tick(work(T), f3.ig, memStore().st, NOW);
+  assertEquals(f3.dms[0].message.text, "Namaste @meera! Ask us anything.");
 });

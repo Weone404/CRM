@@ -1,5 +1,5 @@
 // Instagram comment-to-DM (migration 135; moved from Reel Studio's ig-poster/dm.ts, universal mode).
-// Every 2 minutes: read the comments on the account's posts from the last 7 days; a new comment gets ONE private reply
+// Every 2 minutes: read the comments of the latest 25 posts (any age); a comment under 7 days old gets ONE private reply
 // (Instagram "private replies": one message per comment, within 7 days) when the person has not had our message yet, and a
 // short public reply under the comment. Spam gets nothing; angry / "fraud" comments are left for a person. The inbox too:
 // someone who writes first gets the message once; a mobile number in a reply becomes a CRM lead.
@@ -14,6 +14,7 @@ export type Json = Record<string, any>;
 export const API = "https://graph.instagram.com/v26.0";
 export const DEFAULT_PUBLIC = ["Boarding pass is in your inbox 🎫", "Boarding pass is in your inbox ✈️", "Boarding pass is in your inbox 🛫"];
 export const MAX_CAP = 200;
+export const MEDIA_SCAN = 25;
 const WINDOW_MIN = 7 * 1440 - 30;            // private replies are allowed for 7 days after the comment
 const SPAM = /(https?:\/\/|www\.|\.(com|in|net|xyz)\b|\bpromot(e|ion)\b|\bcollab\b|\bdm (me|for)\b|\bcheck (my|our) (profile|page|bio)\b|\bfollowers?\b|\bcrypto\b|\bbitcoin\b|\bforex\b|\bgiveaway\b|\bearn (money|daily)\b)/i;
 const NEGATIVE = /\b(scam|scammer|fraud|fake|cheat(er|ing)?|loot|worst|bakwas|bekar|dhokha|chor)\b/i;
@@ -74,7 +75,11 @@ export function phoneOf(text: string): string | null {
   }
   return null;
 }
-export const pdfInvite = (cfg: Json) => cfg.pdf_url ? `\n\n📄 Reply to this message and we'll send you our ${String(cfg.pdf_name || "brochure")} (PDF) right here.` : "";
+export const DEFAULT_INVITE = "📄 Reply to this message and we'll send you our {brochure} (PDF) right here.";
+export const DEFAULT_INTRO = "Here's our {brochure} ✈️";
+const fill = (t: string, cfg: Json) => t.replaceAll("{brochure}", String(cfg.pdf_name || "brochure"));
+export const pdfInvite = (cfg: Json) => cfg.pdf_url ? `\n\n${fill(String(cfg.pdf_invite || DEFAULT_INVITE), cfg)}` : "";
+const pdfIntro = (cfg: Json) => fill(String(cfg.pdf_intro || DEFAULT_INTRO), cfg);
 const pdfMessage = (cfg: Json) => ({ attachment: { type: "file", payload: { url: String(cfg.pdf_url) } } });
 const pkey = (id?: string, username?: string) => (id ? String(id) : `u:${String(username ?? "").toLowerCase()}`);
 const publicText = (cfg: Json, n: number) => {
@@ -162,12 +167,12 @@ export async function inbox(ig: IG, st: Store, cfg: Json, uid: string, out: Json
       if (!p?.dm_at) {      // they wrote first: welcome them once, unless the team is already talking to them in this chat
         const team = msgs.some((m) => String(m.from?.id ?? "") === uid && ts(m.created_time) < first);
         if (!team) {
-          await send({ text: render(String(cfg.message), username || undefined).slice(0, 990) }, "welcome"); row.dm_at = new Date(now).toISOString(); row.source = p?.source ?? "dm"; res.welcomed++;
+          await send({ text: render(String(cfg.welcome || cfg.message), username || undefined).slice(0, 990) }, "welcome"); row.dm_at = new Date(now).toISOString(); row.source = p?.source ?? "dm"; res.welcomed++;
           if (cfg.pdf_url && budget.n > 0) { await send(pdfMessage(cfg), "pdf"); row.pdf_at = new Date(now).toISOString(); res.pdf++; }
         }
       } else if (cfg.pdf_url && !p.pdf_at && budget.n > 0) {
         // a commenter answered the private reply: now the brochure can go into the chat
-        await send({ text: `Here's our ${String(cfg.pdf_name || "brochure")} ✈️` }, "pdf_intro");
+        await send({ text: pdfIntro(cfg).slice(0, 990) }, "pdf_intro");
         await send(pdfMessage(cfg), "pdf"); row.pdf_at = new Date(now).toISOString(); res.pdf++;
       }
       const phone = p?.phone ? null : fresh.map((m) => phoneOf(String(m.message ?? ""))).find(Boolean);
@@ -229,8 +234,9 @@ export async function tick(work: Json, ig: IG | null, st: Store, now = Date.now(
       return { state: "not ready", error: err.message };
     }
   }
-  const media: Json[] = ((await ig.get(`${uid}/media`, { fields: "id,timestamp", limit: "12" })).data ?? [])
-    .filter((m: Json) => minsAgo(m.timestamp, now) < 7 * 1440);
+  // the latest posts whatever their age: a new comment can come on an older post, or on a post an ad reuses
+  const media: Json[] = ((await ig.get(`${uid}/media`, { fields: "id,timestamp,comments_count", limit: String(MEDIA_SCAN) })).data ?? [])
+    .filter((m: Json) => Number(m.comments_count ?? 1) > 0);
   const cap = Math.max(1, Math.min(MAX_CAP, Number(cfg.cap) || 60));
   const budget = { n: cap - Number(work.sent_last_hour ?? 0) };
   const out: Json = { sent: 0, media: media.length };

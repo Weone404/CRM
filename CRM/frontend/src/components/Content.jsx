@@ -5,6 +5,7 @@ import { navigate, useRoute } from '../utils/route';
 import { rpc, run, useLoad, Btn } from './adsKit';
 import { edge } from './Ads';
 import Icon from './icons';
+import ContentInstagram from './ContentInstagram';
 
 // Growth > Content (migration 116). The Demand Analyst reads what people search, ask and object to; the Content Planner turns it
 // into the week's reels and carousels; Reel Studio (office Mac) makes and posts them with its 5-minute rule. Ad pictures and videos
@@ -400,7 +401,7 @@ function Results({ d }) {
 }
 
 // ---------------------------------------------------------------- page
-const TABS = [['week', 'This week'], ['ideas', 'Ideas'], ['ads', 'Ad creatives'], ['results', 'Results']];
+const TABS = [['week', 'This week'], ['ideas', 'Ideas'], ['ads', 'Ad creatives'], ['instagram', 'Instagram'], ['results', 'Results']];
 export default function Content() {
   const route = useRoute();
   const tab = TABS.some(([k]) => k === route.section) ? route.section : 'week';
@@ -437,6 +438,7 @@ export default function Content() {
         {tab === 'week' && <Week d={d} week={week} reload={reload} go={go} />}
         {tab === 'ideas' && <Ideas d={d} />}
         {tab === 'ads' && <AdCreatives d={d} reload={reload} />}
+        {tab === 'instagram' && <ContentInstagram />}
         {tab === 'results' && <Results d={d} />}
       </>}
     </div>);
