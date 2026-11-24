@@ -3,6 +3,8 @@
 // (Instagram "private replies": one message per comment, within 7 days) when the person has not had our message yet, and a
 // short public reply under the comment. Spam gets nothing; angry / "fraud" comments are left for a person. The inbox too:
 // someone who writes first gets the message once; a mobile number in a reply becomes a CRM lead.
+// Brochure (cfg.pdf_url, a public https PDF up to 25 MB): Instagram allows only ONE message to a commenter until they reply,
+// so the private reply invites them to reply; their reply gets the PDF in the chat. Someone who writes first gets it at once.
 // Never twice: each comment is claimed (Store.claim, primary key) BEFORE anything is sent, and a comment the account has
 // already replied to (Reel Studio answered it before the move, or a person did) is recorded as 'imported' and skipped.
 // Pure logic: Instagram and the database come in as interfaces, so the tests run it against fakes.
@@ -72,6 +74,8 @@ export function phoneOf(text: string): string | null {
   }
   return null;
 }
+export const pdfInvite = (cfg: Json) => cfg.pdf_url ? `\n\n📄 Reply to this message and we'll send you our ${String(cfg.pdf_name || "brochure")} (PDF) right here.` : "";
+const pdfMessage = (cfg: Json) => ({ attachment: { type: "file", payload: { url: String(cfg.pdf_url) } } });
 const pkey = (id?: string, username?: string) => (id ? String(id) : `u:${String(username ?? "").toLowerCase()}`);
 const publicText = (cfg: Json, n: number) => {
   const l: string[] = (cfg.public_replies ?? []).filter((x: unknown) => String(x ?? "").trim());
@@ -112,7 +116,7 @@ export async function comments(ig: IG, st: Store, cfg: Json, uid: string, own: s
       let reached = !!p?.dm_at, state = "public";
       if (!reached) {
         try {
-          const r = await ig.post(`${uid}/messages`, {}, { recipient: { comment_id: String(c.id) }, message: { text: render(String(cfg.message), c.who).slice(0, 990) } });
+          const r = await ig.post(`${uid}/messages`, {}, { recipient: { comment_id: String(c.id) }, message: { text: (render(String(cfg.message), c.who) + pdfInvite(cfg)).slice(0, 990) } });
           budget.n--; await st.sent("private");
           await st.savePerson({ person: pkey(r.recipient_id ?? c.from?.id, c.who), igsid: r.recipient_id ?? c.from?.id ?? null, username: c.who, source: "comment", dm_at: new Date(now).toISOString() });
           reached = true; state = "sent"; out.sent = (out.sent ?? 0) + 1;
@@ -137,7 +141,7 @@ export async function comments(ig: IG, st: Store, cfg: Json, uid: string, own: s
 export async function inbox(ig: IG, st: Store, cfg: Json, uid: string, out: Json, budget: { n: number }, now: number) {
   const since = Math.max(cfg.inbox_at ? ts(cfg.inbox_at) - 120e3 : 0, now - 24 * 3600e3 + 300e3);
   const convs: Json[] = (await ig.get("me/conversations", { platform: "instagram", fields: "id,updated_time", limit: "25" })).data ?? [];
-  let newest = since; const res = { welcomed: 0, phones: 0, leads: 0 };
+  let newest = since; const res = { welcomed: 0, pdf: 0, phones: 0, leads: 0 };
   for (const cv of convs) {
     const t = ts(cv.updated_time);
     if (!(t > since)) continue;
@@ -157,7 +161,14 @@ export async function inbox(ig: IG, st: Store, cfg: Json, uid: string, out: Json
     try {
       if (!p?.dm_at) {      // they wrote first: welcome them once, unless the team is already talking to them in this chat
         const team = msgs.some((m) => String(m.from?.id ?? "") === uid && ts(m.created_time) < first);
-        if (!team) { await send({ text: render(String(cfg.message), username || undefined).slice(0, 990) }, "welcome"); row.dm_at = new Date(now).toISOString(); row.source = p?.source ?? "dm"; res.welcomed++; }
+        if (!team) {
+          await send({ text: render(String(cfg.message), username || undefined).slice(0, 990) }, "welcome"); row.dm_at = new Date(now).toISOString(); row.source = p?.source ?? "dm"; res.welcomed++;
+          if (cfg.pdf_url && budget.n > 0) { await send(pdfMessage(cfg), "pdf"); row.pdf_at = new Date(now).toISOString(); res.pdf++; }
+        }
+      } else if (cfg.pdf_url && !p.pdf_at && budget.n > 0) {
+        // a commenter answered the private reply: now the brochure can go into the chat
+        await send({ text: `Here's our ${String(cfg.pdf_name || "brochure")} ✈️` }, "pdf_intro");
+        await send(pdfMessage(cfg), "pdf"); row.pdf_at = new Date(now).toISOString(); res.pdf++;
       }
       const phone = p?.phone ? null : fresh.map((m) => phoneOf(String(m.message ?? ""))).find(Boolean);
       if (phone) {

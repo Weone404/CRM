@@ -167,3 +167,29 @@ Deno.test("the token never appears in an error, and long-lived tokens are refres
   assertEquals(await refreshToken("old", "2026-11-01T00:00:00Z", ok, NOW), "NEW_TOKEN_abcdefghijklmnopqrstuvwxyz");
   assertEquals(await refreshToken("old", "2026-11-20T00:00:00Z", ok, NOW), null, "younger than 20 days: kept");
 });
+
+const PDF = { pdf_url: "https://crm.weoneaviation.in/files/we-one-aviation-brochure.pdf", pdf_name: "brochure" };
+Deno.test("brochure: the comment DM invites a reply; the reply gets the PDF once; no PDF set means no invite", async () => {
+  const f = fakeIG({ media, comments: { m1: [c("c1", "riya", "fees?")] } }); const m = memStore();
+  await tick(work(PDF), f.ig, m.st, NOW);
+  assert(f.dms[0].message.text.endsWith("📄 Reply to this message and we'll send you our brochure (PDF) right here."));
+  assertEquals(f.dms.length, 1, "Instagram allows one message to a commenter until they reply");
+  // riya answers the private reply in the chat
+  const msgs = { cv1: [{ id: "m1x", created_time: ago(2), from: { id: "sid_c1", username: "riya" }, message: "yes please" }] };
+  const f2 = fakeIG({ media: [], convs: [{ id: "cv1", updated_time: ago(2) }], msgs }); const r = await tick(work({ ...PDF, inbox_at: m.cfg.inbox_at }), f2.ig, m.st, NOW);
+  assertEquals(f2.dms.map((d) => d.message.text ?? d.message.attachment.type), ["Here's our brochure ✈️", "file"]);
+  assertEquals(f2.dms[1].message.attachment.payload.url, PDF.pdf_url); assertEquals(r.inbox.pdf, 1); assert(m.people.get("sid_c1")!.pdf_at);
+  const msgs3 = { cv1: [...msgs.cv1, { id: "m2x", created_time: ago(1), from: { id: "sid_c1", username: "riya" }, message: "thanks" }] };
+  const f3 = fakeIG({ media: [], convs: [{ id: "cv1", updated_time: ago(1) }], msgs: msgs3 }); await tick(work({ ...PDF, inbox_at: m.cfg.inbox_at }), f3.ig, m.st, NOW);
+  assertEquals(f3.dms.length, 0, "the brochure is sent once");
+  const f4 = fakeIG({ media, comments: { m1: [c("c7", "dev", "info")] } }); await tick(work(), f4.ig, memStore().st, NOW);
+  assert(!f4.dms[0].message.text.includes("PDF"));
+});
+
+Deno.test("brochure: someone who writes first gets the welcome and the PDF together", async () => {
+  const msgs = { cv5: [{ id: "q1", created_time: ago(4), from: { id: "p55", username: "arjun" }, message: "hello" }] };
+  const f = fakeIG({ media: [], convs: [{ id: "cv5", updated_time: ago(4) }], msgs }); const m = memStore();
+  const r = await tick(work(PDF), f.ig, m.st, NOW);
+  assertEquals(f.dms.length, 2); assertEquals(f.dms[1].message.attachment, { type: "file", payload: { url: PDF.pdf_url } });
+  assertEquals([r.inbox.welcomed, r.inbox.pdf], [1, 1]); assertEquals(m.sends.filter((k) => k === "pdf").length, 1);
+});
