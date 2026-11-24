@@ -116,7 +116,7 @@ await page.goto(`${APP}#/content`);
 await page.getByRole('heading', { name: 'Content' }).waitFor({ timeout: 15000 });
 await page.waitForTimeout(800);
 b = await body();
-ok(/GROWTH\s*Website\s*Content/i.test(await nav.innerText()), 'CN01 Content sits under Growth, after Website');
+ok(/GROWTH\s*Google\s*Content/i.test(await nav.innerText()), 'CN01 Content sits under Growth, after Google');
 ok(/Reel Studio connected/.test(b) && /The plan for this week/.test(b) && /Fees and the path after class 12/.test(b) && /You asked: Push CPL fees/.test(b), 'CN02 the week shows the plan, the owner\'s note and whether Reel Studio is connected');
 ok(/CPL cost, line by line/.test(b) && /Opens with: “Where does ₹45 lakh actually go\?”/.test(b) && /1,200 views · 30 sends · 2 enquiries/.test(b) && /Pilot after 12th: 6 steps/.test(b) && /AI presenter/.test(b), 'CN03 each day lists its items: hook, status, AI presenter, and for posts the views, sends and enquiries');
 await page.getByText('Why and how').first().click(); await page.waitForTimeout(200);
@@ -171,7 +171,8 @@ await page.goto(`${APP}#/website`);
 await page.getByRole('heading', { name: 'Website' }).waitFor({ timeout: 15000 });
 await page.waitForTimeout(1200);
 b = await body();
-ok(/GROWTH\s*Website/i.test(await nav.innerText()), 'WS01 Website is first under Growth');
+ok(/GROWTH\s*Google/i.test(await nav.innerText()) && !/Website|Google Ads/.test(await nav.innerText()) && await nav.getByRole('button', { name: 'Google' }).getAttribute('aria-current') === 'page'
+  && await page.getByTestId('google-crumb').getByRole('button', { name: 'Website' }).getAttribute('aria-current') === 'page', 'WS01 the old Website address still opens it, with Google highlighted and the Google strip above');
 ok(/Clicks from Google\s*807\s*↑ 62% vs previous 28 days/.test(b) && /Seen on Google\s*231\.7K/.test(b) && /Average position\s*8\.3\s*Better · was 8\.9/.test(b), 'WS02 headline numbers with their change');
 ok(/Visitors\s*—\s*GA4 has no visits yet: fix/.test(b), 'WS02b visitors card says GA4 needs fixing instead of showing 0');
 ok(/On the site now\s*3\s*Most on CPL Course/.test(b), 'WS10 live visitors from GA4 realtime');
@@ -267,6 +268,120 @@ ok(/Parents test Dec/.test(await body()), 'CS04 a search looks through all three
 // Old "Academy" links still work
 await page.goto(`${APP}#/academy`); await page.waitForTimeout(1200);
 ok(/#\/academy$/.test(page.url()) && await nav.getByRole('button', { name: /^Students/ }).getAttribute('aria-current') === 'page', 'A10 old #/academy link opens a People screen');
+
+// Google: one menu item, three cards, and Google My Business (139)
+await page.setViewportSize({ width: 1280, height: 900 });
+await mode('gbp=data');
+await nav.getByRole('button', { name: 'Google' }).click();
+await page.getByTestId('google-hub').waitFor({ timeout: 15000 }); await page.waitForTimeout(700);
+b = await body();
+ok(page.url().endsWith('#/google') && await page.getByTestId('google-hub').getByRole('button').count() === 3, 'GG01 Google opens a page with three cards');
+ok(/Website[\s\S]*Clicks from Google\s*807\s*↑ 62%[\s\S]*Seen on Google\s*231\.7K/.test(b), 'GG02 Website card: clicks with their change, and how often the site was seen');
+ok(/Google My Business\s*Connected[\s\S]*Profile views[\s\S]*Calls[\s\S]*Rating\s*4\.7 ★[\s\S]*213 reviews · 1 profile/.test(b), 'GG03 Business Profile card: views, calls, rating and reviews');
+ok(/Google Ads\s*No spend since 15 Nov[\s\S]*Spend\s*₹847/.test(b), 'GG04 Google Ads card says plainly when the ads stopped spending');
+await page.screenshot({ path: '/tmp/google_hub.png', fullPage: true });
+const errsBefore = errors.length;
+await page.getByTestId('google-card-ads').click(); await page.waitForTimeout(900);
+ok(/#\/ads$/.test(page.url()) && await page.getByTestId('google-crumb').getByRole('button', { name: 'Google Ads' }).getAttribute('aria-current') === 'page'
+  && await nav.getByRole('button', { name: 'Google' }).getAttribute('aria-current') === 'page', 'GG05 a card opens its section at the old address; Google stays highlighted');
+ok(/Google Ads hit a problem/.test(await body()) && await page.getByTestId('google-crumb').isVisible(), 'GG05b if a section crashes (this stub gives Google Ads no data), the strip back to Google stays');
+await page.getByTestId('google-crumb').getByRole('button', { name: 'Google', exact: true }).click(); await page.waitForTimeout(500);
+ok(page.url().endsWith('#/google'), 'GG06 the strip leads back to the three cards');
+await page.goBack(); await page.waitForTimeout(500);
+ok(/#\/ads$/.test(page.url()), 'GG06b the browser Back button works across them');
+await page.getByTestId('google-crumb').getByRole('button', { name: 'Google My Business' }).click(); await page.waitForTimeout(300);
+errors.length = errsBefore;      // the Google Ads crash was the point of GG05b; it is not counted by A13
+await page.getByTestId('gbp').waitFor(); await page.waitForTimeout(900);
+b = await body();
+const g = page.getByTestId('gbp');
+ok(/#\/gbp$/.test(page.url()) && /We One Aviation · last 28 days vs the 28 before/.test(b), 'GG07 Google My Business names the profile and the period');
+ok(/Profile views\s*\d[\d,.K]*\s*[↑↓] \d+% vs previous 28 days/.test(b) && /Calls\s*\d+/.test(b) && /Website clicks\s*\d+/.test(b) && /Direction requests\s*\d+/.test(b) && /Messages\s*\d+/.test(b), 'GG08 five headline numbers, each with its change');
+const gt = g.locator('[data-section="trend"]');
+ok(/Day by day/.test(await gt.innerText()) && /Profile views (up|down) \d+% vs the 28 days before/.test(await gt.innerText()) && /Latest day: 21 Nov/.test(await gt.innerText())
+  && await gt.locator('svg[aria-label="Profile views per day"] path').count() >= 3, 'GG09 day-by-day chart against the period before, with a one-line takeaway and the latest day Google has');
+await page.getByRole('button', { name: /^Calls/ }).click(); await page.waitForTimeout(300);
+ok(await gt.getByRole('tab', { name: 'Calls' }).getAttribute('aria-selected') === 'true' && await gt.locator('svg[aria-label="Calls per day"]').count() === 1, 'GG09b a headline card charts its own number');
+ok(/of every 100\s*people who saw the profile/.test(b) && /Google search\s*70%/i.test(b) && /Google maps\s*30%/i.test(b) && /Phone\s*80%/.test(b) && /Computer\s*20%/.test(b), 'GG10 Search vs Maps, phone vs computer, and how many acted');
+ok(/What people did next[\s\S]*Called[\s\S]*Opened the website[\s\S]*Asked for directions/.test(b) && await g.locator('svg[aria-label="Views by weekday"] [role="button"]').count() === 7, 'GG11 what people did, and the busiest weekdays');
+ok(/Words people searched[\s\S]*October 2026[\s\S]*pilot training in delhi/.test(b) && !/flying school near me/.test(await g.locator('[data-section="words"]').innerText()), 'GG12 top search words of the latest month (rare words stay in the full list)');
+ok(/4\.7 of 5[\s\S]*213 reviews · 2 new in 28 days · 2 without a reply/.test(await g.locator('[data-section="reviews"]').innerText().then((x) => x.replace(/\s+/g, ' '))), 'GG13 reviews: rating, total, new, waiting for a reply');
+await page.setViewportSize({ width: 1280, height: 2400 }); await page.waitForTimeout(500);
+await page.screenshot({ path: '/tmp/gbp_overview.png', fullPage: true });
+await page.setViewportSize({ width: 1280, height: 900 });
+await page.getByRole('button', { name: '7 days' }).click(); await page.waitForTimeout(800);
+ok(/#\/gbp\?d=7$/.test(page.url()) && (await calls()).some((x) => x.fn === 'api_gbp_overview' && x.args.p_days === 7) && /last 7 days vs the 7 before/.test(await body())
+  && /The 7 days before/.test(await gt.innerText()), 'GG14 the period is in the address and reaches the server; the chart compares 7 days with 7');
+await page.getByRole('tab', { name: 'Search words' }).click(); await page.waitForTimeout(500);
+b = await body();
+ok(/#\/gbp\/words\?d=7$/.test(page.url()) && /flying school near me\s*fewer than 15/.test(b) && /pilot training in delhi\s*148\s*90\s*↑ 64%/.test(b) && /cpl course fees\s*20\s*—\s*new/.test(b), 'GG15 search words: counts, last month, change; rare words as "fewer than"');
+await page.getByLabel('Find a search word').fill('DGCA'); await page.waitForTimeout(200);
+ok(/dgca ground classes/.test(await body()) && !/pilot training in delhi/.test(await g.locator('table').innerText()), 'GG15b the list can be searched (any letter case)');
+await page.getByLabel('Find a search word').fill('zzz'); await page.waitForTimeout(200);
+ok(/No search word matches/.test(await body()), 'GG15c a search with no match says so');
+await page.getByRole('tab', { name: 'Reviews' }).click(); await page.waitForTimeout(700);
+b = await body();
+ok(/Asha Verma[\s\S]*Great faculty[\s\S]*Your reply · 21 Nov\s*Thank you, Asha\./.test(b) && /Rating only, no text\./.test(b) && /No reply yet/.test(b), 'GG16 reviews with stars, text and your reply; rating-only reviews say so');
+ok(/<img src=x onerror=alert\(1\)> Nobody picked up/.test(b) && await page.locator('img[src="x"]').count() === 0, 'GG16b review text is shown as text, never run as HTML');
+await page.getByRole('tab', { name: '1 to 3 stars' }).click(); await page.waitForTimeout(600);
+ok(/[?&]f=low/.test(page.url()) && (await calls()).some((x) => x.fn === 'api_gbp_reviews' && x.args.p_filter === 'low') && !/Asha Verma/.test(await body()), 'GG17 low-star filter is in the address and asks the server');
+await page.getByRole('tab', { name: 'Profiles & logins' }).click(); await page.waitForTimeout(600);
+b = await body();
+ok(/We One Aviation\s*Connected[\s\S]*Book My Charter\s*Sign in again[\s\S]*Google no longer accepts this sign-in/.test(b), 'GG18 every Google login with its own state and what to do');
+ok(/Business Profiles[\s\S]*We One Aviation[\s\S]*4\.7 ★ · 213 reviews[\s\S]*Flight school · Dwarka, New Delhi/.test(b) && /Book My Charter\s*Not verified on Google/.test(b)
+  && await page.getByLabel('Track We One Aviation').isChecked() && !(await page.getByLabel('Track Book My Charter').isChecked()), 'GG19 every profile, with which ones are tracked');
+await page.getByLabel('Track Book My Charter').click(); await page.waitForTimeout(900);   // the stub keeps answering "not tracked", so click, not check()
+ok((await calls()).some((x) => x.fn === 'api_gbp_location_track' && x.args.p_on === true && x.args.p_id === '22222222-2222-4222-8222-222222222222'), 'GG20 ticking a profile starts tracking it');
+await page.getByRole('button', { name: 'Add a Google login' }).click();
+await page.getByLabel(/Name for this login/).fill('Second business'); await page.getByLabel(/Google refresh token/).fill('not-a-token');
+ok(await page.getByLabel(/Google refresh token/).getAttribute('type') === 'password', 'GG21 the token box hides what is typed');
+await page.getByRole('button', { name: 'Add login' }).click(); await page.waitForTimeout(700);
+ok(/not a Google refresh token/.test(await body()) && !(await calls()).some((x) => x.fn === 'edge:crm-google-business' && x.args.connection), 'GG21b a wrong token is refused with the reason; Google is not called');
+await page.getByLabel(/Google refresh token/).fill('1//0gSTUBstubSTUBstubSTUBstubSTUBstubSTUB');
+await page.getByRole('button', { name: 'Add login' }).click(); await page.waitForTimeout(1200);
+cw = await calls();
+ok(cw.some((x) => x.fn === 'api_gbp_connection_add' && x.args.p_label === 'Second business') && cw.some((x) => x.fn === 'edge:crm-google-business' && x.args.connection === 'c3c3c3c3-3333-4333-8333-333333333333' && x.args.jobs.join() === 'discover')
+  && /1 profile\(s\) in 1 account/.test(await body()), 'GG22 a new login is saved and checked with Google at once');
+ok(!(await page.content()).includes('1//0gSTUB'), 'GG22b the token is gone from the page after saving');
+await page.locator('[data-login="Book My Charter"]').getByRole('button', { name: 'Remove' }).click(); await page.waitForTimeout(200);
+ok(/This deletes the login, its saved token, its 1 profile and every number and review/.test(await body()) && !(await calls()).some((x) => x.fn === 'api_gbp_connection_remove'), 'GG23 removing asks first and says exactly what goes');
+await page.locator('[data-login="Book My Charter"]').getByRole('button', { name: 'Keep' }).click();
+await page.goto(`${APP}#/gbp`); await page.getByTestId('gbp').waitFor(); await page.waitForTimeout(600);
+const before = (await calls()).length;
+await page.getByRole('button', { name: 'Refresh' }).click(); await page.waitForTimeout(1500);
+cw = (await calls()).slice(before).filter((x) => x.fn === 'edge:crm-google-business').map((x) => x.args.jobs.join());
+ok(cw.join('|') === 'discover|sync' && /Google My Business is up to date/.test(await body()), 'GG24 Refresh checks the logins, then collects, and says when it is done');
+await mode('gbp=waiting');
+await page.goto(`${APP}#/gbp?d=90`); await page.getByTestId('gbp').waitFor(); await page.waitForTimeout(900);
+b = await body();
+ok(/Getting Google My Business connected\s*2 of 5 done/.test(b) && /Google has approved the project for Business Profile data\s*Waiting for Google/.test(b) && /clears by itself when Google's approval email arrives/.test(b)
+  && !/Profile views/.test(b), 'GG25 while Google has not approved the project: a checklist that says so, no empty charts');
+await page.screenshot({ path: '/tmp/gbp_waiting.png', fullPage: true });
+await page.goto(`${APP}#/google`); await page.getByTestId('google-hub').waitFor(); await page.waitForTimeout(600);
+ok(/Google My Business\s*Waiting for Google[\s\S]*Nothing can be read until its approval email arrives/.test(await body()), 'GG25b the hub card says the same');
+await mode('gbp=empty');
+await page.goto(`${APP}#/gbp/reviews`); await page.getByTestId('gbp').waitFor(); await page.waitForTimeout(900);
+b = await body();
+ok(/0 of 5 done|1 of 5 done/.test(b) && /A Google login that owns or manages the profile is added/.test(b) && !(await page.getByRole('button', { name: 'Refresh' }).count()), 'GG26 nothing connected: the checklist on every tab, no Refresh to press');
+await page.goto(`${APP}#/gbp/nonsense?p=%27%3B+drop&d=abc`); await page.getByTestId('gbp').waitFor(); await page.waitForTimeout(700);
+cw = await calls();
+ok(cw[cw.length - 1].fn === 'api_gbp_overview' && cw[cw.length - 1].args.p_location === null && cw[cw.length - 1].args.p_days === 28 && await page.getByRole('tab', { name: 'Overview' }).getAttribute('aria-selected') === 'true',
+  'GG27 a mangled address falls back to the overview, all profiles, 28 days');
+await mode('gbp=data');
+await page.setViewportSize({ width: 390, height: 844 });
+for (const [h, name] of [['#/google', 'hub'], ['#/gbp', 'overview'], ['#/gbp/words', 'search words'], ['#/gbp/reviews', 'reviews'], ['#/gbp/manage', 'profiles & logins'], ['#/website', 'website with the strip']]) {
+  await page.goto(`${APP}${h}`); await page.waitForTimeout(1100);
+  ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), `GG28 fits a phone screen: ${name}`);
+  if (h === '#/gbp') await page.screenshot({ path: '/tmp/gbp_phone.png', fullPage: true });
+  if (h === '#/google') await page.screenshot({ path: '/tmp/google_hub_phone.png', fullPage: true });
+}
+const small = await page.evaluate(() => [...document.querySelectorAll('[data-testid="gbp"] button, [data-testid="google-crumb"] button')].filter((e) => { const r = e.getBoundingClientRect(); return r.width && r.height < 32; }).map((e) => e.innerText.slice(0, 20)));
+ok(small.length === 0, `GG29 every button is tall enough to tap${small.length ? ': ' + small.join(', ') : ''}`);
+await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: 'More' }).click();
+const gsheet = page.getByRole('dialog', { name: 'More' });
+ok(/GROWTH\s*Google\s*Content/i.test(await gsheet.innerText()) && !/Website|Google Ads/.test(await gsheet.innerText()), 'GG30 phone: Google is one item in the More sheet');
+await gsheet.getByRole('button', { name: 'Google' }).click(); await page.getByTestId('google-hub').waitFor();
+ok(page.url().endsWith('#/google') && await page.getByTestId('google-hub').getByRole('button').count() === 3, 'GG30b phone: it opens the three cards');
+await page.setViewportSize({ width: 1280, height: 900 });
 
 // Phone: bottom bar with Home first, grouped More sheet
 await page.setViewportSize({ width: 390, height: 844 });

@@ -45,14 +45,14 @@ function Tip({ x, w, children, side }) {
 const Key = ({ color, dashed }) => <svg width="18" height="8" aria-hidden="true" className="shrink-0"><line x1="1" y1="4" x2="17" y2="4" stroke={color} strokeWidth="2" strokeDasharray={dashed ? '4 3' : undefined} strokeLinecap="round" /></svg>;
 
 // ---------------------------------------------------------------- trend: this 28 days vs the 28 before, aligned by date
-export function Trend({ cur = [], prev = [], value, format = (v) => nf(v), invert = false, height = 220, label, onPick }) {
+export function Trend({ cur = [], prev = [], value, format = (v) => nf(v), invert = false, height = 220, label, onPick, gap = 28 }) {
   const [ref, w] = useWidth();
   const [hi, setHi] = useState(null);
   const pts = useMemo(() => {
-    const p = new Map(prev.map((r) => [toDate(r.d).getTime() + 28 * DAY, r]));
-    return cur.map((r) => { const t = toDate(r.d).getTime(); return { t, v: value(r), pv: p.has(t) ? value(p.get(t)) : null, pd: t - 28 * DAY }; })
+    const p = new Map(prev.map((r) => [toDate(r.d).getTime() + gap * DAY, r]));
+    return cur.map((r) => { const t = toDate(r.d).getTime(); return { t, v: value(r), pv: p.has(t) ? value(p.get(t)) : null, pd: t - gap * DAY }; })
       .filter((x) => x.v != null && !Number.isNaN(x.v));
-  }, [cur, prev, value]);
+  }, [cur, prev, value, gap]);
   if (!pts.length) return <div ref={ref} className="h-[120px] grid place-items-center text-sm text-glass-secondary">No days to draw yet.</div>;
   const pad = { l: 44, r: 12, t: 14, b: 26 }, W = Math.max(w, 280), H = height, iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
   const all = pts.flatMap((p) => [p.v, p.pv]).filter((v) => v != null);
@@ -99,11 +99,11 @@ export function Trend({ cur = [], prev = [], value, format = (v) => nf(v), inver
     </div>
   );
 }
-export function TrendLegend({ prevShown = true }) {
+export function TrendLegend({ prevShown = true, days = 28 }) {
   return (
     <div className="flex flex-wrap gap-4 text-[12px] text-glass-secondary">
-      <span className="inline-flex items-center gap-1.5"><Key color={C.accent} />Last 28 days</span>
-      {prevShown && <span className="inline-flex items-center gap-1.5"><Key color={C.prev} dashed />The 28 days before</span>}
+      <span className="inline-flex items-center gap-1.5"><Key color={C.accent} />Last {days} days</span>
+      {prevShown && <span className="inline-flex items-center gap-1.5"><Key color={C.prev} dashed />The {days} days before</span>}
     </div>
   );
 }

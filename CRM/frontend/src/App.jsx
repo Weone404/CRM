@@ -40,6 +40,9 @@ const PhoneApp = lazy(() => import('./components/AppAlerts').then((m) => ({ defa
 const BusinessEmail = lazy(() => import('./components/AppAlerts').then((m) => ({ default: m.BusinessEmail })));
 const Vault = lazy(() => import('./components/Vault'));
 const Website = lazy(() => import('./components/Website'));
+const Google = lazy(() => import('./components/Google'));
+const GoogleBusiness = lazy(() => import('./components/GoogleBusiness'));
+const GoogleCrumb = lazy(() => import('./components/Google').then((m) => ({ default: m.GoogleCrumb })));
 const Content = lazy(() => import('./components/Content'));
 const Amazon = lazy(() => import('./components/Amazon'));
 const Ads = lazy(() => import('./components/Ads'));
@@ -292,6 +295,10 @@ export default function App() {
     return showEmployeeLogin ? <EmployeeLogin onLogin={setEmployee} /> : <Login onLogin={setEmployee} onSwitchToEmployee={() => setShowEmployeeLogin(true)} onSwitchToStudent={() => setShowStudentLogin(true)} />;
   }
 
+  // Google is one item: its page has three cards (Website, Google My Business, Google Ads). Those three keep their own
+  // addresses (#/website, #/gbp, #/ads), so old links and bookmarks still open them.
+  const canGoogle = canAccessAds || (USE_SUPABASE && department === 'Admin');
+  const googlePages = { website: canGoogle, gbp: canGoogle && USE_SUPABASE, ads: canAccessAds };
   const tabs = [
     { id: 'home', label: 'Home', icon: 'home' },
     canAccessLeads && { id: 'leads', label: 'Leads', icon: 'leads' },
@@ -302,9 +309,8 @@ export default function App() {
     department === 'Admin' && { id: 'policy', label: 'Policy Docs', icon: 'policy' },
     canAccessFlightBridge && { id: 'partnerships', label: 'FlightBridge AI', icon: 'globe' },
     canAccessAmazon && { id: 'amazon', label: 'Amazon', icon: 'cart' },
-    (canAccessAds || (USE_SUPABASE && department === 'Admin')) && { id: 'website', label: 'Website', icon: 'chart' },
-    (canAccessAds || (USE_SUPABASE && department === 'Admin')) && { id: 'content', label: 'Content', icon: 'image' },
-    canAccessAds && { id: 'ads', label: 'Google Ads', icon: 'rocket' },
+    canGoogle && { id: 'google', label: 'Google', icon: 'search' },
+    canGoogle && { id: 'content', label: 'Content', icon: 'image' },
     canAccessAds && { id: 'metaads', label: 'Meta Ads', icon: 'send' },
     USE_SUPABASE && department === 'Admin' && { id: 'connections', label: 'Connections & keys', icon: 'lock' },
     USE_SUPABASE && department === 'Admin' && { id: 'settings', label: 'Settings', icon: 'settings' },
@@ -329,8 +335,8 @@ export default function App() {
   // Each screen keeps its own address (#/students, #/tasks ...), so old links and bookmarks still work.
   const lastAcademy = () => { try { const v = localStorage.getItem('academy_tab'); return ACADEMY.includes(v) && tabs.some((t) => t.id === v) ? v : null; } catch { return null; } };
   const wanted = routeTab === 'academy' ? (lastAcademy() || ACADEMY.find((id) => tabs.some((t) => t.id === id))) : routeTab;
-  const activeTab = tabs.some((t) => t.id === wanted) ? wanted : 'home';
-  const section = activeTab;
+  const activeTab = tabs.some((t) => t.id === wanted) || googlePages[wanted] ? wanted : 'home';
+  const section = googlePages[activeTab] ? 'google' : activeTab;      // what the navigation highlights
   const go = (id) => {
     setShowMore(false);
     if (ACADEMY.includes(id)) { try { localStorage.setItem('academy_tab', id); } catch { /* ignore */ } }
@@ -339,7 +345,7 @@ export default function App() {
   const untouchedCount = canAccessLeads ? leads.filter((l) => !l.first_contacted_at && !l.closed && !l.closure_outcome).length : 0;
   const navBadges = { leads: untouchedCount || 0 };
   // Phones: the most used sections in the bar (about 72px each); everything else in the grouped "More" sheet.
-  const PHONE_FIRST = ['home', 'leads', 'tasks', 'students', 'ads', 'metaads'];
+  const PHONE_FIRST = ['home', 'leads', 'tasks', 'students', 'google', 'metaads'];
   const ordered = [...PHONE_FIRST.map((id) => tabs.find((t) => t.id === id)).filter(Boolean), ...tabs.filter((t) => !PHONE_FIRST.includes(t.id))];
   const slots = Math.min(5, Math.max(3, Math.floor(vw / 72)));
   const barItems = ordered.length <= slots ? ordered : ordered.slice(0, slots - 1);
@@ -418,7 +424,9 @@ export default function App() {
       <Sidebar tabs={tabs} active={section} onSelect={go} badges={navBadges} />
       <main className="flex-1 min-w-0 p-4 sm:p-6">
       <div className="max-w-7xl mx-auto">
-      <ErrorBoundary name={tabs.find((t) => t.id === activeTab)?.label} resetKey={activeTab}>
+      {/* outside the error boundary: if a Google section crashes, the way back and across stays */}
+      {googlePages[activeTab] && <Suspense fallback={null}><GoogleCrumb page={activeTab} canAds={canAccessAds} /></Suspense>}
+      <ErrorBoundary name={tabs.find((t) => t.id === activeTab)?.label || { website: 'Website', gbp: 'Google My Business', ads: 'Google Ads' }[activeTab]} resetKey={activeTab}>
         {activeTab === 'home' && (
           <Home employee={employee} leads={leads} followups={followups} leadsReady={leadsReady}
             canAccessLeads={canAccessLeads} canAccessAds={canAccessAds} canOpenKeys={USE_SUPABASE && department === 'Admin'} onOpenTab={(tab, sec, params) => navigate(tab, sec, params)} />
@@ -515,6 +523,8 @@ export default function App() {
           {activeTab === 'policy' && department === 'Admin' && <PolicyDocs />}
           {activeTab === 'partnerships' && canAccessFlightBridge && <FlightBridge />}
           {activeTab === 'amazon' && canAccessAmazon && <Amazon access={amzAccess} />}
+          {activeTab === 'google' && canGoogle && <Google canAds={canAccessAds} />}
+          {activeTab === 'gbp' && googlePages.gbp && <GoogleBusiness />}
           {activeTab === 'ads' && canAccessAds && <Ads access={adsAccess} />}
           {activeTab === 'metaads' && canAccessAds && <AdsMeta access={adsAccess} />}
           {activeTab === 'settings' && USE_SUPABASE && department === 'Admin' && <div className="space-y-4">{accountCard}<PhoneApp notifications={canAccessAmazon} /><BusinessEmail />
@@ -526,7 +536,7 @@ export default function App() {
           {activeTab === 'account' && <div className="space-y-4">{accountCard}{USE_SUPABASE && <PhoneApp notifications={canAccessAmazon} />}</div>}
           {activeTab === 'leave' && isEmployeeSession && <LeaveCalendar employeeId={employee.id} />}
           {activeTab === 'connections' && USE_SUPABASE && department === 'Admin' && <Vault />}
-          {activeTab === 'website' && <Website />}
+          {activeTab === 'website' && canGoogle && <Website />}
           {activeTab === 'content' && <Content />}
         </Suspense>
       </ErrorBoundary>

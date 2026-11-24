@@ -2,6 +2,42 @@
 import http from 'node:http';
 const mode = { health: 'ok', token: 'ok', leads: 'ok' };
 const calls = [];
+// ---- Google hub + Google My Business (139)
+const gDay = (i, base) => { const d = new Date(Date.UTC(2026, 10, 21) - (base + 27 - i) * 86400000).toISOString().slice(0, 10);
+  const views = 20 + ((i * 7) % 13) + (base ? 0 : 6), calls = i % 4 === 0 ? 2 : 1, website = (i % 3) + 1, directions = i % 5 === 0 ? 1 : 0, messages = i % 9 === 0 ? 1 : 0;
+  return { d, views, search: Math.round(views * 0.7), maps: views - Math.round(views * 0.7), calls, website, directions, messages, actions: calls + website + directions + messages }; };
+const gSum = (rows) => { const t = { views: 0, search: 0, maps: 0, calls: 0, website: 0, directions: 0, messages: 0, actions: 0 }; rows.forEach((r) => Object.keys(t).forEach((k) => { t[k] += r[k]; }));
+  return { ...t, mobile: Math.round(t.views * 0.8), desktop: t.views - Math.round(t.views * 0.8), bookings: 0, days: rows.length }; };
+const G_CUR = Array.from({ length: 28 }, (_, i) => gDay(i, 0)), G_PREV = Array.from({ length: 28 }, (_, i) => gDay(i, 28));
+const G_LOCS = [
+  { id: '11111111-1111-4111-8111-111111111111', connection_id: 'c1c1c1c1-1111-4111-8111-111111111111', title: 'We One Aviation', address: 'Dwarka, New Delhi', category: 'Flight school', phone: '+91 98110 00000', website: 'https://weoneaviation.in/', maps_uri: 'https://maps.google.com/?cid=1', verified: true, tracked: true, rating: 4.7, reviews_total: 213, synced_at: new Date().toISOString() },
+  { id: '22222222-2222-4222-8222-222222222222', connection_id: 'c2c2c2c2-2222-4222-8222-222222222222', title: 'Book My Charter', address: 'Mumbai', category: 'Aircraft charter', verified: false, tracked: false, rating: null, reviews_total: null, synced_at: null }];
+const G_REVIEWS = [
+  { review_id: 'r1', location_id: G_LOCS[0].id, profile: 'We One Aviation', reviewer: 'Asha Verma', stars: 5, comment: 'Great faculty and honest guidance.', created_at: '2026-11-20T10:00:00Z', reply: 'Thank you, Asha.', reply_at: '2026-11-21T05:00:00Z' },
+  { review_id: 'r2', location_id: G_LOCS[0].id, profile: 'We One Aviation', reviewer: 'A Google user', stars: 2, comment: '<img src=x onerror=alert(1)> Nobody picked up my call.', created_at: '2026-11-12T10:00:00Z', reply: null, reply_at: null },
+  { review_id: 'r3', location_id: G_LOCS[0].id, profile: 'We One Aviation', reviewer: 'Ravi', stars: 4, comment: '', created_at: '2026-10-30T10:00:00Z', reply: null, reply_at: null }];
+const gbpOverview = (args) => {
+  const access = { can_view: true, can_run: true, is_admin: true };
+  const empty = { access, setup: { client: true, connections: 0, connected: 0, waiting_google: false, locations: 0, tracked: 0, has_data: false }, connections: [], locations: [], selected: null,
+    period: { days: 28, from: '2026-10-25', to: '2026-11-21', last_day: null }, totals: gSum([]), prev: gSum([]), days: [], prev_days: [], weekdays: [], keywords: { month: null, count: 0, rows: [] },
+    reviews: { total: 0, rating: null, stored: 0, by_star: {}, unreplied: 0, new: 0, new_prev: 0, latest: [] }, runs: {} };
+  if (mode.gbp === 'empty') return empty;
+  const conns = [{ id: 'c1c1c1c1-1111-4111-8111-111111111111', label: 'We One Aviation', email: 'Nikhil', status: mode.gbp === 'waiting' ? 'waiting_google' : 'connected',
+    error: mode.gbp === 'waiting' ? 'Google has not approved this Cloud project for the Business Profile APIs yet (the quota is 0).' : null, last_ok_at: null, checked_at: new Date().toISOString(), locations: 1, tracked: 1 },
+    { id: 'c2c2c2c2-2222-4222-8222-222222222222', label: 'Book My Charter', email: null, status: 'needs_signin', error: 'Google no longer accepts this sign-in. Sign in again and save the new token.', last_ok_at: null, checked_at: null, locations: 1, tracked: 0 }];
+  if (mode.gbp === 'waiting') return { ...empty, connections: conns, locations: [], setup: { client: true, connections: 2, connected: 0, waiting_google: true, locations: 0, tracked: 0, has_data: false } };
+  const n = [7, 28, 90].includes(args.p_days) ? args.p_days : 28;
+  const cur = G_CUR.slice(-Math.min(n, 28)), prev = n === 7 ? G_CUR.slice(-14, -7) : G_PREV;
+  return { access, setup: { client: true, connections: 2, connected: 1, waiting_google: false, locations: 2, tracked: 1, has_data: true }, connections: conns, locations: G_LOCS,
+    selected: args.p_location === G_LOCS[0].id ? G_LOCS[0].id : null, period: { days: n, from: cur[0].d, to: '2026-11-21', last_day: '2026-11-21' },
+    totals: gSum(cur), prev: gSum(prev), days: cur, prev_days: prev,
+    weekdays: [0, 1, 2, 3, 4, 5, 6].map((dow) => ({ dow, views: 90 + dow * 11, actions: 10 + dow })),
+    keywords: { month: '2026-10-01', prev_month: '2026-09-01', count: 4, rows: [{ k: 'pilot training in delhi', v: 148, below: null, pv: 90 }, { k: 'dgca ground classes', v: 60, below: null, pv: 75 },
+      { k: 'cpl course fees', v: 20, below: null, pv: null }, { k: 'flying school near me', v: null, below: 15, pv: null }] },
+    reviews: { total: 213, rating: 4.7, stored: 3, by_star: { 1: 0, 2: 1, 3: 0, 4: 1, 5: 1 }, unreplied: 2, new: 2, new_prev: 1, latest: G_REVIEWS },
+    runs: { sync: { status: 'ok', detail: 'ok', at: new Date(Date.now() - 3 * 3600000).toISOString() } } };
+};
+
 
 // Chart data: 28 days and the 28 before, deterministic so screenshots stay stable.
 const wave = (i, a, b) => Math.round(a + b * (0.5 + 0.5 * Math.sin(i / 2.3)) + ((i * 37) % 11));
@@ -126,6 +162,13 @@ http.createServer((req, res) => {
       return send(res, 200, { results: Object.fromEntries((b.jobs || []).map((j) => [j, { status: 'ok', detail: `${j} done` }])) });
     });
   }
+  if (u.pathname === '/functions/v1/crm-google-business') {
+    let body = ''; req.on('data', (c) => { body += c; });
+    return req.on('end', () => {
+      const b = JSON.parse(body || '{}'); calls.push({ fn: 'edge:crm-google-business', args: b });
+      return send(res, 200, { results: Object.fromEntries((b.jobs || []).map((j) => [j, { status: 'ok', detail: j === 'discover' ? 'We One Aviation: 1 profile(s) in 1 account(s)' : 'We One Aviation: 1 profile(s), 300 day-numbers' }])) });
+    });
+  }
   if (u.pathname === '/functions/v1/ads-sync') {
     let body = ''; req.on('data', (c) => { body += c; });
     return req.on('end', () => {
@@ -169,6 +212,18 @@ http.createServer((req, res) => {
     if (fn === 'api_ads_meta_actions') return send(res, 200, { items: [{ id: 91, status: 'done', error: null },
       { id: 92, status: 'failed', error: 'Stub: Meta refused this budget as too low for the ad set' }] });
     if (fn === 'api_vault_overview') return send(res, 200, VAULT);
+    if (fn === 'api_google_hub') return send(res, 200, { website: { clicks: 807, clicks_prev: 497, impressions: 231714, visitors: null, at: new Date().toISOString() },
+      ads: { spend: 847.37, clicks: 61, impressions: 2210, last_spend_day: '2026-11-15', account_status: 'connected' },
+      gbp: mode.gbp === 'empty' ? { connections: 0, tracked: 0, waiting_google: false, last_day: null, totals: null, prev: null, rating: null, reviews: 0 }
+        : mode.gbp === 'waiting' ? { connections: 2, tracked: 0, waiting_google: true, last_day: null, totals: null, prev: null, rating: null, reviews: 0 }
+        : { connections: 2, tracked: 1, waiting_google: false, last_day: '2026-11-21', totals: gSum(G_CUR), prev: gSum(G_PREV), rating: 4.7, reviews: 213 } });
+    if (fn === 'api_gbp_overview') return send(res, 200, gbpOverview(calls[calls.length - 1].args || {}));
+    if (fn === 'api_gbp_reviews') { const a = calls[calls.length - 1].args || {};
+      return send(res, 200, G_REVIEWS.filter((r) => (a.p_filter === 'unreplied' ? !r.reply : a.p_filter === 'low' ? r.stars <= 3 : true))); }
+    if (fn === 'api_gbp_connection_add') { const a = calls[calls.length - 1].args || {};
+      return /^1\/\//.test(a.p_refresh_token || '') ? send(res, 200, { id: 'c3c3c3c3-3333-4333-8333-333333333333' }) : send(res, 400, { code: 'PT422', message: 'That is not a Google refresh token (it starts with 1// and has no spaces)' }); }
+    if (fn === 'api_gbp_location_track') return send(res, 200, { tracked: true });
+    if (fn === 'api_gbp_connection_remove') return send(res, 200, { removed: true });
     if (fn === 'api_web_access') return send(res, 200, { can_view: true, can_run: true, is_admin: true });
     if (fn === 'api_web_overview') return send(res, 200, WEB);
     if (fn === 'api_content_overview') return send(res, 200, CONTENT);

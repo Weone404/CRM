@@ -3,7 +3,7 @@
 ## What changed for people using the CRM
 
 - **Home** is the start page: leads this week, leads not contacted yet, follow-ups due, Google clicks (for people with ADS access), one "Needs your attention" list, and folded details.
-- **Grouped sidebar** on laptops (1024 px and wider): Home, People (Leads, Students, Tasks, Team, Attendance), Growth (Google Ads, Meta Ads, Amazon, FlightBridge AI), Setup (Settings, Policy Docs, My Profile, My Leave, Account). Phones and tablets keep the bottom bar, starting with Home; the "More" sheet uses the same groups. Old links keep working, `#/academy` included.
+- **Grouped sidebar** on laptops (1024 px and wider): Home, People (Leads, Students, Tasks, Team, Attendance), Growth (Google, Content, Meta Ads, Amazon, FlightBridge AI), Setup (Settings, Policy Docs, My Profile, My Leave, Account). Phones and tablets keep the bottom bar, starting with Home; the "More" sheet uses the same groups. Old links keep working, `#/academy` included.
 - **Signal indicator** in the top bar: Fast / Slow / Very slow / Weak internet / CRM not responding / Offline. Tap it for details: your internet, how fast the CRM server answers, the last refresh, and a "Check again" button.
 - **Calm look**: the colour wash behind the app is gone (flat light grey), and the accent blue is #0A63CE, which has enough contrast on white for text.
 
@@ -132,3 +132,16 @@ Server-side load worth reviewing later:
 - the Amazon bridge polls about 8,500 times a day;
 - `crm-mongo-import` runs every minute, averaging 2.8 s;
 - 84 foreign keys have no covering index (Supabase performance advisor).
+
+## Google: one menu item, three cards (migration 139, 2026-11-24)
+
+Growth > Google (`#/google`) replaces the separate Website and Google Ads items. Its page has three cards: Website, Google My Business and Google Ads, each with its headline numbers (`api_google_hub`). The sections keep their addresses (`#/website`, `#/gbp`, `#/ads`), so old links still work; a strip above each one leads back to Google or across to a sibling, and it stays even if the section crashes.
+
+Google My Business (`#/gbp`) shows Google's own Business Profile numbers for any number of profiles, from any number of Google logins:
+
+- **Overview:** profile views, calls, website clicks, direction requests and messages for 7, 28 or 90 days against the period before, day by day; Search vs Maps; phone vs computer; busiest weekdays; top search words; reviews.
+- **Search words:** the searches that showed the profile, month by month (Google gives only "fewer than N" for rare words).
+- **Reviews:** all, without a reply, or 1 to 3 stars.
+- **Profiles & logins:** Admin adds a Google login (a refresh token with the `business.manage` scope, made with the CRM's own OAuth client; stored in Vault as `crm_gbp_refresh_<id>`, never returned). Every profile that login manages is listed; Admin and ADS approvers tick the ones to track.
+
+The `crm-google-business` Edge Function collects the data (jobs `discover` and `sync`), nightly at 05:05 IST and on Refresh. Google keeps the Business Profile APIs at quota 0 until it approves the Cloud project ("Application for Basic API Access"); until then the login shows "Waiting for Google" and the screen shows a checklist instead of empty charts. Tests: `supabase/tests/gbp/` (SQL `run.sh`, Deno `deno test tests/gbp/`), and GG01 to GG30 in `supabase/tests/shell/app_checks.mjs`.
