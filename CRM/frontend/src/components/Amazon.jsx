@@ -196,7 +196,7 @@ function Products({ access, listings, findings, go, reload, openSku, setOpenSku 
   return (
     <div className="space-y-3">
       <DeliverySpeed listings={listings} go={go} />
-      <input className="glass-input w-full px-3 py-2 text-sm" placeholder="Search your products" value={q} onChange={(e) => setQ(e.target.value)} />
+      <input className="glass-input w-full px-3 py-2 text-sm" placeholder="Search by name or product code (SKU / ASIN)" aria-label="Search products" value={q} onChange={(e) => setQ(e.target.value)} />
       {!listings ? <Empty>Loading…</Empty> : <ProductGallery listings={listings} findings={findings} q={q} onOpen={setOpenSku} />}
     </div>
   );

@@ -57,22 +57,23 @@ export function ProductGallery({ listings, findings, onOpen, q }) {
   const list = (listings || []).filter((r) => !q || `${r.sku} ${r.asin} ${r.title}`.toLowerCase().includes(q.toLowerCase()));
   if (!list.length) return <div className="text-center text-glass-muted py-10 text-sm">No products found.</div>;
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+    <div className="prod-grid">
       {list.map((r) => {
         const img = coverOf(r);
         return (
           <button key={r.sku} type="button" data-sku={r.sku} onClick={() => onOpen(r.sku)} aria-label={`Edit ${r.title || r.sku}`}
-            className="glass-card p-0 overflow-hidden text-left flex flex-col hover:shadow-lg transition-shadow">
-            <div className="relative aspect-square bg-white grid place-items-center">
-              {img ? <img src={img} alt="" loading="lazy" className="w-full h-full object-contain p-2" /> : <Icon name="image" size={32} />}
+            className="glass-card prod-card p-0 overflow-hidden text-left hover:shadow-lg transition-shadow">
+            <div className="prod-card-img">
+              {img ? <img src={img} alt="" loading="lazy" /> : <span className="prod-card-noimg"><Icon name="image" size={32} /></span>}
               {r.is_parent && <span className="absolute top-2 left-2"><Chip>Group</Chip></span>}
               {bySku[r.sku] > 0 && <span className="absolute top-2 right-2"><Chip style={AMBER}>{bySku[r.sku]} to fix</Chip></span>}
               {(r.images || []).length > 1 && <span className="absolute bottom-2 right-2"><Chip>{r.images.length} photos</Chip></span>}
             </div>
-            <div className="p-3 flex-1 flex flex-col gap-1.5">
+            <div className="prod-card-body">
               <div className="text-[13px] font-semibold text-glass-primary leading-snug line-clamp-2">{r.title || '(no name)'}</div>
+              <div className="prod-card-code" title="Product code (SKU)">{r.sku}</div>
               {!r.is_parent && (
-                <div className="mt-auto flex flex-wrap items-center gap-1">
+                <div className="flex flex-wrap items-baseline gap-1">
                   <span className="text-base font-bold">{inr(r.price)}</span>
                   {r.mrp > r.price && <span className="text-[11px] line-through text-glass-muted">{inr(r.mrp)}</span>}
                 </div>
