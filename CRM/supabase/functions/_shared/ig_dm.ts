@@ -145,27 +145,32 @@ export async function comments(ig: IG, st: Store, cfg: Json, uid: string, own: s
 // The inbox: chats updated in the last 24 hours (Instagram allows replies within 24 hours of the person's message)
 export async function inbox(ig: IG, st: Store, cfg: Json, uid: string, out: Json, budget: { n: number }, now: number) {
   const since = Math.max(cfg.inbox_at ? ts(cfg.inbox_at) - 120e3 : 0, now - 24 * 3600e3 + 300e3);
-  const convs: Json[] = (await ig.get("me/conversations", { platform: "instagram", fields: "id,updated_time", limit: "25" })).data ?? [];
-  let newest = since; const res = { welcomed: 0, pdf: 0, phones: 0, leads: 0 };
+  // one call: the latest chats with their last few messages (asking each chat for its whole history is refused by Instagram)
+  const convs: Json[] = (await ig.get("me/conversations", { platform: "instagram", limit: "10",
+    fields: "id,updated_time,messages.limit(8){id,created_time,from,message}" })).data ?? [];
+  let newest = since; const res = { welcomed: 0, pdf: 0, phones: 0, leads: 0, groups: 0 };
   for (const cv of convs) {
     const t = ts(cv.updated_time);
     if (!(t > since)) continue;
     if (budget.n <= 0) { out.capped = true; break; }
-    const ids: Json[] = ((await ig.get(String(cv.id), { fields: "messages" })).messages?.data ?? []).slice(0, 8);
-    const msgs: Json[] = [];
-    for (const m of ids) { try { msgs.push(await ig.get(String(m.id), { fields: "id,created_time,from,to,message" })); } catch { /* too old for Instagram */ } }
+    const msgs: Json[] = cv.messages?.data ?? [];
+    for (const m of msgs) {            // text missing from the list: read that message on its own (old ones may be refused)
+      if (m.message === undefined && m.from?.id && String(m.from.id) !== uid && ts(m.created_time) > since) {
+        try { Object.assign(m, await ig.get(String(m.id), { fields: "id,created_time,from,message" })); } catch { /* left without text */ }
+      }
+    }
     const theirs = msgs.filter((m) => m.from?.id && String(m.from.id) !== uid).sort((x, y) => ts(x.created_time) - ts(y.created_time));
     if (!theirs.length) { newest = Math.max(newest, t); continue; }
+    if (new Set(theirs.map((m) => String(m.from.id))).size > 1) { res.groups++; newest = Math.max(newest, t); continue; }   // a group chat: never messaged
     const who = theirs[theirs.length - 1].from; const id = String(who.id); const username = String(who.username ?? "");
     const p = await st.person(id, username);
     const fresh = theirs.filter((m) => ts(m.created_time) > Math.max(since, p?.last_in_at ? ts(p.last_in_at) : 0));
     if (!fresh.length) { newest = Math.max(newest, t); continue; }
-    const first = ts(fresh[0].created_time);
     const row: Json = { person: p?.person ?? id, igsid: id, username: username || p?.username || null, last_in_at: new Date(ts(fresh[fresh.length - 1].created_time)).toISOString() };
     const send = async (message: Json, kind: string) => { await ig.post(`${uid}/messages`, {}, { recipient: { id }, message }); budget.n--; await st.sent(kind); };
     try {
       if (!p?.dm_at) {      // they wrote first: welcome them once, unless the team is already talking to them in this chat
-        const team = msgs.some((m) => String(m.from?.id ?? "") === uid && ts(m.created_time) < first);
+        const team = msgs.some((m) => String(m.from?.id ?? "") === uid);
         if (!team) {
           await send({ text: render(String(cfg.welcome || cfg.message), username || undefined).slice(0, 990) }, "welcome"); row.dm_at = new Date(now).toISOString(); row.source = p?.source ?? "dm"; res.welcomed++;
           if (cfg.pdf_url && budget.n > 0) { await send(pdfMessage(cfg), "pdf"); row.pdf_at = new Date(now).toISOString(); res.pdf++; }

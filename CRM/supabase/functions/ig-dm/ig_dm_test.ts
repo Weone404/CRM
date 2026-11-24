@@ -18,7 +18,7 @@ function fakeIG(o: { media?: Json[]; comments?: Record<string, Json[]>; replies?
       if (path === `${UID}/media`) return { data: (o.media ?? []).slice(0, Number(q.limit ?? 12)) };
       const cm = /^(.+)\/comments$/.exec(path); if (cm) return { data: o.comments?.[cm[1]] ?? [] };
       const rp = /^(.+)\/replies$/.exec(path); if (rp) return { data: o.replies?.[rp[1]] ?? [] };
-      if (path === "me/conversations") return { data: o.convs ?? [] };
+      if (path === "me/conversations") return { data: (o.convs ?? []).map((cv) => ({ ...cv, messages: { data: [...(o.msgs?.[cv.id] ?? [])].sort((x, y) => Date.parse(y.created_time.replace("+0000", "Z")) - Date.parse(x.created_time.replace("+0000", "Z"))).slice(0, 8) } })) };
       if (o.msgs?.[path]) return { messages: { data: o.msgs[path].map((m) => ({ id: m.id })) } };
       for (const list of Object.values(o.msgs ?? {})) { const m = list.find((x) => x.id === path); if (m) return m; }
       return {};
@@ -212,4 +212,15 @@ Deno.test("custom texts: welcome for people who write first, brochure invite and
   const f3 = fakeIG({ media: [], convs: [{ id: "cv9", updated_time: ago(3) }], msgs: { cv9: [{ id: "z1", created_time: ago(3), from: { id: "p9", username: "meera" }, message: "hello" }] } });
   await tick(work(T), f3.ig, memStore().st, NOW);
   assertEquals(f3.dms[0].message.text, "Namaste @meera! Ask us anything.");
+});
+
+Deno.test("inbox: one call for the chats; group chats and chats the team already answers get no welcome", async () => {
+  const msgs = {
+    g1: [{ id: "a", created_time: ago(5), from: { id: "u1", username: "kalpesh" }, message: "hi" }, { id: "b", created_time: ago(4), from: { id: "u2", username: "rupa" }, message: "hello" }],
+    t1: [{ id: "c", created_time: ago(9), from: { id: "u3", username: "dev" }, message: "fees?" }, { id: "d", created_time: ago(8), from: { id: UID, username: OWN }, message: "Hi Dev, the team here" }],
+    s1: [{ id: "e", created_time: ago(3), from: { id: "u4", username: "meera" }, message: "pilot banna hai" }] };
+  const f = fakeIG({ media: [], convs: [{ id: "g1", updated_time: ago(4) }, { id: "t1", updated_time: ago(8) }, { id: "s1", updated_time: ago(3) }], msgs });
+  const r = await tick(work(), f.ig, memStore().st, NOW);
+  assertEquals(f.dms.map((d) => d.recipient.id), ["u4"]); assertEquals([r.inbox.welcomed, r.inbox.groups], [1, 1]);
+  assertEquals(f.calls.filter((c) => c.startsWith("GET ") && !["GET me/conversations", `GET ${UID}/media`].includes(c)), [], "no call per chat");
 });
