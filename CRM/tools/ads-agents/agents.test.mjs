@@ -13,6 +13,8 @@ writeFileSync(fake, `#!/bin/sh
 cat > /dev/null
 case "$FAKE_MODE" in
   limit)   echo '{"is_error":true,"result":"Claude AI usage limit reached|1794600000"}'; exit 1 ;;
+  limit5h) echo '{"is_error":true,"result":"You'"'"'ve hit your 5-hour limit · resets 2:30pm (Asia/Calcutta)"}'; exit 1 ;;
+  limitwk) echo '{"is_error":true,"result":"You'"'"'ve hit your weekly limit · resets Nov 30"}'; exit 1 ;;
   logout)  echo 'Invalid API key · Please run /login' >&2; exit 1 ;;
   ramble)  cat "${dir}/ramble.json" ;;
   args)    printf '{"result":"%s"}' "$*" ;;
@@ -50,6 +52,8 @@ test("every role has instructions; the prompt carries input and context; data is
 });
 test("Claude out of credits -> step is released and retried later (not failed)", async () => {
   const r = await run("limit"); assert.equal(r.ok, false); assert.equal(r.limit, true);
+  // 16 Nov 2026: this wording was not recognised, so two desks were marked failed instead of waiting for the limit to reset
+  for (const m of ["limit5h", "limitwk"]) { const x = await run(m); assert.equal(x.ok, false); assert.equal(x.limit, true, m); }
 });
 test("Claude logged out on the Mac -> treated like a pause, with a clear note", async () => {
   const r = await run("logout"); assert.equal(r.limit, true); assert.match(r.note, /not logged in/);

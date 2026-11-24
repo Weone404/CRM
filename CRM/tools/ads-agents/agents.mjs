@@ -76,7 +76,7 @@ export function runClaude(role, text) {
       const textOut = r?.result ?? out;
       const all = `${textOut}\n${err}`;
       if (signal === "SIGTERM") return resolve({ ok: false, note: "Took too long" });
-      if (/usage limit|rate limit|limit reached|resets? at/i.test(all) && (code !== 0 || r?.is_error)) return resolve({ ok: false, limit: true, note: "Claude usage limit" });
+      if (/usage limit|rate limit|limit reached|hit your [^.\n]{0,40}limit|\b(?:5-hour|weekly|session) limit|resets?\s+(?:at\s+)?\d/i.test(all) && (code !== 0 || r?.is_error)) return resolve({ ok: false, limit: true, note: "Claude usage limit" });
       if (/not logged in|please run \/login|invalid api key|authentication/i.test(all)) return resolve({ ok: false, limit: true, note: "Claude Code is not logged in on the Mac" });
       if (code !== 0 || r?.is_error) return resolve({ ok: false, note: `Claude stopped (${String(textOut || err).slice(0, 160)})` });
       resolve({ ok: true, text: String(textOut) });
