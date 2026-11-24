@@ -3,7 +3,7 @@ import { supabase, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from '../backend/sup
 import { showToast } from '../utils/toast';
 import { confirmDialog } from './ui/dialogs';
 import Icon from './icons';
-import { inr, diffRows, STATUS_STYLE, ageText, plain, FIELD_LABELS, DECISION_CATS, decisionCategory } from '../utils/amazon';
+import { inr, diffRows, STATUS_STYLE, ageText, plain, FIELD_LABELS, DECISION_CATS, decisionCategory, changeFields } from '../utils/amazon';
 import { useRoute, setParams } from '../utils/route';
 
 // Decisions inbox, Live Claude chat, Morning summary and Mac connection for CRM > Amazon.
@@ -399,18 +399,28 @@ export function Decisions({ access, onChange, openProduct }) {
   const approveAll = async (list = safe, label = '') => {
     const warnedIn = list.filter((c) => (c.guard_result?.warnings || []).length).length;
     if (!(await confirmDialog(`Approve ${list.length} safe ${label ? `${label} ` : ''}changes?`, { message: `Only the best choice of each group, and only changes that pass every check.${warnedIn ? ` ${warnedIn} have a heads-up shown on the card.` : ''} Each one goes live on Amazon.`, confirmText: 'Approve all' }))) return;
-    const safe = list;
+    // One change per product and field: two names for one product would both go live a minute apart.
+    const taken = new Set();
+    const safe = list.filter((c) => {
+      const keys = changeFields(c).map((f) => `${c.sku}|${f}`);
+      if (keys.some((k) => taken.has(k))) return false;
+      keys.forEach((k) => taken.add(k)); return true;
+    });
     setBusy('all');
-    let ok = 0, bad = 0;
+    let ok = 0, skipped = list.length - safe.length;
+    const bad = [];
     for (let i = 0; i < safe.length; i++) {
       showToast(`Sending ${i + 1} of ${safe.length}…`, 'info');
       try {
         const a = await rpc('api_amz_approve', { p_id: safe[i].id, p_second_confirm: false });
-        if (a?.status === 'stale') { bad++; continue; }
-        const s = await send(safe[i].id); if (s.t === 'error') bad++; else ok++;
-      } catch { bad++; }
+        if (a?.status === 'cancelled') { skipped++; continue; }
+        if (a?.status === 'stale') { bad.push(`${safe[i].sku}: ${a.error || 'changed on Amazon'}`); continue; }
+        const s = await send(safe[i].id); if (s.t === 'error') bad.push(`${safe[i].sku}: ${s.m || 'not sent'}`); else ok++;
+      } catch (e) { bad.push(`${safe[i].sku}: ${e.message}`); }
     }
-    setBusy(''); showToast(`${ok} sent${bad ? `, ${bad} need a look` : ''}.`, bad ? 'error' : 'success'); refresh();
+    setBusy('');
+    showToast(`${ok} sent${skipped ? `, ${skipped} skipped (another choice for the same product and field)` : ''}${bad.length ? `, ${bad.length} need a look: ${bad.slice(0, 2).join(' · ')}` : ''}.`, bad.length ? 'error' : 'success');
+    refresh();
   };
   const fixAll = async () => {
     if (!(await confirmDialog('Let Claude fix every problem?', { message: `Claude prepares 1-3 ranked choices for each of the ${findings.length} problems. Nothing goes live until you approve.${fix?.mac_online ? '' : ' Your Mac is offline, so the hourly backup will do it (slower).'}`, confirmText: 'Fix all with Claude' }))) return;

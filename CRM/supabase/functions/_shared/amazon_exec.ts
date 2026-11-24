@@ -8,7 +8,7 @@
 //   4. real PATCH. Throttling is retried inside SpApi (a 429 is never processed by Amazon, so no duplicate);
 //      a 5xx / network drop leaves the change in Executing for reconcile() to settle from Amazon's real state
 //   5. re-read and verify; suppressed -> alert + rollback draft; fields the API cannot set -> Needs manual
-import { SpApi, UnknownOutcome, SpApiError, buildPatches, parseListing, verifyApplied, isSuppressed } from "./amazon.ts";
+import { SpApi, UnknownOutcome, SpApiError, buildPatches, previewPatches, parseListing, verifyApplied, isSuppressed } from "./amazon.ts";
 
 export type Rpc = (fn: string, args?: Record<string, unknown>) => Promise<any>;
 
@@ -58,7 +58,7 @@ export async function execute(rpc: Rpc, api: SpApi, secrets: Record<string, stri
 
   // 3. preview
   let preview: any;
-  try { preview = await api.patchListing(seller, sku, productType, patches, true); }
+  try { preview = await api.patchListing(seller, sku, productType, previewPatches(patches, live.attributes), true); }
   catch (e) {
     const msg = e instanceof SpApiError ? `${e.status} ${e.message}` : String(e);
     // A preview is a read for our purposes: nothing changed on Amazon, so it is safe to mark failed.

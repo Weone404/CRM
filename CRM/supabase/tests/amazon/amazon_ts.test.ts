@@ -419,3 +419,34 @@ test("Competitor study: photos in Amazon's order, ~500 px each, own listings lef
   expect(r[0].images.map((i) => i.variant)).toEqual(["MAIN", "PT01", "PT02"]);
   expect(r[0].images[0].url).toContain("/m.jpg");
 });
+
+import { previewPatches } from "../../functions/_shared/amazon.ts";
+describe("previewPatches (Amazon refuses merge in VALIDATION_PREVIEW)", () => {
+  const attrs = {
+    fulfillment_availability: [{ fulfillment_channel_code: "DEFAULT", quantity: 5, lead_time_to_ship_max_days: 4 }],
+    purchasable_offer: [{ marketplace_id: "A21TJRUUN4KGV", currency: "INR", audience: "ALL", our_price: [{ schedule: [{ value_with_tax: 349 }] }], start_at: { value: "2026-01-01" } },
+                        { marketplace_id: "A21TJRUUN4KGV", currency: "INR", audience: "B2B", our_price: [{ schedule: [{ value_with_tax: 330 }] }] }],
+  };
+  test("dispatch merge -> replace of the whole attribute, other values kept", () => {
+    const { patches } = buildPatches({ handling_days: 2 }, "A21TJRUUN4KGV", "en_IN");
+    const pv = previewPatches(patches, attrs);
+    expect(pv.every((p: any) => p.op !== "merge")).toBe(true);
+    expect(pv[0]).toEqual({ op: "replace", path: "/attributes/fulfillment_availability", value: [{ fulfillment_channel_code: "DEFAULT", quantity: 5, lead_time_to_ship_max_days: 2 }] });
+    expect(patches[0].op).toBe("merge");                       // the real PATCH still merges
+  });
+  test("price merge keeps the B2B offer and the start date", () => {
+    const { patches } = buildPatches({ price: 399 }, "A21TJRUUN4KGV", "en_IN");
+    const v = previewPatches(patches, attrs)[0].value;
+    expect(v.length).toBe(2);
+    expect(v[0].our_price[0].schedule[0].value_with_tax).toBe(399);
+    expect(v[0].start_at).toEqual({ value: "2026-01-01" });
+    expect(v[1].our_price[0].schedule[0].value_with_tax).toBe(330);
+    expect(attrs.purchasable_offer[0].our_price[0].schedule[0].value_with_tax).toBe(349);   // input not mutated
+  });
+  test("no current value: the new entry is used; non-merge patches untouched", () => {
+    const { patches } = buildPatches({ handling_days: 3, title: "X" }, "A21TJRUUN4KGV", "en_IN");
+    const pv = previewPatches(patches, {});
+    expect(pv.find((p: any) => p.path.endsWith("fulfillment_availability")).value).toEqual([{ fulfillment_channel_code: "DEFAULT", lead_time_to_ship_max_days: 3 }]);
+    expect(pv.find((p: any) => p.path.endsWith("item_name")).op).toBe("replace");
+  });
+});

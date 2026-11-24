@@ -143,9 +143,9 @@ DECLARE d jsonb;
 BEGIN
   d := public.api_amz_draft_create('listing', 'ZL-HFFY-RKIN', '{"title": "Nitaniya 2027 Diary with Magnetic Leather Cover"}', 'title');
   RESET ROLE;
-  UPDATE public.amazon_listings SET version = version + 1 WHERE sku = 'ZL-HFFY-RKIN';
+  UPDATE public.amazon_listings SET version = version + 1, title = 'Title changed in Seller Central' WHERE sku = 'ZL-HFFY-RKIN';
   SET ROLE authenticated; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
-  PERFORM pg_temp.ok(public.api_amz_approve((d->>'id')::uuid)->>'status' = 'stale', 'X05a out-of-date draft is not approved');
+  PERFORM pg_temp.ok(public.api_amz_approve((d->>'id')::uuid)->>'status' = 'stale', 'X05a draft whose field Amazon changed is not approved');
   PERFORM pg_temp.ok(EXISTS (SELECT 1 FROM jsonb_array_elements(public.api_amz_queue('stale')) x WHERE x->>'id' = d->>'id'), 'X05b and is kept as Stale');
 END $$;
 
@@ -1159,6 +1159,46 @@ BEGIN
   PERFORM pg_temp.fails($q$SELECT public.svc_amz_studio_study('x', 'y', '[]', NULL)$q$, '%permission denied%', 'SC21 browser cannot start a study without Amazon''s data (server only)');
   RESET ROLE;
   PERFORM pg_temp.ok('PEXELS_API_KEY' = ANY (crm_private.amz_secret_names()), 'SC22 the free Pexels key is a Vault setting');
+END $$;
+RESET ROLE;
+
+
+-- AP (131): Approve all. Stale only when Amazon moved the SAME field; same-field rivals close; sync keeps unmoved drafts.
+SET ROLE authenticated; SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+DO $$
+DECLARE t1 jsonb; t2 jsonb; h jsonb; r jsonb; v_sku text;
+BEGIN
+  RESET ROLE;
+  SELECT l.sku INTO v_sku FROM public.amazon_listings l WHERE NOT l.is_parent AND l.price IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM public.amazon_change_queue q WHERE q.sku = l.sku AND q.status IN ('pending', 'approved', 'executing', 'stale'))
+   ORDER BY l.sku LIMIT 1;
+  SET ROLE authenticated; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  t1 := public.api_amz_draft_create('listing', v_sku, '{"title": "Nitaniya 2027 Diary A5 with Name, PU Leather, Brown"}', 'title');
+  t2 := public.api_amz_draft_create('listing', v_sku, '{"title": "Nitaniya Personalised Diary 2027 A5 with Name, Brown"}', 'title 2');
+  h  := public.api_amz_draft_create('listing', v_sku, '{"backend_terms": "planner organiser notebook gift"}', 'hidden');
+  RESET ROLE;
+  -- another change of this product went live (sync bumps the version and marks waiting drafts Stale, as before)
+  UPDATE public.amazon_listings SET version = version + 1, price = price + 1 WHERE sku = v_sku;
+  UPDATE public.amazon_change_queue SET status = 'stale', error = 'Listing changed on Amazon after this draft was made.'
+   WHERE sku = v_sku AND status = 'pending';
+  PERFORM pg_temp.ok((SELECT count(*) FROM public.amazon_change_queue WHERE id IN ((t1->>'id')::uuid, (t2->>'id')::uuid, (h->>'id')::uuid) AND status = 'pending') = 3,
+    'AP01 a sync change to another field (price) leaves the name and hidden-word drafts waiting');
+  SET ROLE authenticated; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  r := public.api_amz_approve((t1->>'id')::uuid);
+  RESET ROLE;
+  PERFORM pg_temp.ok(r->>'status' = 'approved' AND (r->>'base_version')::int = (SELECT version FROM public.amazon_listings WHERE sku = v_sku),
+    'AP02 an older version is no reason to refuse: approved and re-based');
+  PERFORM pg_temp.ok((SELECT status = 'cancelled' AND reject_reason LIKE 'Replaced:%name%' FROM public.amazon_change_queue WHERE id = (t2->>'id')::uuid),
+    'AP03 the rival name for the same product is closed (never two names live a minute apart)');
+  SET ROLE authenticated; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  r := public.api_amz_approve((t2->>'id')::uuid);
+  PERFORM pg_temp.ok(r->>'status' = 'cancelled', 'AP04 Approve all reaching the replaced one gets no error');
+  r := public.api_amz_approve((h->>'id')::uuid);
+  PERFORM pg_temp.ok(r->>'status' = 'approved', 'AP05 a change to another field of the same product is approved too');
+  RESET ROLE;
+  PERFORM pg_temp.ok(crm_private.amz_change_fields('{"title": "x", "attributes": {"title_differentiation": []}}') = ARRAY['attributes.title_differentiation', 'title'],
+    'AP06 fields of a change (attributes by name)');
+  PERFORM pg_temp.ok(crm_private.amz_same_value('price', '"299"', '299.00') AND NOT crm_private.amz_same_value('title', '"a"', '"b"'), 'AP07 value compare (numbers, text)');
 END $$;
 RESET ROLE;
 

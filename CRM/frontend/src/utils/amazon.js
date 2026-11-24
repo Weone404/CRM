@@ -85,6 +85,10 @@ export function diffRows(before = {}, after = {}) {
 }
 
 // Which group a Decision belongs to in the Decisions tab.
+// The fields one change touches (attributes by name), e.g. ['title', 'attributes.title_differentiation'].
+export const changeFields = (c) => Object.keys(c?.after || {}).flatMap((k) => (k === 'attributes' && c.after.attributes && typeof c.after.attributes === 'object'
+  ? Object.keys(c.after.attributes).map((a) => `attributes.${a}`) : [k]));
+
 export const DECISION_CATS = [
   ['text', 'Names & text'], ['search', 'Search words'], ['details', 'Product details'], ['photos', 'Photos'],
   ['price', 'Price & stock'], ['dispatch', 'Dispatch'], ['other', 'Other'],

@@ -294,6 +294,24 @@ export function parseListing(item: any, sellerSkuFallback?: string) {
   };
 }
 
+// Amazon refuses "merge" in VALIDATION_PREVIEW ("Merge operation is not allowed for VALIDATION_PREVIEW requests").
+// For the preview only, each merge becomes a replace of the whole attribute: the current entries, with the one that
+// matches the merge selector (fulfillment_channel_code / audience+marketplace) updated. The real PATCH keeps the merge.
+export function previewPatches(patches: any[], attrs: Record<string, any> = {}) {
+  const SEL: Record<string, string[]> = { fulfillment_availability: ["fulfillment_channel_code"], purchasable_offer: ["audience", "marketplace_id"] };
+  return patches.map((p) => {
+    if (p?.op !== "merge") return p;
+    const name = String(p.path).replace(/^\/attributes\//, "");
+    const keys = SEL[name] || [];
+    const cur: any[] = Array.isArray(attrs?.[name]) ? JSON.parse(JSON.stringify(attrs[name])) : [];
+    for (const v of p.value || []) {
+      const i = cur.findIndex((c) => keys.every((k) => k === "audience" ? (c?.[k] ?? "ALL") === (v?.[k] ?? "ALL") : c?.[k] === v?.[k]));
+      if (i >= 0) cur[i] = { ...cur[i], ...v }; else cur.push(v);
+    }
+    return { op: "replace", path: p.path, value: cur };
+  });
+}
+
 // Fields the module can push, and how. Anything else is reported as notPushed (set by hand in Seller Central).
 export function buildPatches(after: Record<string, any>, mk: string, lang: string, before: Record<string, any> = {}) {
   const patches: any[] = [];
