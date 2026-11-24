@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { rpc, run, useLoad, Btn } from './adsKit';
 import { Switch } from './ui/AppleControls';
+import ContentInstagramDashboard from './ContentInstagramDashboard';
 
 // Content > Instagram > Comment-to-DM (migrations 135-137). The ig-dm run (every 2 minutes) reads these settings;
 // the token lives in Connections & keys > Meta and is never shown here.
@@ -160,11 +161,16 @@ function CommentToDM() {
 }
 
 export default function ContentInstagram() {
+  const [view, setView] = useState('dashboard');
+  const tabs = [['dashboard', 'Dashboard'], ['settings', 'Comment-to-DM settings']];
   return (
     <div className="space-y-3">
-      <div role="tablist" aria-label="Instagram" className="flex gap-1">
-        <span role="tab" aria-selected="true" className="px-3 py-1.5 rounded-full text-[13px] font-semibold" style={{ background: 'rgba(10,99,206,0.10)', color: '#0A63CE' }}>Comment-to-DM</span>
+      <div role="tablist" aria-label="Instagram" className="flex flex-wrap gap-1">
+        {tabs.map(([k, l]) => (
+          <button key={k} type="button" role="tab" aria-selected={view === k} onClick={() => setView(k)}
+            className="px-3 min-h-[32px] rounded-full text-[13px]"
+            style={view === k ? { background: 'rgba(10,99,206,0.10)', color: '#0A63CE', fontWeight: 600 } : { color: 'rgba(0,0,0,0.6)' }}>{l}</button>))}
       </div>
-      <CommentToDM />
+      {view === 'dashboard' ? <ContentInstagramDashboard /> : <CommentToDM />}
     </div>);
 }

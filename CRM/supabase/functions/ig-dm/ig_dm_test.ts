@@ -35,7 +35,7 @@ function fakeIG(o: { media?: Json[]; comments?: Record<string, Json[]>; replies?
 }
 
 function memStore() {
-  const log = new Map<string, Json>(), people = new Map<string, Json>(), sends: string[] = [], leads: Json[] = []; let cfg: Json = {};
+  const log = new Map<string, Json>(), people = new Map<string, Json>(), sends: string[] = [], leads: Json[] = [], events: string[] = []; let cfg: Json = {};
   const st: Store = {
     async known(ids) { return new Set(ids.filter((i) => log.has(i))); },
     async claim(row) { if (log.has(row.comment_id)) return false; log.set(row.comment_id, { ...row }); return true; },
@@ -50,8 +50,9 @@ function memStore() {
     async sent(kind) { sends.push(kind); },
     async lead(p) { leads.push(p); return { status: "created", lead_id: "11111111-1111-1111-1111-111111111111" }; },
     async cfg(p) { cfg = { ...cfg, ...p }; },
+    async event(kind, person) { events.push(`${kind}:${person ?? ""}`); },
   };
-  return { st, log, people, sends, leads, get cfg() { return cfg; } };
+  return { st, log, people, sends, leads, events, get cfg() { return cfg; } };
 }
 const CFG = { on: true, mode: "universal", message: "Hi {name}! Free career counselling: send your number.", thanks: "Thanks {name}!", public_reply: true, cap: 60,
               inbox: true, crm: true, state: "ready", user_id: UID, username: OWN };
@@ -222,5 +223,22 @@ Deno.test("inbox: one call for the chats; group chats and chats the team already
   const f = fakeIG({ media: [], convs: [{ id: "g1", updated_time: ago(4) }, { id: "t1", updated_time: ago(8) }, { id: "s1", updated_time: ago(3) }], msgs });
   const r = await tick(work(), f.ig, memStore().st, NOW);
   assertEquals(f.dms.map((d) => d.recipient.id), ["u4"]); assertEquals([r.inbox.welcomed, r.inbox.groups], [1, 1]);
-  assertEquals(f.calls.filter((c) => c.startsWith("GET ") && !["GET me/conversations", `GET ${UID}/media`].includes(c)), [], "no call per chat");
+  assertEquals(f.calls.filter((c) => c.startsWith("GET ") && !["GET me/conversations", `GET ${UID}/media`].includes(c)), ["GET u3", "GET u4"],
+    "no call per chat; one follow check per new person only");
+});
+
+Deno.test("dashboard events: messages, a request from a non-follower, a reply from a commenter, number and lead", async () => {
+  const f0 = fakeIG({ media, comments: { m1: [c("c1", "riya", "fees?")] } }); const m = memStore();
+  await tick(work(), f0.ig, m.st, NOW);
+  const msgs = {
+    r1: [{ id: "a", created_time: ago(3), from: { id: "sid_c1", username: "riya" }, message: "my number 98765 43210" }],
+    n1: [{ id: "b", created_time: ago(2), from: { id: "u7", username: "stranger" }, message: "hi" }, { id: "b2", created_time: ago(1), from: { id: "u7", username: "stranger" }, message: "fees?" }],
+    n2: [{ id: "x", created_time: ago(2), from: { id: "u8", username: "fan" }, message: "hello" }] };
+  const f = fakeIG({ media: [], convs: [{ id: "r1", updated_time: ago(3) }, { id: "n1", updated_time: ago(1) }, { id: "n2", updated_time: ago(2) }], msgs });
+  const get = f.ig.get.bind(f.ig);
+  f.ig.get = async (path, q) => path === "u7" ? { is_user_follow_business: false } : path === "u8" ? { is_user_follow_business: true } : get(path, q);
+  const r = await tick(work({ inbox_at: m.cfg.inbox_at }), f.ig, m.st, NOW);
+  assertEquals(m.events.sort(), ["in_message:u7", "in_message:u7", "in_message:u8", "in_new:u8", "in_reply:sid_c1", "in_request:u7", "lead:sid_c1", "phone:sid_c1"]);
+  assertEquals([r.inbox.requests, r.inbox.new], [1, 1]);
+  assertEquals(m.people.get("u7")!.follows, false);
 });

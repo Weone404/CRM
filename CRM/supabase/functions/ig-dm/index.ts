@@ -45,6 +45,7 @@ const store: Store = {
   async sent(kind) { await admin.from("ig_dm_send").insert({ kind }); },
   async lead(p) { return await rpc("svc_content_dm_lead", { p }) as Json; },
   async cfg(patch) { await rpc("svc_ig_dm_cfg", { p: patch }); },
+  async event(kind, person) { await admin.from("ig_dm_event").insert({ kind, person: person ?? null }); },   // dashboard only: never blocks a run
 };
 
 Deno.serve(async (req) => {

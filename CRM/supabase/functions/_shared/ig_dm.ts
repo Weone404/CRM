@@ -35,6 +35,7 @@ export interface Store {
   sent(kind: string): Promise<void>;
   lead(p: Json): Promise<Json>;                                     // svc_content_dm_lead
   cfg(patch: Json): Promise<void>;                                  // svc_ig_dm_cfg (state fields only)
+  event(kind: string, person?: string | null): Promise<void>;       // ig_dm_event: what came in (dashboard)
 }
 
 // the Graph API over fetch; the token never appears in an error
@@ -106,7 +107,7 @@ export async function comments(ig: IG, st: Store, cfg: Json, uid: string, own: s
     for (const c of list.sort((x, y) => ts(x.timestamp) - ts(y.timestamp))) {
       if (done.has(String(c.id))) continue;
       if (budget.n <= 0) { out.capped = true; return; }
-      const base = { comment_id: String(c.id), media_id: String(m.id), username: c.who.slice(0, 60), text: String(c.text ?? "").slice(0, 200), person: pkey(c.from?.id, c.who) };
+      const base = { comment_id: String(c.id), media_id: String(m.id), permalink: m.permalink ?? null, username: c.who.slice(0, 60), text: String(c.text ?? "").slice(0, 200), person: pkey(c.from?.id, c.who) };
       const kind = classify(c.text);
       if (kind) { if (await st.claim({ ...base, state: "skipped", reason: kind })) out[kind] = (out[kind] ?? 0) + 1; continue; }
       if (!(await st.claim({ ...base, state: "sending" }))) continue;                 // another run has it
@@ -148,7 +149,7 @@ export async function inbox(ig: IG, st: Store, cfg: Json, uid: string, out: Json
   // one call: the latest chats with their last few messages (asking each chat for its whole history is refused by Instagram)
   const convs: Json[] = (await ig.get("me/conversations", { platform: "instagram", limit: "10",
     fields: "id,updated_time,messages.limit(8){id,created_time,from,message}" })).data ?? [];
-  let newest = since; const res = { welcomed: 0, pdf: 0, phones: 0, leads: 0, groups: 0 };
+  let newest = since; const res = { welcomed: 0, pdf: 0, phones: 0, leads: 0, groups: 0, new: 0, requests: 0 };
   for (const cv of convs) {
     const t = ts(cv.updated_time);
     if (!(t > since)) continue;
@@ -167,6 +168,13 @@ export async function inbox(ig: IG, st: Store, cfg: Json, uid: string, out: Json
     const fresh = theirs.filter((m) => ts(m.created_time) > Math.max(since, p?.last_in_at ? ts(p.last_in_at) : 0));
     if (!fresh.length) { newest = Math.max(newest, t); continue; }
     const row: Json = { person: p?.person ?? id, igsid: id, username: username || p?.username || null, last_in_at: new Date(ts(fresh[fresh.length - 1].created_time)).toISOString() };
+    // dashboard: every message that came in; a new person writing first is a message request when they don't follow us
+    for (let i = 0; i < fresh.length; i++) await st.event(p?.source === "comment" ? "in_reply" : "in_message", row.person);
+    if (!p) {
+      let follows: boolean | null = null;
+      try { const u = await ig.get(id, { fields: "is_user_follow_business" }); if (typeof u.is_user_follow_business === "boolean") follows = u.is_user_follow_business; } catch { /* unknown */ }
+      row.follows = follows; await st.event(follows === false ? "in_request" : "in_new", row.person); res[follows === false ? "requests" : "new"]++;
+    }
     const send = async (message: Json, kind: string) => { await ig.post(`${uid}/messages`, {}, { recipient: { id }, message }); budget.n--; await st.sent(kind); };
     try {
       if (!p?.dm_at) {      // they wrote first: welcome them once, unless the team is already talking to them in this chat
@@ -182,12 +190,12 @@ export async function inbox(ig: IG, st: Store, cfg: Json, uid: string, out: Json
       }
       const phone = p?.phone ? null : fresh.map((m) => phoneOf(String(m.message ?? ""))).find(Boolean);
       if (phone) {
-        row.phone = phone; res.phones++;
+        row.phone = phone; res.phones++; await st.event("phone", row.person);
         if (cfg.crm !== false && username) {
           try {
             const l = await st.lead({ username, phone, source: (p?.source ?? row.source) === "dm" ? "dm" : "comment_dm",
               text: fresh.map((m) => String(m.message ?? "")).join(" ").replace(/\s+/g, " ").trim().slice(0, 300) });
-            if (l?.lead_id) { row.lead_id = l.lead_id; res.leads++; }
+            if (l?.lead_id) { row.lead_id = l.lead_id; res.leads++; await st.event("lead", row.person); }
             else if (l?.error) row.note = String(l.error).slice(0, 200);
           } catch (e) { row.note = `CRM lead: ${String((e as Error).message).slice(0, 180)}`; }
         }
@@ -240,7 +248,7 @@ export async function tick(work: Json, ig: IG | null, st: Store, now = Date.now(
     }
   }
   // the latest posts whatever their age: a new comment can come on an older post, or on a post an ad reuses
-  const media: Json[] = ((await ig.get(`${uid}/media`, { fields: "id,timestamp,comments_count", limit: String(MEDIA_SCAN) })).data ?? [])
+  const media: Json[] = ((await ig.get(`${uid}/media`, { fields: "id,timestamp,comments_count,permalink", limit: String(MEDIA_SCAN) })).data ?? [])
     .filter((m: Json) => Number(m.comments_count ?? 1) > 0);
   const cap = Math.max(1, Math.min(MAX_CAP, Number(cfg.cap) || 60));
   const budget = { n: cap - Number(work.sent_last_hour ?? 0) };
