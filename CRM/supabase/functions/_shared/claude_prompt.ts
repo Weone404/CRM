@@ -42,7 +42,11 @@ export function buildPrompt(job: any, context: unknown) {
       `buyer clarity, risk to sales, price margin) so the owner can judge.\n` +
       `Fix types: long or repetitive names -> new "title"; no or lost Add to Cart -> "price" (never below 299; consider the Add to Cart price) and/or ` +
       `"handling_days"; colour swatch photo with text/logo -> {"remove_swatch": true} (rank 1) because a clean photo must be uploaded by hand; ` +
-      `old year -> title with 2027; title changed outside the CRM -> keep the current title or restore the old one.\n` +
+      `old year -> title with 2027; title changed outside the CRM -> keep the current title or restore the old one; ` +
+      `size does not match (size_conflict) -> make the name, bullets and the "paper_size" detail agree. The seller's sizes: 25 cm x 17.6 cm is B5, ` +
+      `23 cm x 17.6 cm is A5. Use the centimetres stated on the listing to decide; if no centimetres are stated, do NOT guess: draft nothing and ` +
+      `ask the owner to measure the diary; old year in the text (old_year_text) -> the same "bullets" or "description" with only the year corrected; ` +
+      `two product codes on one listing (duplicate_listing) -> draft nothing, the owner must delete one in Seller Central.\n` +
       `If a problem cannot be fixed with the allowed fields, say so in "answer" and draft nothing for it. "answer": one short summary line.`;
   }
   if (job.kind === "suggest") {

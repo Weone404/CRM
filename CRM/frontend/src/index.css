@@ -729,3 +729,10 @@ input[type="datetime-local"].glass-input { color-scheme: light; }
 .prod-card-img > span.absolute { z-index: 1; }
 .prod-card-body { padding: 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .prod-card-code { font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-muted, #8e8e93); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Amazon > product page: problems and waiting changes */
+.todo-ok { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #1E7B34; padding: 2px 4px; }
+.todo-card { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.todo-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.todo-row { display: flex; gap: 10px; align-items: flex-start; padding-top: 12px; border-top: 1px solid var(--border-subtle, rgba(60,60,67,0.12)); min-width: 0; }
+.todo-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex: none; }

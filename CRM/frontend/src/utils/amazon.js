@@ -37,8 +37,25 @@ export const PLAIN = {
   main_image: ['Main photo breaks Amazon rules', 'White background, no text, at least 1000 px.'],
   amazon_issue: ['Amazon reported a problem', 'See the details and the suggested fix.'],
   suppressed_after_change: ['Product is hidden on Amazon after a change', 'Approve the undo in Approve Changes.'],
+  size_conflict: ['The size is not the same everywhere', 'Make the name, the bullets and the "paper size" detail say the same size.'],
+  old_year_text: ['An old year is still in the text', 'Change the old year in the bullets or description to the current one.'],
+  duplicate_listing: ['Two product codes share one Amazon listing', 'Keep one code. Set the other to 0 stock, then delete it in Seller Central.'],
   price_floor: ['Price is below ₹299', 'Raise the price.'],
   mrp_gte_price: ['MRP is lower than the price', 'MRP must be equal or higher.'],
+};
+// Why a problem matters, in one line (shown on the product page).
+export const WHY = {
+  size_conflict: 'A buyer who gets a different size returns it, and a diary with a name on it cannot be resold.',
+  old_year_text: 'Buyers think the diary is for last year and skip it.',
+  duplicate_listing: 'Amazon forbids duplicate offers and can remove both.',
+  buybox_none: 'Without the "Add to Cart" button almost nobody can buy, and ads do not show.',
+  buybox_lost: 'Buyers get the other seller when they press "Add to Cart".',
+  title_drift: 'The name on Amazon is not the one you approved.',
+  suppressed_after_change: 'The product is hidden from search until this is fixed.',
+  amazon_issue: 'Amazon can hide the product until this is fixed.',
+  main_image: 'Amazon can hide the product from search.',
+  legal_fields: 'These details are required by law in India.',
+  stale_year: 'Buyers think the diary is for last year and skip it.',
 };
 export const plain = (code, fallback) => {
   if (code === 'amazon_issue' && /SWCH|swatch/i.test(fallback || '')) return ['Colour swatch photo has text or a logo', 'Amazon hides it. Remove it or upload a clean photo.'];

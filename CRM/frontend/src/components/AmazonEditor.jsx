@@ -3,7 +3,7 @@ import { supabase, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from '../backend/sup
 import { showToast } from '../utils/toast';
 import { confirmDialog } from './ui/dialogs';
 import Icon from './icons';
-import { chars, utf8Bytes, inr, measureImage, dispatchText, plain, ageText } from '../utils/amazon';
+import { chars, utf8Bytes, inr, measureImage, dispatchText, plain, ageText, WHY } from '../utils/amazon';
 import { ideasFor } from '../utils/amazonIdeas';
 
 // Product gallery + full product editor for CRM > Amazon > My Products.
@@ -186,7 +186,75 @@ export function simpleDetails(attributes) {
 }
 
 // ---------------------------------------------------------------- editor
-export function ProductEditor({ listing, access, onClose, onSaved }) {
+// ---------------------------------------------------------------- problems + waiting changes of one product
+function ProductTodo({ sku, go }) {
+  const [d, setD] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const load = () => rpc('api_amz_product_todo', { p_sku: sku }).then(setD).catch(() => setD({ problems: [], waiting: [] }));
+  useEffect(() => { load(); }, [sku]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!d?.fixing) return undefined; const t = setInterval(load, 6000); return () => clearInterval(t); }, [d?.fixing]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!d) return null;
+  const { problems = [], waiting = [] } = d;
+  const fix = async () => {
+    setBusy(true);
+    try { const r = await rpc('api_amz_fix', { p_sku: sku }); showToast(r.queued ? 'Claude is preparing the fixes. They appear in Decisions for your approval.' : 'Claude is already working on this product.', 'success'); await load(); }
+    catch (e) { showToast(e.message, 'error'); }
+    setBusy(false);
+  };
+  const dismiss = async (f) => {
+    if (!(await confirmDialog('Mark as not a problem?', { message: 'It will not be shown again for this product unless it comes back.', confirmText: 'Not a problem' }))) return;
+    try { await rpc('api_amz_finding_dismiss', { p_id: f.id, p_reason: 'Not a problem (checked by hand)' }); await load(); } catch (e) { showToast(e.message, 'error'); }
+  };
+  const needFix = problems.filter((f) => !f.fix_waiting).length;
+  return (
+    <div className="space-y-3" data-todo>
+      {problems.length === 0 ? (
+        <div className="todo-ok"><Icon name="check" size={15} />No problems found on this product.</div>
+      ) : (
+        <div className="glass-card todo-card">
+          <div className="todo-head">
+            <div className="font-bold">{problems.length} thing{problems.length > 1 ? 's' : ''} to fix</div>
+            {d.can_fix && (d.fixing ? <span className="text-xs text-glass-secondary">Claude is preparing fixes…</span>
+              : needFix > 0 && <button type="button" className="glass-btn px-3 py-1.5 text-xs inline-flex items-center gap-1.5" disabled={busy} onClick={fix}><Icon name="sparkles" size={14} />Fix with Claude</button>)}
+          </div>
+          {problems.map((f) => {
+            const [what, how] = plain(f.rule_code, f.message);
+            return (
+              <div key={f.id} className="todo-row" data-problem={f.rule_code}>
+                <span className="todo-dot" style={{ background: f.severity === 'blocker' ? '#FF3B30' : '#FF9500' }} aria-hidden="true" />
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="text-sm font-semibold">{what}</div>
+                  {f.message && f.message !== what && <div className="text-xs text-glass-secondary break-words">{f.message}</div>}
+                  {WHY[f.rule_code] && <div className="text-xs"><b>Why it matters:</b> {WHY[f.rule_code]}</div>}
+                  {how && <div className="text-xs"><b>How to fix:</b> {how}</div>}
+                  <div className="flex flex-wrap items-center gap-3 pt-0.5">
+                    {f.fix_waiting > 0 && <button type="button" className="text-xs font-semibold" style={{ color: '#1E7B34' }} onClick={() => go?.('decisions')}>Fix ready: review in Decisions →</button>}
+                    {d.can_fix && <button type="button" className="text-xs text-glass-muted underline" onClick={() => dismiss(f)}>Not a problem</button>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {waiting.length > 0 && (
+        <div className="glass-card todo-card">
+          <div className="todo-head">
+            <div className="font-bold">{waiting.length} change{waiting.length > 1 ? 's' : ''} waiting for your approval</div>
+            <button type="button" className="glass-btn-ghost px-3 py-1.5 text-xs font-semibold" onClick={() => go?.('decisions')}>Review in Decisions</button>
+          </div>
+          {waiting.slice(0, 5).map((w) => (
+            <div key={w.id} className="todo-row"><span className="todo-dot" style={{ background: 'var(--accent)' }} aria-hidden="true" />
+              <div className="min-w-0 flex-1"><div className="text-sm truncate">{w.summary || 'Change'}</div><div className="text-[11px] text-glass-muted">Changes: {w.fields || w.kind} · {ageText(w.created_at)}</div></div></div>
+          ))}
+          {waiting.length > 5 && <div className="text-[11px] text-glass-muted px-1">and {waiting.length - 5} more</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function ProductEditor({ listing, access, onClose, onSaved, go }) {
   const l = listing;
   const [tab, setTab] = useState('photos');
   const [busy, setBusy] = useState(false);
@@ -328,6 +396,8 @@ export function ProductEditor({ listing, access, onClose, onSaved }) {
           {(l.issues || []).length > 0 && <div className="text-xs" style={{ color: '#C4261D' }}>Amazon says: {l.issues.map((i) => i.message).join(' | ').slice(0, 300)}</div>}
         </div>
       </div>
+
+      <ProductTodo sku={l.sku} go={go} />
 
       <div role="tablist" aria-label="Edit" className="glass-card p-1 grid grid-cols-4 gap-1">
         {TABS.map(([id, label, icon]) => (

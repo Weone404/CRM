@@ -52,6 +52,15 @@ await page.screenshot({ path: `${SHOTS}/amz_listings.png`, fullPage: false });
 
 // Editor: name & text with AI ideas
 await page.locator('[data-sku="69-E0DG-L8W8"]').click();
+await page.locator('[data-todo]').waitFor({ timeout: 6000 });
+{
+  const todo = await rpcAs('api_amz_product_todo', { p_sku: '69-E0DG-L8W8' });
+  const shown = await page.locator('[data-todo] [data-problem]').count();
+  ok(shown === todo.problems.length && (shown > 0 ? (await page.locator('[data-todo]').getByText('How to fix:').count()) >= 1 : (await page.getByText('No problems found on this product.').count()) === 1),
+    'UI03c product page lists this product\'s problems with how to fix (or says there are none)');
+  ok(!(await page.locator('[data-sku]').count()) && (await page.locator('.prod-card-code').count()) === 0, 'UI03d editor open (gallery hidden)');
+  await page.screenshot({ path: `${SHOTS}/amz_product_todo.png`, fullPage: false });
+}
 await page.getByRole('tab', { name: 'Name & text' }).click();
 const title = page.getByLabel('Product name', { exact: true });
 await title.fill('Nitaniya B5 PU Leather Diary 2027 Light Tan with Pen Holder and Ribbon Marks');   // 76 chars
@@ -67,7 +76,7 @@ await ideas.getByLabel('Idea i0').fill('Nitaniya B5 PU Leather Diary 2027, Light
 await ideas.getByRole('button', { name: 'Use this' }).first().click();
 ok((await title.inputValue()) === 'Nitaniya B5 PU Leather Diary 2027, Light Tan, Pen Holder, 160 Pages', 'UI23 an edited idea is used in the field');
 await page.waitForTimeout(800);
-ok(!(await page.locator('body').innerText()).includes('Title is'), 'UI05 compliant name clears the problem');
+ok(!(await page.evaluate(() => { const c = document.body.cloneNode(true); c.querySelectorAll('[data-todo]').forEach((n) => n.remove()); return c.innerText || c.textContent; })).includes('Title is'), 'UI05 compliant name clears the problem');   // the saved listing's own open problems stay in the panel
 await page.getByRole('button', { name: 'Generate with AI' }).first().click();
 await ideas.getByRole('button', { name: 'Ask Claude for better ideas' }).click();
 await page.waitForTimeout(600);

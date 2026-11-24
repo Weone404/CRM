@@ -192,7 +192,7 @@ function DeliverySpeed({ listings, go }) {
 function Products({ access, listings, findings, go, reload, openSku, setOpenSku }) {
   const [q, setQ] = useState('');
   const open = (listings || []).find((l) => l.sku === openSku);
-  if (open) return <ProductEditor key={open.sku + open.version} listing={open} access={access} onClose={() => setOpenSku('')} onSaved={reload} />;
+  if (open) return <ProductEditor key={open.sku + open.version} listing={open} access={access} onClose={() => setOpenSku('')} onSaved={reload} go={go} />;
   return (
     <div className="space-y-3">
       <DeliverySpeed listings={listings} go={go} />

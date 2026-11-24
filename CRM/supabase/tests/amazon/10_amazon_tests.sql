@@ -1202,4 +1202,47 @@ BEGIN
 END $$;
 RESET ROLE;
 
+
+-- CK (132): trustworthy checks, product page, one suggestion per product and field
+DO $$
+DECLARE v_sku text; r jsonb; a uuid; b uuid; c uuid;
+BEGIN
+  SELECT l.sku INTO v_sku FROM public.amazon_listings l WHERE NOT l.is_parent
+     AND NOT EXISTS (SELECT 1 FROM public.amazon_change_queue q WHERE q.sku = l.sku AND q.status IN ('pending', 'approved', 'executing'))
+   ORDER BY l.sku DESC LIMIT 1;
+  UPDATE public.amazon_listings SET title = 'Nitaniya Diary 2027 with Name, A5 Size, Brown',
+     attributes = coalesce(attributes, '{}') || '{"paper_size": [{"value": "B5"}]}',
+     bullets = '["Convenient Size: The B5 size (25 cm x 17.6 cm)", "Dated pages for 2026 with month index"]' WHERE sku = v_sku;
+  PERFORM pg_temp.ok(EXISTS (SELECT 1 FROM public.amazon_audit_findings WHERE sku = v_sku AND status = 'open' AND rule_code = 'size_conflict'
+      AND message LIKE '%name says A5%details say B5%'), 'CK01 size conflict (name A5, details B5) is flagged when the listing changes');
+  PERFORM pg_temp.ok(EXISTS (SELECT 1 FROM public.amazon_audit_findings WHERE sku = v_sku AND status = 'open' AND rule_code = 'old_year_text'
+      AND message LIKE '%2027%2026%'), 'CK02 an old year left in the bullets is flagged');
+  UPDATE public.amazon_listings SET title = 'Nitaniya Diary 2027 with Name, B5 Size, Brown',
+     bullets = '["Convenient Size: The B5 size (25 cm x 17.6 cm)", "Dated pages for 2027 with month index"]' WHERE sku = v_sku;
+  PERFORM pg_temp.ok(NOT EXISTS (SELECT 1 FROM public.amazon_audit_findings WHERE sku = v_sku AND status = 'open' AND rule_code IN ('size_conflict', 'old_year_text')),
+    'CK03 both close by themselves once the listing is right');
+  -- false alarm: drift on a name we approved
+  UPDATE public.amazon_listings SET last_approved_title = 'something older' WHERE sku = v_sku;
+  INSERT INTO public.amazon_audit_findings (sku, rule_code, severity, message, source) VALUES (v_sku, 'title_drift', 'warning', 'Title changed outside the CRM', 'sync');
+  INSERT INTO public.amazon_audit_findings (sku, rule_code, severity, message, source) VALUES (v_sku, 'suppressed_after_change', 'blocker', 'Listing is suppressed', 'sync');
+  INSERT INTO public.amazon_change_queue (kind, sku, summary, before, after, status, created_by_type) VALUES ('rollback', v_sku, 'Roll back (suppressed)', '{}', '{"title": "old"}', 'pending', 'system') RETURNING id INTO a;
+  UPDATE public.amazon_listings SET last_approved_title = title, status = 'Active', issues = '[]' WHERE sku = v_sku;
+  PERFORM pg_temp.ok(NOT EXISTS (SELECT 1 FROM public.amazon_audit_findings WHERE sku = v_sku AND status = 'open' AND rule_code IN ('title_drift', 'suppressed_after_change'))
+    AND (SELECT status FROM public.amazon_change_queue WHERE id = a) = 'cancelled',
+    'CK04 false alarms close: approved name is not drift; selling again closes "hidden" and its waiting undo');
+  -- one suggestion per product and field
+  INSERT INTO public.amazon_change_queue (kind, sku, summary, before, after, status, created_by_type, alt_group, alt_rank) VALUES ('listing', v_sku, 'kw one', '{}', '{"title": "Name one"}', 'pending', 'claude', 'kw1:' || v_sku, 1) RETURNING id INTO a;
+  INSERT INTO public.amazon_change_queue (kind, sku, summary, before, after, status, created_by_type) VALUES ('listing', v_sku, 'mine', '{}', '{"backend_terms": "x y"}', 'pending', 'user') RETURNING id INTO c;
+  INSERT INTO public.amazon_change_queue (kind, sku, summary, before, after, status, created_by_type, alt_group, alt_rank) VALUES ('listing', v_sku, 'kw two', '{}', '{"title": "Name two"}', 'pending', 'claude', 'kw2:' || v_sku, 1) RETURNING id INTO b;
+  PERFORM pg_temp.ok((SELECT status FROM public.amazon_change_queue WHERE id = a) = 'cancelled' AND (SELECT status FROM public.amazon_change_queue WHERE id = b) = 'pending'
+    AND (SELECT status FROM public.amazon_change_queue WHERE id = c) = 'pending', 'CK05 a newer keyword name replaces the older one; another field and your own drafts stay');
+  SET ROLE authenticated; PERFORM set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000a', false);
+  r := public.api_amz_product_todo(v_sku);
+  PERFORM pg_temp.ok(jsonb_array_length(r->'waiting') = 2 AND jsonb_typeof(r->'problems') = 'array' AND (r->>'can_fix')::boolean AND r->'waiting'->0 ? 'fields',
+    'CK06 product page: problems and waiting changes for one product');
+  RESET ROLE;
+  PERFORM pg_temp.ok(crm_private.amz_sizes('A5 Size diary, b5 cover') = ARRAY['A5', 'B5'], 'CK07 sizes found in text');
+END $$;
+RESET ROLE;
+
 \echo ALL SQL TESTS PASSED
