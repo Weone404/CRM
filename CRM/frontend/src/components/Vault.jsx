@@ -109,6 +109,7 @@ function buildGroups(o) {
         ads('META_ACCESS_TOKEN', 'Access token (system user)', 'secret'),
         ads('META_PAGE_TOKEN', 'Page token', 'secret'),
         ads('META_WEBHOOK_VERIFY_TOKEN', 'Webhook verify token', 'secret', 'Any long random text; paste the same in the Meta app'),
+        ads('INSTAGRAM_LOGIN_TOKEN', 'Instagram token (comment-to-DM)', 'secret', 'Meta for Developers > your app > Instagram > API setup with Instagram login > Generate token. Renews itself every 20 days'),
       ].map((i) => ({ ...i, ...st('ads', i.name) })) },
     { id: 'amazon', name: 'Amazon', summary: 'Seller Central, Amazon Ads, Pexels images',
       tests: [{ label: 'Test Amazon', run: () => edge('amazon-settings', { action: 'test' }), line: amzSt.last_test?.status ? `${amzSt.last_test.status === 'ok' ? 'Test passed' : 'Test failed'} ${when(amzSt.last_test.at)}` : 'Not tested yet', bad: amzSt.last_test?.status && amzSt.last_test.status !== 'ok' }],
