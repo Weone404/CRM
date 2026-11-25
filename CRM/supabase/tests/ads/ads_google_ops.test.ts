@@ -394,3 +394,61 @@ Deno.test("ad_schedule refuses a gap, an overlap, a short day, half hours, a bad
     if (!threw) throw new Error(`ad_schedule accepted ${JSON.stringify(p)}`);
   }
 });
+
+Deno.test("budget_set: every running campaign's budget in one request, each read back by its amount", () => {
+  const b = buildOps(CID, "budget_set", { daily_total: 300, parts: [
+    { campaign_id: "1", daily_budget: 210, budget_resource: `customers/${CID}/campaignBudgets/11` },
+    { campaign_id: "2", daily_budget: 90, budget_resource: `customers/${CID}/campaignBudgets/22` }] });
+  eq(b.ops, [
+    { campaignBudgetOperation: { update: { resourceName: `customers/${CID}/campaignBudgets/11`, amountMicros: "210000000" }, updateMask: "amountMicros" } },
+    { campaignBudgetOperation: { update: { resourceName: `customers/${CID}/campaignBudgets/22`, amountMicros: "90000000" }, updateMask: "amountMicros" } },
+  ], "two budget updates, exact micros");
+  eq(b.checks, [{ mode: "field", field: "amount_micros", value: "210000000" }, { mode: "field", field: "amount_micros", value: "90000000" }], "read back by amount");
+  eq(buildOps(CID, "budget_set", { daily_total: 255, parts: [
+    { daily_budget: 177.5, budget_resource: `customers/${CID}/campaignBudgets/11` },
+    { daily_budget: 77.5, budget_resource: `customers/${CID}/campaignBudgets/22` }] }).ops.length, 2, "paise add up exactly (no float drift)");
+});
+
+Deno.test("budget_set refuses an unknown budget, another account's budget, one budget twice, bad money and parts that do not add up", () => {
+  const r = (n: string) => `customers/${CID}/campaignBudgets/${n}`;
+  const bad = [
+    { daily_total: 300, parts: [] },
+    { daily_total: 300 },
+    { daily_total: 300, parts: [{ daily_budget: 300 }] },
+    { daily_total: 300, parts: [{ daily_budget: 300, budget_resource: "customers/1111111111/campaignBudgets/1" }] },
+    { daily_total: 300, parts: [{ daily_budget: 150, budget_resource: r("1") }, { daily_budget: 150, budget_resource: r("1") }] },
+    { daily_total: 300, parts: [{ daily_budget: 0, budget_resource: r("1") }, { daily_budget: 300, budget_resource: r("2") }] },
+    { daily_total: 300, parts: [{ daily_budget: "lots", budget_resource: r("1") }] },
+    { daily_total: 300, parts: [{ daily_budget: 200, budget_resource: r("1") }, { daily_budget: 90, budget_resource: r("2") }] },
+    { daily_total: 300, parts: Array.from({ length: 21 }, (_, i) => ({ daily_budget: 1, budget_resource: r(String(i)) })) },
+  ];
+  for (const p of bad) {
+    let threw = false;
+    try { buildOps(CID, "budget_set", p); } catch { threw = true }
+    if (!threw) throw new Error(`budget_set accepted ${JSON.stringify(p)}`);
+  }
+});
+
+Deno.test("executeGoogleOp budget_set: pre-check, one real request, verified only when both amounts read back", async () => {
+  const calls: { validate: boolean }[] = [];
+  const amounts: Record<string, string> = { [`customers/${CID}/campaignBudgets/11`]: "210000000", [`customers/${CID}/campaignBudgets/22`]: "60000000" };
+  const fake = {
+    withLogin() { return this; },
+    async mutate(_c: string, ops: any[], validate: boolean) {
+      calls.push({ validate });
+      return { mutateOperationResponses: ops.map((o) => ({ campaignBudgetResult: { resourceName: o.campaignBudgetOperation.update.resourceName } })) };
+    },
+    async search(_c: string, q: string) {
+      const rn = q.match(/resource_name = '([^']+)'/)?.[1] ?? "";
+      return [{ campaignBudget: { resourceName: rn, amountMicros: amounts[rn] } }];
+    },
+  } as any;
+  const op = { id: "x", kind: "budget_set", account_external_id: CID, login_customer_id: null, status: "approved", payload: { daily_total: 300, parts: [
+    { daily_budget: 210, budget_resource: `customers/${CID}/campaignBudgets/11` }, { daily_budget: 90, budget_resource: `customers/${CID}/campaignBudgets/22` }] } } as any;
+  const r1 = await executeGoogleOp(fake, op);
+  eq(calls.map((c) => c.validate), [true, false], "Google's pre-check first, then the real request once");
+  eq(r1.status, "failed", "one amount did not read back: not verified");
+  amounts[`customers/${CID}/campaignBudgets/22`] = "90000000";
+  const r2 = await executeGoogleOp(fake, op);
+  eq(r2.status, "verified", "both read back: verified");
+});

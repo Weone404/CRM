@@ -133,6 +133,25 @@ export function buildOps(cid: string, kind: string, p: any): Built {
         { mode: "field", field: "amount_micros", value: m });
       break;
     }
+    case "budget_set": {   // the owner's one daily amount, shared between the running campaigns: all of them change or none
+      const parts = Array.isArray(p.parts) ? p.parts : [];
+      if (!parts.length || parts.length > 20) throw new AdsError("sync_failed", "parts: one row for every switched-on campaign");
+      const seen = new Set<string>();
+      let sum = 0;
+      for (const pt of parts) {
+        const rn = String(pt?.budget_resource ?? "");
+        if (!/^customers\/\d+\/campaignBudgets\/\d+$/.test(rn)) throw new AdsError("sync_failed", "a campaign's budget is not known yet; sync first");
+        if (!rn.startsWith(`${C}/`)) throw new AdsError("sync_failed", "resource belongs to another account");
+        if (seen.has(rn)) throw new AdsError("sync_failed", "two campaigns share one budget; it cannot be changed from here");
+        seen.add(rn);
+        const m = micros(pt.daily_budget, "daily_budget");
+        sum += Number(m);
+        add({ campaignBudgetOperation: { update: { resourceName: rn, amountMicros: m }, updateMask: "amountMicros" } },
+          { mode: "field", field: "amount_micros", value: m });
+      }
+      if (p.daily_total !== undefined && sum !== Number(micros(p.daily_total, "daily_total"))) throw new AdsError("sync_failed", "the parts do not add up to the daily total");
+      break;
+    }
     case "campaign_create": {   // a whole Search campaign in one atomic request; temporary ids: budget -1, campaign -2, ad groups -3...
       const name = String(p.name ?? "").trim();
       if (name.length < 3) throw new AdsError("sync_failed", "campaign name is required");

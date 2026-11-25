@@ -1,10 +1,10 @@
-// ADS > Google Ads: runs the owner-only operations of migration 144 (campaign_create, income_filter).
+// ADS > Google Ads: runs the owner-only operations of migrations 144-146 (campaign_create, income_filter, ad_schedule, budget_set).
 // A small function of its own, so the large ads-sync function is not redeployed for them. Same rules as ads-sync's "execute":
 // the gate is re-checked when an operation is claimed, Google's own pre-check runs first (nothing changes), the real request is
 // sent once, and only a successful read-back counts as verified. Interrupted operations are never re-sent.
 // Called by the crm-ads-google-build schedule (x-cron-token) only; no browser calls this.
 // With {"check": "<operation id>"} it only asks Google to validate a waiting operation (nothing changes) and logs the answer.
-// With {"read": "billing"} it only reads what Google reports about the account's money.
+// With {"read": "billing"} it only reads what Google reports about the account's money (the prepaid balance, migration 146).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { cors, cronOk, json, rpc } from "../_shared/ads_deno.ts";
 import { GoogleAds, scrubSecrets } from "../_shared/ads_core.ts";
@@ -29,11 +29,12 @@ Deno.serve(async (req) => {
     try { body = await req.json(); } catch { /* empty body */ }
     // {"read": "billing"}: what Google says about the account's money (read only), saved for the Google Ads home screen.
     if (body.read === "billing") {
-      const acc = ((await rpc("svc_ads_accounts")) as { id: string; platform: string; external_id: string }[]).find((a) => a.platform === "google");
+      const accs = (await rpc("svc_ads_accounts")) as { id: string; platform: string; external_id: string; status?: string; login_customer_id?: string | null }[];
+      const acc = accs.find((a) => a.platform === "google" && a.status === "connected") ?? accs.find((a) => a.platform === "google");
       if (!acc) return json(req, 404, { detail: "No Google Ads account" });
-      const data = await readBilling(google, acc.external_id);
-      await rpc("svc_ads_google_snapshot_save", { p_account: acc.id, p_kind: "billing", p_data: data });
-      return json(req, 200, { read: "billing", data });
+      const data = await readBilling(google, acc.external_id, acc.login_customer_id);
+      const saved = await rpc("svc_ads_google_billing_save", { p_account: acc.id, p_data: data });
+      return json(req, 200, { read: "billing", saved });
     }
     if (body.check) {
       if (!/^[0-9a-f-]{36}$/i.test(body.check)) return json(req, 422, { detail: "check must be an operation id" });
