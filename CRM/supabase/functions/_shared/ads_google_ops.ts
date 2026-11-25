@@ -34,6 +34,7 @@ export const micros = (v: unknown, what: string) => {
 // Google's household-income groups (share of households by income; UNDETERMINED = Google does not know).
 export const INCOME_TIERS = ["INCOME_RANGE_0_50", "INCOME_RANGE_50_60", "INCOME_RANGE_60_70", "INCOME_RANGE_70_80", "INCOME_RANGE_80_90",
   "INCOME_RANGE_90_UP", "INCOME_RANGE_UNDETERMINED"];
+const WEEK = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"];
 const camel = (s: string) => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 export const getPath = (row: any, path: string) => path.split(".").reduce((o, k) => (o == null ? undefined : o[camel(k)]), row);
 
@@ -193,6 +194,26 @@ export function buildOps(cid: string, kind: string, p: any): Built {
       if (!ops.length) throw new AdsError("sync_failed", "nothing to change");
       break;
     }
+    case "ad_schedule": {       // time slots with their own bid change, the same every day; old schedule rows go in the same request
+      const camp = `${C}/campaigns/${digits(p.campaign_id, "campaign_id")}`;
+      for (const r of p.remove ?? []) {
+        const rn = String(r);
+        if (!new RegExp(`^${C}/campaignCriteria/${p.campaign_id}~\\d+$`).test(rn)) throw new AdsError("sync_failed", "resource belongs to another account or campaign");
+        add({ campaignCriterionOperation: { remove: rn } }, { mode: "absent" });
+      }
+      if (!Array.isArray(p.slots) || !p.slots.length) throw new AdsError("sync_failed", "give at least one time slot");
+      let next = 0;
+      for (const s of p.slots) {
+        const sh = Number(s.start_hour), eh = Number(s.end_hour), pct = Number(s.bid_pct ?? 0);
+        if (!Number.isInteger(sh) || !Number.isInteger(eh) || sh !== next || eh <= sh || eh > 24) throw new AdsError("sync_failed", "time slots must cover 0 to 24 in order, in whole hours");
+        if (!Number.isInteger(pct) || pct < -90 || pct > 900) throw new AdsError("sync_failed", "bid_pct must be a whole number from -90 to 900");
+        next = eh;
+        for (const d of WEEK) add({ campaignCriterionOperation: { create: { campaign: camp, bidModifier: (100 + pct) / 100,
+          adSchedule: { dayOfWeek: d, startHour: sh, startMinute: "ZERO", endHour: eh, endMinute: "ZERO" } } } }, { mode: "exists" });
+      }
+      if (next !== 24) throw new AdsError("sync_failed", "time slots must cover all 24 hours");
+      break;
+    }
     default:
       throw new AdsError("sync_failed", `unknown operation ${kind}`);
   }
@@ -281,7 +302,7 @@ export async function executeGoogleOp(google: GoogleAds, op: GoogleOp):
   const names = resultNames(resp);
   const result = { resource_names: names };
   try {
-    const v = await (op.kind === "campaign_create" ? verifyNamesBatched : verifyNames)(g, cid, names, built.checks);
+    const v = await (op.kind === "campaign_create" || op.kind === "ad_schedule" ? verifyNamesBatched : verifyNames)(g, cid, names, built.checks);
     const bad = v.filter((x) => !x.ok);
     return bad.length ? { status: "failed", result, verify: v, error: `Google accepted it, but ${bad.length} item(s) do not read back as expected.` }
                       : { status: "verified", result, verify: v };
@@ -334,6 +355,9 @@ export const SNAPSHOT_QUERIES: Record<string, string> = {
   locations: "SELECT campaign.id, campaign_criterion.criterion_id, campaign_criterion.location.geo_target_constant, campaign_criterion.negative " +
     "FROM campaign_criterion WHERE campaign_criterion.type = 'LOCATION' AND campaign.status != 'REMOVED'",
   // income groups shut out of a campaign (migration 144); ad-group rows, if any, are in income_ad_groups
+  // time slots and their bid changes (migration 145); no rows = ads show all day at the same bid
+  ad_schedule: "SELECT campaign.id, campaign_criterion.resource_name, campaign_criterion.ad_schedule.day_of_week, campaign_criterion.ad_schedule.start_hour, " +
+    "campaign_criterion.ad_schedule.end_hour, campaign_criterion.bid_modifier FROM campaign_criterion WHERE campaign_criterion.type = 'AD_SCHEDULE' AND campaign.status = 'ENABLED'",
   income: "SELECT campaign.id, campaign_criterion.resource_name, campaign_criterion.income_range.type, campaign_criterion.negative " +
     "FROM campaign_criterion WHERE campaign_criterion.type = 'INCOME_RANGE' AND campaign.status != 'REMOVED'",
   income_ad_groups: "SELECT campaign.id, ad_group.id, ad_group_criterion.resource_name, ad_group_criterion.income_range.type, ad_group_criterion.negative " +

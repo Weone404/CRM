@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 144 ADS premium targeting: throwaway database with the Google side of ADS (076-099), then 144 twice. Needs PGHOST/PGUSER(/PGPASSWORD).
+# 144 + 145 ADS premium targeting and time-of-day bids: throwaway database with the Google side of ADS (076-099), 144 twice, then 145 twice. Needs PGHOST/PGUSER(/PGPASSWORD).
 set -euo pipefail
 cd "$(dirname "$0")"
 DB=ads_premium_$$
@@ -22,3 +22,16 @@ psql -q -X -v ON_ERROR_STOP=1 -d $DB -f $M/144_ads_google_premium_down.sql >/dev
   && psql -q -X -v ON_ERROR_STOP=1 -d $DB -f $M/144_ads_google_premium.sql >/dev/null 2>&1 \
   && psql -q -X -t -A -d $DB -c "SELECT jsonb_array_length(crm_private.ads_google_gate((SELECT id FROM public.ads_accounts WHERE platform = 'google'), 'income_filter', '{\"campaign_id\":\"1\",\"exclude\":[\"INCOME_RANGE_0_50\"]}')->'blockers') = 0" | grep -q "^t$" \
   && echo "PASS PR2 144 rolls back (old gate under its own name, new kinds unknown again) and re-applies" || echo "FAIL PR2 144 rollback"
+# 145 on top: twice, its tests, then rollback (refused while schedule operations exist) and re-apply
+for f in $M/145_ads_google_schedule.sql $M/145_ads_google_schedule.sql; do
+  psql -q -X -v ON_ERROR_STOP=1 -d $DB -f "$f" >/dev/null 2>&1 || { echo "FAILED applying $f"; psql -X -v ON_ERROR_STOP=1 -d $DB -f "$f" 2>&1 | grep -m3 ERROR; exit 1; }
+done
+psql -X -q -t -v ON_ERROR_STOP=1 -d $DB -f 20_schedule_tests.sql 2>&1 | grep -E "PASS|FAIL|ERROR|ALL |^ *[0-9]" | sed 's/^.*NOTICE:  //'
+{ psql -q -X -v ON_ERROR_STOP=1 -d $DB -f $M/145_ads_google_schedule_down.sql 2>&1 || true; } | grep -q "cannot be rolled back" \
+  && psql -q -X -d $DB -c "DELETE FROM public.ads_google_ops WHERE kind = 'ad_schedule'" >/dev/null \
+  && psql -q -X -v ON_ERROR_STOP=1 -d $DB -f $M/145_ads_google_schedule_down.sql >/dev/null 2>&1 \
+  && psql -q -X -v ON_ERROR_STOP=1 -d $DB -f $M/144_ads_google_premium.sql >/dev/null 2>&1 \
+  && psql -q -X -t -A -d $DB -c "SELECT to_regprocedure('crm_private.ads_google_gate_v144(uuid,text,jsonb,uuid)') IS NULL AND (crm_private.ads_google_gate((SELECT id FROM public.ads_accounts WHERE platform = 'google'), 'ad_schedule', '{}')->'blockers') @> '[\"Unknown operation type.\"]' AND jsonb_array_length(crm_private.ads_google_gate((SELECT id FROM public.ads_accounts WHERE platform = 'google'), 'income_filter', '{\"campaign_id\":\"1\",\"exclude\":[\"INCOME_RANGE_0_50\"]}')->'blockers') = 0" | grep -q "^t$" \
+  && psql -q -X -v ON_ERROR_STOP=1 -d $DB -f $M/145_ads_google_schedule.sql >/dev/null 2>&1 \
+  && psql -q -X -t -A -d $DB -c "SELECT jsonb_array_length(crm_private.ads_google_gate((SELECT id FROM public.ads_accounts WHERE platform = 'google'), 'ad_schedule', '{\"campaign_id\":\"1\",\"slots\":[{\"start_hour\":0,\"end_hour\":24}]}')->'blockers') = 0" | grep -q "^t$" \
+  && echo "PASS PR3 145 rollback is refused while schedules exist, then rolls back to 144 (schedules unknown, income filter intact) and re-applies" || echo "FAIL PR3 145 rollback"

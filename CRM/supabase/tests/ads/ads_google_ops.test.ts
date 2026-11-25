@@ -361,3 +361,36 @@ Deno.test("dryRunGoogleOp: validate only, never the real request; reports Google
   eq(await dryRunGoogleOp(no, op), { ok: false, operations: 1, error: "POLICY_FINDING: unproven claim" }, "refused, with Google's words");
   eq(await dryRunGoogleOp(ok, { ...op, payload: { campaign_id: "9" } }), { ok: false, operations: 0, error: "nothing to change" }, "a bad operation never reaches Google");
 });
+
+// ---- migration 145: time-of-day bids ----
+Deno.test("ad_schedule: every day, every slot, with the bid change; old rows removed first", () => {
+  const b = buildOps(CID, "ad_schedule", { campaign_id: "9", remove: [`customers/${CID}/campaignCriteria/9~300`],
+    slots: [{ start_hour: 0, end_hour: 6, bid_pct: -30 }, { start_hour: 6, end_hour: 24 }] });
+  eq(b.ops.length, 15, "1 removal + 2 slots x 7 days");
+  eq(b.ops[0], { campaignCriterionOperation: { remove: `customers/${CID}/campaignCriteria/9~300` } }, "old row out first");
+  eq(b.checks[0], { mode: "absent" }, "read back as gone");
+  eq(b.ops[1].campaignCriterionOperation.create, { campaign: `customers/${CID}/campaigns/9`, bidModifier: 0.7,
+    adSchedule: { dayOfWeek: "MONDAY", startHour: 0, startMinute: "ZERO", endHour: 6, endMinute: "ZERO" } }, "30% lower, midnight to 6");
+  eq(b.ops[14].campaignCriterionOperation.create, { campaign: `customers/${CID}/campaigns/9`, bidModifier: 1,
+    adSchedule: { dayOfWeek: "SUNDAY", startHour: 6, startMinute: "ZERO", endHour: 24, endMinute: "ZERO" } }, "the rest of the day unchanged");
+});
+
+Deno.test("ad_schedule refuses a gap, an overlap, a short day, half hours, a bad bid and another campaign's row", () => {
+  const bad = [
+    { campaign_id: "9", slots: [{ start_hour: 0, end_hour: 6 }, { start_hour: 7, end_hour: 24 }] },
+    { campaign_id: "9", slots: [{ start_hour: 0, end_hour: 8 }, { start_hour: 6, end_hour: 24 }] },
+    { campaign_id: "9", slots: [{ start_hour: 0, end_hour: 22 }] },
+    { campaign_id: "9", slots: [{ start_hour: 6, end_hour: 24 }] },
+    { campaign_id: "9", slots: [{ start_hour: 0, end_hour: 6.5 }, { start_hour: 6.5, end_hour: 24 }] },
+    { campaign_id: "9", slots: [{ start_hour: 0, end_hour: 24, bid_pct: -95 }] },
+    { campaign_id: "9", slots: [{ start_hour: 0, end_hour: 24, bid_pct: 12.5 }] },
+    { campaign_id: "9", slots: [] },
+    { campaign_id: "9", slots: [{ start_hour: 0, end_hour: 24 }], remove: [`customers/${CID}/campaignCriteria/8~300`] },
+    { campaign_id: "9", slots: [{ start_hour: 0, end_hour: 24 }], remove: ["customers/1111111111/campaignCriteria/9~300"] },
+  ];
+  for (const p of bad) {
+    let threw = false;
+    try { buildOps(CID, "ad_schedule", p); } catch { threw = true }
+    if (!threw) throw new Error(`ad_schedule accepted ${JSON.stringify(p)}`);
+  }
+});
