@@ -233,3 +233,66 @@ Deno.test("ingestEvents: accepted, rejected with Google's status, a missing scop
   eq(convertOutcome("UNAVAILABLE: try later").status, "retry", "transient");
   eq(convertOutcome("INVALID_ARGUMENT: duplicate transaction").status, "sent", "duplicate is sent");
 });
+
+// ---- migration 144: new campaign and income filter ----
+Deno.test("campaign_create: budget, Search campaign and locations in one request, with temporary ids", () => {
+  const b = buildOps(CID, "campaign_create", { name: " Other cities ", daily_budget: 60, max_cpc: 20, locations: ["9061645", 1007801] });
+  eq(b.ops.length, 4, "budget + campaign + 2 locations");
+  eq(b.checks.every((c) => c.mode === "exists"), true, "every row is read back");
+  eq(b.ops[0].campaignBudgetOperation.create, { resourceName: `customers/${CID}/campaignBudgets/-1`, name: "Other cities budget", deliveryMethod: "STANDARD",
+    amountMicros: "60000000", explicitlyShared: false }, "its own budget, exact micros");
+  const c = b.ops[1].campaignOperation.create;
+  eq([c.resourceName, c.name, c.advertisingChannelType, c.status, c.campaignBudget], [`customers/${CID}/campaigns/-2`, "Other cities", "SEARCH", "ENABLED", `customers/${CID}/campaignBudgets/-1`], "campaign");
+  eq(c.targetSpend, { cpcBidCeilingMicros: "20000000" }, "Maximize Clicks with the click limit");
+  eq(c.networkSettings, { targetGoogleSearch: true, targetSearchNetwork: false, targetContentNetwork: false, targetPartnerSearchNetwork: false }, "Google Search only");
+  eq(c.geoTargetTypeSetting, { positiveGeoTargetType: "PRESENCE" }, "people physically there");
+  eq(c.containsEuPoliticalAdvertising, "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING", "required declaration");
+  eq(b.ops[3].campaignCriterionOperation.create, { campaign: `customers/${CID}/campaigns/-2`, location: { geoTargetConstant: "geoTargetConstants/1007801" } }, "location on the new campaign");
+  eq(buildOps(CID, "campaign_create", { name: "Paused one", daily_budget: 1, max_cpc: 3, locations: ["1"], status: "paused" }).ops[1].campaignOperation.create.status, "PAUSED", "paused on request");
+});
+
+Deno.test("campaign_create refuses no locations, a bad location, a bad status, no name and bad money", () => {
+  const bad = [
+    { name: "X campaign", daily_budget: 60, max_cpc: 20, locations: [] },
+    { name: "X campaign", daily_budget: 60, max_cpc: 20 },
+    { name: "X campaign", daily_budget: 60, max_cpc: 20, locations: ["12a"] },
+    { name: "X campaign", daily_budget: 60, max_cpc: 20, locations: ["1"], status: "REMOVED" },
+    { name: " a ", daily_budget: 60, max_cpc: 20, locations: ["1"] },
+    { name: "X campaign", daily_budget: 0, max_cpc: 20, locations: ["1"] },
+    { name: "X campaign", daily_budget: 60, max_cpc: "abc", locations: ["1"] },
+  ];
+  for (const p of bad) {
+    let threw = false;
+    try { buildOps(CID, "campaign_create", p); } catch { threw = true }
+    if (!threw) throw new Error(`campaign_create accepted ${JSON.stringify(p)}`);
+  }
+});
+
+Deno.test("income_filter: shuts groups out of a campaign or an ad group, and lets them back in", () => {
+  const c = buildOps(CID, "income_filter", { campaign_id: "9", exclude: ["INCOME_RANGE_0_50", "income_range_undetermined"] });
+  eq(c.ops, [
+    { campaignCriterionOperation: { create: { campaign: `customers/${CID}/campaigns/9`, negative: true, incomeRange: { type: "INCOME_RANGE_0_50" } } } },
+    { campaignCriterionOperation: { create: { campaign: `customers/${CID}/campaigns/9`, negative: true, incomeRange: { type: "INCOME_RANGE_UNDETERMINED" } } } },
+  ], "campaign level, negative");
+  eq(c.checks, [{ mode: "exists" }, { mode: "exists" }], "read back");
+  const a = buildOps(CID, "income_filter", { ad_group_id: "5", exclude: ["INCOME_RANGE_70_80"], remove: [`customers/${CID}/adGroupCriteria/5~510001`] });
+  eq(a.ops[0], { adGroupCriterionOperation: { create: { adGroup: `customers/${CID}/adGroups/5`, negative: true, incomeRange: { type: "INCOME_RANGE_70_80" } } } }, "ad group level");
+  eq(a.ops[1], { adGroupCriterionOperation: { remove: `customers/${CID}/adGroupCriteria/5~510001` } }, "let back in");
+  eq(a.checks[1], { mode: "absent" }, "removal is read back as gone");
+});
+
+Deno.test("income_filter refuses an unknown group, another account's row, the wrong level and an empty change", () => {
+  const bad = [
+    { campaign_id: "9", exclude: ["RICH"] },
+    { campaign_id: "9", remove: ["customers/1111111111/campaignCriteria/9~510001"] },
+    { campaign_id: "9", remove: [`customers/${CID}/adGroupCriteria/9~510001`] },
+    { ad_group_id: "5", remove: [`customers/${CID}/campaignCriteria/5~510001`] },
+    { campaign_id: "9" },
+    { exclude: ["INCOME_RANGE_0_50"] },
+  ];
+  for (const p of bad) {
+    let threw = false;
+    try { buildOps(CID, "income_filter", p); } catch { threw = true }
+    if (!threw) throw new Error(`income_filter accepted ${JSON.stringify(p)}`);
+  }
+});

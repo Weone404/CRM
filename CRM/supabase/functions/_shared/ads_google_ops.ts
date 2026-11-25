@@ -31,6 +31,9 @@ export const micros = (v: unknown, what: string) => {
   if (!Number.isFinite(n) || n <= 0) throw new AdsError("sync_failed", `${what} must be a number above 0`);
   return String(Math.round(n * 100) * 10_000);
 };
+// Google's household-income groups (share of households by income; UNDETERMINED = Google does not know).
+export const INCOME_TIERS = ["INCOME_RANGE_0_50", "INCOME_RANGE_50_60", "INCOME_RANGE_60_70", "INCOME_RANGE_70_80", "INCOME_RANGE_80_90",
+  "INCOME_RANGE_90_UP", "INCOME_RANGE_UNDETERMINED"];
 const camel = (s: string) => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 export const getPath = (row: any, path: string) => path.split(".").reduce((o, k) => (o == null ? undefined : o[camel(k)]), row);
 
@@ -127,6 +130,41 @@ export function buildOps(cid: string, kind: string, p: any): Built {
       const m = micros(p.daily_budget, "daily_budget");
       add({ campaignBudgetOperation: { update: { resourceName: rn, amountMicros: m }, updateMask: "amountMicros" } },
         { mode: "field", field: "amount_micros", value: m });
+      break;
+    }
+    case "campaign_create": {   // budget + Search campaign + first locations, in one atomic request (temporary ids -1 and -2)
+      const name = String(p.name ?? "").trim();
+      if (name.length < 3) throw new AdsError("sync_failed", "campaign name is required");
+      const st = String(p.status ?? "ENABLED").toUpperCase();
+      if (st !== "ENABLED" && st !== "PAUSED") throw new AdsError("sync_failed", "status must be ENABLED or PAUSED");
+      if (!Array.isArray(p.locations) || !p.locations.length) throw new AdsError("sync_failed", "a campaign needs at least one location");
+      const budget = `${C}/campaignBudgets/-1`, camp = `${C}/campaigns/-2`;
+      add({ campaignBudgetOperation: { create: { resourceName: budget, name: `${name} budget`, deliveryMethod: "STANDARD",
+        amountMicros: micros(p.daily_budget, "daily_budget"), explicitlyShared: false } } }, { mode: "exists" });
+      add({ campaignOperation: { create: { resourceName: camp, name, advertisingChannelType: "SEARCH", status: st, campaignBudget: budget,
+        targetSpend: { cpcBidCeilingMicros: micros(p.max_cpc, "max_cpc") },
+        networkSettings: { targetGoogleSearch: true, targetSearchNetwork: false, targetContentNetwork: false, targetPartnerSearchNetwork: false },
+        geoTargetTypeSetting: { positiveGeoTargetType: "PRESENCE" },
+        containsEuPoliticalAdvertising: "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING" } } }, { mode: "exists" });
+      for (const g of p.locations) add({ campaignCriterionOperation: { create: { campaign: camp,
+        location: { geoTargetConstant: `geoTargetConstants/${digits(g, "location")}` } } } }, { mode: "exists" });
+      break;
+    }
+    case "income_filter": {     // household income groups shut out of a campaign or an ad group (negative), or let back in (remove)
+      const onCampaign = /^\d+$/.test(String(p.campaign_id ?? ""));
+      const parent = onCampaign ? `${C}/campaigns/${digits(p.campaign_id, "campaign_id")}` : `${C}/adGroups/${digits(p.ad_group_id, "ad_group_id")}`;
+      const key = onCampaign ? "campaignCriterionOperation" : "adGroupCriterionOperation";
+      for (const t of p.exclude ?? []) {
+        const type = String(t).toUpperCase();
+        if (!INCOME_TIERS.includes(type)) throw new AdsError("sync_failed", `unknown income group ${type}`);
+        add({ [key]: { create: { [onCampaign ? "campaign" : "adGroup"]: parent, negative: true, incomeRange: { type } } } }, { mode: "exists" });
+      }
+      for (const r of p.remove ?? []) {
+        const rn = String(r);
+        if (!new RegExp(`^${C}/${onCampaign ? "campaignCriteria" : "adGroupCriteria"}/\\d+~\\d+$`).test(rn)) throw new AdsError("sync_failed", "resource belongs to another account or level");
+        add({ [key]: { remove: rn } }, { mode: "absent" });
+      }
+      if (!ops.length) throw new AdsError("sync_failed", "nothing to change");
       break;
     }
     default:
@@ -234,6 +272,11 @@ export const SNAPSHOT_QUERIES: Record<string, string> = {
     "FROM campaign WHERE campaign.status != 'REMOVED'",
   locations: "SELECT campaign.id, campaign_criterion.criterion_id, campaign_criterion.location.geo_target_constant, campaign_criterion.negative " +
     "FROM campaign_criterion WHERE campaign_criterion.type = 'LOCATION' AND campaign.status != 'REMOVED'",
+  // income groups shut out of a campaign (migration 144); ad-group rows, if any, are in income_ad_groups
+  income: "SELECT campaign.id, campaign_criterion.resource_name, campaign_criterion.income_range.type, campaign_criterion.negative " +
+    "FROM campaign_criterion WHERE campaign_criterion.type = 'INCOME_RANGE' AND campaign.status != 'REMOVED'",
+  income_ad_groups: "SELECT campaign.id, ad_group.id, ad_group_criterion.resource_name, ad_group_criterion.income_range.type, ad_group_criterion.negative " +
+    "FROM ad_group_criterion WHERE ad_group_criterion.type = 'INCOME_RANGE' AND ad_group_criterion.negative = TRUE AND campaign.status != 'REMOVED'",
   ad_groups: "SELECT campaign.id, ad_group.id, ad_group.name, ad_group.status, ad_group.type, ad_group.cpc_bid_micros FROM ad_group " +
     "WHERE campaign.status != 'REMOVED' AND ad_group.status != 'REMOVED'",
   // keywords of the running campaigns (performance comes from the search terms; keyword_view hides keywords with no traffic)
