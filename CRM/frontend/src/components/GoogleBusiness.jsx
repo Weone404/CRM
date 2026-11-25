@@ -473,6 +473,178 @@ function Reviews({ o, filter, go, stamp }) {
   );
 }
 
+// ---------------------------------------------------------------- health check, posts, photos (migration 143)
+const useRows = (fn, args, deps) => {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
+  const load = useCallback(async () => { try { setData(await rpc(fn, args)); setErr(''); } catch (e) { setErr(e.message); } }, deps);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setData(null); load(); }, [load]);
+  return [data, err, load];
+};
+const https = (u) => (typeof u === 'string' && /^https:\/\//.test(u) ? u : null);
+
+function Health({ o, stamp }) {
+  const [rows, err] = useRows('api_gbp_profile', { p_location: o.selected || null }, [o.selected, stamp]);
+  if (err) return <div role="alert" className="glass-card p-5 text-sm">{err}</div>;
+  if (!rows) return <div className="glass-card p-5 text-sm text-glass-secondary">Loading…</div>;
+  const line = (c) => (
+    <li key={c.key} className="flex items-start gap-3 py-2.5 border-t border-[var(--hairline)] first:border-t-0" data-check={c.key}>
+      <span className="mt-0.5 h-6 w-6 rounded-full inline-flex items-center justify-center shrink-0"
+        style={c.ok ? { background: 'rgba(30,123,52,0.12)', color: '#1E7B34' } : c.level === 'basic' ? { background: 'rgba(192,39,29,0.10)', color: '#A42219' } : { background: 'rgba(178,106,0,0.14)', color: '#8A5300' }}>
+        <Icon name={c.ok ? 'check' : 'alert'} size={13} /></span>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium text-glass-primary">{c.title} {!c.ok && <Chip tone={c.level === 'basic' ? 'bad' : 'warn'}>{c.level === 'basic' ? 'Basic' : 'Good practice'}</Chip>}</div>
+        <div className="text-[13px] text-glass-secondary break-words">{c.detail}</div>
+      </div>
+    </li>
+  );
+  return (
+    <div className="flex flex-col gap-5">
+      {rows.map((p) => {
+        const todo = (p.checks || []).filter((c) => !c.ok).sort((a, b) => (a.level === 'basic' ? 0 : 1) - (b.level === 'basic' ? 0 : 1));
+        const fine = (p.checks || []).filter((c) => c.ok);
+        return (
+          <Section key={p.id} id="health" title={p.title} hint={`${p.ok} of ${p.total} in order${p.checked_at ? ` · read from Google ${ago(p.checked_at)}` : ''}`}
+            action={<a href="https://business.google.com/locations" target="_blank" rel="noopener noreferrer" className="shrink-0 text-sm font-medium text-[var(--accent)] min-h-[36px] inline-flex items-center gap-1">Edit on Google<Icon name="external" size={13} /></a>}>
+            {!p.collected && <p className="m-0 mb-2 text-[13px]" style={{ color: '#8A5300' }}>Only the basics are checked so far. Hours, description, photos and posts are read on the next refresh.</p>}
+            {todo.length === 0 ? <p className="m-0 mb-1 text-sm font-medium" style={{ color: '#1E7B34' }}>Everything checked is in order.</p>
+              : <ul className="m-0 p-0 list-none">{todo.map(line)}</ul>}
+            {fine.length > 0 && <details className="mt-2"><summary className="cursor-pointer text-sm font-medium text-[var(--accent)] min-h-[32px]">{fine.length} in order</summary><ul className="m-0 p-0 list-none">{fine.map(line)}</ul></details>}
+          </Section>
+        );
+      })}
+      {!rows.length && <div className="glass-card p-5 text-sm text-glass-secondary">No tracked profile to check.</div>}
+      <p className="m-0 text-xs text-glass-secondary">"Basic" items are what a customer needs to find and reach you. "Good practice" items are the CRM's advice, not rules set by Google.</p>
+    </div>
+  );
+}
+
+const POST_STATE = { LIVE: ['Live', 'good'], REJECTED: ['Rejected by Google', 'bad'], PROCESSING: ['Being checked by Google', 'muted'], SCHEDULED: ['Scheduled', 'muted'] };
+const BUTTONS = [['', 'No button'], ['LEARN_MORE', 'Learn more'], ['BOOK', 'Book'], ['SIGN_UP', 'Sign up'], ['CALL', 'Call now'], ['ORDER', 'Order online'], ['SHOP', 'Shop']];
+function Posts({ o, stamp }) {
+  const [d, err, load] = useRows('api_gbp_posts', { p_location: o.selected || null, p_limit: 60 }, [o.selected, stamp]);
+  const [f, setF] = useState({ text: '', cta: '', url: '', photo: '', loc: '' });
+  const [busy, setBusy] = useState(false);
+  if (err) return <div role="alert" className="glass-card p-5 text-sm">{err}</div>;
+  if (!d) return <div className="glass-card p-5 text-sm text-glass-secondary">Loading…</div>;
+  const can = (d.profiles || []).filter((p) => p.can_post);
+  const loc = f.loc || can[0]?.id || '';
+  const many = (d.profiles || []).length > 1;
+  const push = async () => {
+    const out = await edge(['post']).catch((e) => ({ results: { post: { status: 'error', detail: e.message } } }));
+    const r = out.results?.post;
+    showToast(r?.status === 'ok' ? 'Published on Google' : `Not published: ${r?.detail || 'no answer'}`, r?.status === 'ok' ? 'success' : 'error');
+    return r?.status === 'ok';
+  };
+  const publish = async (p, fromForm) => {
+    if (busy) return; setBusy(true);
+    try {
+      await rpc('api_gbp_post_create', { p_location: p.loc, p_summary: p.text, p_cta_type: p.cta || null, p_cta_url: p.cta && p.cta !== 'CALL' ? p.url : null, p_photo_url: p.photo || null });
+      if (await push() && fromForm) setF({ text: '', cta: '', url: '', photo: '', loc: f.loc });
+    } catch (e) { showToast(e.message, 'error'); }
+    await load(); setBusy(false);
+  };
+  const remove = async (w) => { setBusy(true); try { await rpc('api_gbp_post_cancel', { p_id: w.id }); } catch (e) { showToast(e.message, 'error'); } await load(); setBusy(false); };
+  const field = 'glass-input min-h-[40px] px-3 text-sm';
+  return (
+    <div className="flex flex-col gap-5">
+      {d.can_run && can.length > 0 && (
+        <Section id="new-post" title="New post" hint="It goes on your Business Profile exactly as written here. Google reviews every post and may reject one that breaks its rules.">
+          <form className="grid gap-3 max-w-2xl" onSubmit={(e) => { e.preventDefault(); publish({ ...f, loc }, true); }}>
+            {can.length > 1 && <label className="text-[13px] text-glass-secondary flex flex-col gap-1">Profile
+              <select className={field} value={loc} onChange={(e) => setF({ ...f, loc: e.target.value })}>{can.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>}
+            <label className="text-[13px] text-glass-secondary flex flex-col gap-1">What do you want to tell people?
+              <textarea className="glass-input px-3 py-2 text-sm" rows={4} maxLength={1500} required value={f.text} onChange={(e) => setF({ ...f, text: e.target.value })} placeholder="New DGCA ground class batch starts on 1 December. Weekday and weekend timings." />
+              <span className="self-end text-[12px]">{f.text.length} of 1,500</span></label>
+            <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+              <label className="text-[13px] text-glass-secondary flex flex-col gap-1">Button
+                <select className={field} value={f.cta} onChange={(e) => setF({ ...f, cta: e.target.value })}>{BUTTONS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+              {f.cta && f.cta !== 'CALL' && <label className="text-[13px] text-glass-secondary flex flex-col gap-1">Where the button leads
+                <input type="url" className={field} required pattern="https://.+" value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} placeholder="https://weoneaviation.in/…" /></label>}
+            </div>
+            {f.cta === 'CALL' && <p className="m-0 text-[13px] text-glass-secondary">The button calls the phone number on your profile.</p>}
+            <label className="text-[13px] text-glass-secondary flex flex-col gap-1">Photo (optional): a link to a picture that anyone can open
+              <input type="url" className={field} pattern="https://.+" value={f.photo} onChange={(e) => setF({ ...f, photo: e.target.value })} placeholder="https://…/photo.jpg" /></label>
+            <div><button type="submit" disabled={busy || !f.text.trim()} className="glass-btn min-h-[40px] px-4 text-sm">{busy ? 'Publishing…' : 'Publish on Google'}</button></div>
+          </form>
+        </Section>
+      )}
+      {d.can_run && !can.length && (d.profiles || []).length > 0 && <div className="glass-card p-5 text-sm text-glass-secondary">Google does not allow posts on {many ? 'these profiles' : 'this profile'}.</div>}
+      {(d.waiting || []).length > 0 && (
+        <Section id="waiting-posts" title="Not on Google" hint="Posts that did not go out. Nothing is sent again by itself.">
+          {d.waiting.map((w) => (
+            <div key={w.id} className="py-3 border-t border-[var(--hairline)] first:border-t-0 text-sm" data-waiting={w.id}>
+              <div className="flex flex-wrap items-center gap-2"><Chip tone={w.status === 'failed' ? 'bad' : 'muted'}>{w.status === 'failed' ? 'Not published' : 'Being published'}</Chip>
+                <span className="text-[12px] text-glass-secondary">{day(w.created_at)}{many ? ` · ${w.profile}` : ''}</span></div>
+              <p className="m-0 mt-1 text-glass-primary whitespace-pre-line break-words">{w.summary}</p>
+              {w.error && <p className="m-0 mt-1 text-[13px]" style={{ color: '#A42219' }}>{w.error}</p>}
+              {d.can_run && w.status === 'failed' && <div className="mt-2 flex flex-wrap gap-2">
+                <button type="button" disabled={busy} className="glass-btn-ghost min-h-[36px] px-3 text-[13px]" onClick={async () => { await remove(w); publish({ text: w.summary, cta: w.cta_type || '', url: w.cta_url || '', photo: w.photo_url || '', loc: w.location_id }); }}>Publish again</button>
+                <button type="button" disabled={busy} className="glass-btn-ghost min-h-[36px] px-3 text-[13px]" onClick={() => remove(w)}>Remove</button></div>}
+            </div>
+          ))}
+        </Section>
+      )}
+      <Section id="posts" title="Posts on Google" hint={`${fmt((d.posts || []).length)} shown, newest first. Google no longer reports how many people saw a post.`}>
+        {!(d.profiles || []).some((p) => p.collected) && <p className="m-0 text-sm text-glass-secondary">Posts are read on the next refresh.</p>}
+        {(d.profiles || []).some((p) => p.collected) && !(d.posts || []).length && <p className="m-0 text-sm text-glass-secondary">No post on the profile yet.</p>}
+        {(d.posts || []).map((p) => {
+          const [label, tone] = POST_STATE[p.state] || [p.state || 'Unknown', 'muted'];
+          const btn = BUTTONS.find(([k]) => k && k === p.cta_type);
+          return (
+            <article key={`${p.location_id}${p.post_id}`} className="py-3.5 border-t border-[var(--hairline)] first:border-t-0 text-sm flex gap-3" data-post={p.post_id}>
+              {https(p.media_url) && <img src={p.media_url} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-16 w-16 rounded-[10px] object-cover shrink-0" />}
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5"><Chip tone={tone}>{label}</Chip><span className="text-[12px] text-glass-secondary">{day(p.created_at)}{many ? ` · ${p.profile}` : ''}</span></div>
+                <p className="m-0 mt-1 text-glass-primary whitespace-pre-line break-words">{p.summary || 'No text.'}</p>
+                <div className="mt-1 flex flex-wrap gap-x-4 text-[13px]">
+                  {btn && <span className="text-glass-secondary">Button: {btn[1]}{https(p.cta_url) ? <> → <span className="break-all">{p.cta_url}</span></> : ''}</span>}
+                  {https(p.search_url) && <a href={p.search_url} target="_blank" rel="noopener noreferrer" className="text-[var(--accent)] inline-flex items-center gap-1">View on Google<Icon name="external" size={12} /></a>}
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </Section>
+    </div>
+  );
+}
+
+const PHOTO_KIND = { COVER: 'Cover', PROFILE: 'Logo', LOGO: 'Logo', EXTERIOR: 'Outside', INTERIOR: 'Inside', PRODUCT: 'Product', AT_WORK: 'At work', TEAMS: 'Team', FOOD_AND_DRINK: 'Food and drink',
+  MENU: 'Menu', COMMON_AREA: 'Common area', ROOMS: 'Rooms', ADDITIONAL: 'Other', CUSTOMER: 'From a customer' };
+function Photos({ o, stamp }) {
+  const [d, err] = useRows('api_gbp_media', { p_location: o.selected || null, p_limit: 200 }, [o.selected, stamp]);
+  const [who, setWho] = useState('all');
+  if (err) return <div role="alert" className="glass-card p-5 text-sm">{err}</div>;
+  if (!d) return <div className="glass-card p-5 text-sm text-glass-secondary">Loading…</div>;
+  const items = (d.items || []).filter((m) => (who === 'all' ? true : who === 'yours' ? m.by_owner : !m.by_owner));
+  const kinds = Object.entries(d.by_category || {}).sort((a, b) => b[1] - a[1]);
+  return (
+    <Section id="photos" title="Photos" hint={d.collected ? `${fmt(d.owner)} of your own · ${fmt(d.customers)} from customers${d.last_added ? ` · your last one added ${day(d.last_added)}` : ''}. Google no longer reports how many people saw a photo.` : 'Photos are read on the next refresh.'}>
+      {d.collected && <>
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <div role="tablist" aria-label="Whose photos" className="inline-flex p-0.5 rounded-[10px] bg-[var(--surface-sunken)]">
+            {[['all', 'All'], ['yours', 'Yours'], ['customers', 'From customers']].map(([k, l]) => (
+              <button key={k} role="tab" aria-selected={who === k} type="button" onClick={() => setWho(k)} className={`min-h-[34px] px-3 rounded-[8px] text-[13px] ${who === k ? 'bg-white shadow-sm font-semibold text-glass-primary' : 'text-glass-secondary'}`}>{l}</button>))}
+          </div>
+          {kinds.map(([k, n]) => <Chip key={k}>{PHOTO_KIND[k] || 'Other'} {fmt(n)}</Chip>)}
+        </div>
+        {!items.length && <p className="m-0 text-sm text-glass-secondary">{who === 'customers' ? 'No photo from customers.' : 'No photo here yet.'}</p>}
+        <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))' }}>
+          {items.map((m) => {
+            const inner = <>
+              {https(m.thumb_url) ? <img src={m.thumb_url} alt={m.description || PHOTO_KIND[m.category] || 'Photo'} loading="lazy" referrerPolicy="no-referrer" className="w-full aspect-square object-cover rounded-[12px] bg-[var(--surface-sunken)]" />
+                : <span className="w-full aspect-square rounded-[12px] bg-[var(--surface-sunken)] inline-flex items-center justify-center text-[12px] text-glass-secondary">{m.format === 'VIDEO' ? 'Video' : 'No preview'}</span>}
+              <span className="block mt-1 text-[12px] text-glass-secondary truncate">{PHOTO_KIND[m.category] || 'Other'}{m.format === 'VIDEO' ? ' · video' : ''}{m.created_at ? ` · ${day(m.created_at)}` : ''}</span></>;
+            return https(m.google_url) ? <a key={`${m.location_id}${m.media_id}`} href={m.google_url} target="_blank" rel="noopener noreferrer" className="block" data-photo={m.media_id}>{inner}</a>
+              : <div key={`${m.location_id}${m.media_id}`} data-photo={m.media_id}>{inner}</div>;
+          })}
+        </div>
+      </>}
+    </Section>
+  );
+}
+
 // ---------------------------------------------------------------- profiles and Google logins
 function TokenForm({ withName, busy, onSave, onCancel }) {
   const [name, setName] = useState('');
@@ -588,7 +760,8 @@ function Manage({ o, reload }) {
 }
 
 // ---------------------------------------------------------------- page
-const TABS = [['overview', 'Overview'], ['words', 'Search words'], ['reviews', 'Reviews'], ['manage', 'Profiles & logins']];
+const TABS = [['overview', 'Overview'], ['words', 'Search words'], ['reviews', 'Reviews'], ['health', 'Health check'], ['posts', 'Posts'], ['photos', 'Photos'], ['manage', 'Profiles & logins']];
+const NEEDS_PROFILE = ['health', 'posts', 'photos'];      // these work as soon as a profile is tracked, before any numbers arrive
 export default function GoogleBusiness() {
   const route = useRoute();
   const tab = TABS.some(([k]) => k === route.section) ? route.section : 'overview';
@@ -633,12 +806,12 @@ export default function GoogleBusiness() {
               {tracked.map((l) => <option key={l.id} value={l.id}>{l.title}</option>)}
             </select>
           )}
-          <div role="group" aria-label="Period" className="inline-flex p-0.5 rounded-[10px] bg-[var(--surface-sunken)]">
+          {!NEEDS_PROFILE.includes(tab) && tab !== 'manage' && <div role="group" aria-label="Period" className="inline-flex p-0.5 rounded-[10px] bg-[var(--surface-sunken)]">
             {PERIODS.map((n) => (
               <button key={n} type="button" aria-pressed={days === n} onClick={() => navigate('gbp', tab === 'overview' ? '' : tab, { p: loc || undefined, d: n === 28 ? undefined : n })}
                 className={`min-h-[32px] px-3 rounded-[8px] ${days === n ? 'bg-white shadow-sm font-semibold text-glass-primary' : 'text-glass-secondary'}`}>{n} days</button>
             ))}
-          </div>
+          </div>}
           {o?.access?.can_run && Number(s.connections) > 0 && <button type="button" disabled={!!running} onClick={refresh} className="glass-btn min-h-[36px] px-3.5 inline-flex items-center gap-1.5"><Icon name="refresh" size={14} />{running ? `${running}…` : 'Refresh'}</button>}
         </div>
       </div>
@@ -650,7 +823,10 @@ export default function GoogleBusiness() {
       </div>
       {err && !o && <div role="alert" className="glass-card p-5 text-sm">{err} <button type="button" className="text-[var(--accent)] font-medium ml-2" onClick={load}>Try again</button></div>}
       {!o && !err && <div className="glass-card p-5 text-sm text-glass-secondary">Loading…</div>}
-      {o && tab !== 'manage' && !s.has_data && <Setup o={o} isAdmin={o.access?.is_admin} />}
+      {o && tab !== 'manage' && (NEEDS_PROFILE.includes(tab) ? !Number(s.tracked) : !s.has_data) && <Setup o={o} isAdmin={o.access?.is_admin} />}
+      {o && tab === 'health' && Number(s.tracked) > 0 && <Health o={o} stamp={lastRun} />}
+      {o && tab === 'posts' && Number(s.tracked) > 0 && <Posts o={o} stamp={lastRun} />}
+      {o && tab === 'photos' && Number(s.tracked) > 0 && <Photos o={o} stamp={lastRun} />}
       {o && tab === 'overview' && s.has_data && <Overview o={o} go={go} />}
       {o && tab === 'words' && s.has_data && <Words o={o} />}
       {o && tab === 'reviews' && s.has_data && <Reviews o={o} filter={route.params.f} go={go} stamp={lastRun} />}

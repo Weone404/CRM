@@ -419,6 +419,89 @@ await page.screenshot({ path: '/tmp/gbp_reviews.png', fullPage: true });
 await page.goto(`${APP}#/gbp/reviews?d=7`); await page.waitForTimeout(900);
 await page.getByRole('tab', { name: '1 to 3 stars' }).click(); await page.waitForTimeout(600);
 ok(/[?&]f=low/.test(page.url()) && (await calls()).some((x) => x.fn === 'api_gbp_reviews' && x.args.p_filter === 'low') && !/Asha Verma/.test(await body()), 'GG17 low-star filter is in the address and asks the server');
+// Health check, posts, photos (143)
+await page.goto(`${APP}#/gbp/health`); await page.getByTestId('gbp').waitFor(); await page.waitForTimeout(900);
+b = await body();
+const hs = g.locator('[data-section="health"]');
+ok(/We One Aviation\s*5 of 9 in order · read from Google 2 h ago/.test(b) && await hs.getByRole('link', { name: /Edit on Google/ }).getAttribute('href') === 'https://business.google.com/locations', 'HC01 health check: how many items are in order, when it was read, and a link to edit on Google');
+let t = (await hs.locator('ul').first().innerText()).replace(/\s+/g, ' ');
+ok(/^Website link Basic .*Opening hours Basic .*At least 10 photos of your own Good practice You have 4; customers added 31\. A post in the last 30 days Good practice Last post on 2 Sep 2026\.$/.test(t),
+  'HC02 what is missing comes first, basics before advice, each with what Google has now');
+ok(/<img src=z onerror=alert\(3\)>/.test(t) && await page.locator('img[src="z"]').count() === 0 && /advice, not rules set by Google/.test(b), 'HC03 text from Google is shown as text; advice is labelled as advice');
+await hs.locator('summary').click();
+ok(/5 in order/.test(await hs.locator('summary').innerText()) && /Verified on Google\s*Google has verified that you own this business\./.test(await hs.innerText()), 'HC04 what is in order is folded away, one click to see');
+await mode('gbpHealth=basic');
+await page.reload(); await page.getByTestId('gbp').waitFor(); await page.waitForTimeout(1000);
+ok(/Only the basics are checked so far\. Hours, description, photos and posts are read on the next refresh\./.test(await body()), 'HC05 before the detailed read it says so, instead of calling things missing');
+await mode('gbpHealth=full');
+await page.getByRole('tab', { name: 'Posts' }).click(); await page.waitForTimeout(800);
+b = await body();
+ok(/#\/gbp\/posts/.test(page.url()) && /Live\s*20 Nov\s*New DGCA batch from 1 December\.\s*Weekday and weekend timings\.\s*Button: Learn more → https:\/\/weoneaviation\.in\/dgca\s*View on Google/.test(b)
+  && /Rejected by Google\s*2 Sept?\s*<b>Call now<\/b> 98110/.test(b) && /Google no longer reports how many people saw a post/.test(b), 'PO01 posts with their state, text, button and a link to see them on Google; no invented view counts');
+ok(await g.locator('[data-post="p1"] img').getAttribute('src') === 'https://lh3.googleusercontent.com/p1' && await g.locator('[data-post="p2"] img').count() === 0 && !/javascript:/.test(await g.locator('[data-post="p2"]').innerHTML()),
+  'PO02 a picture is shown only from an https link; a script link from the data is never put in the page');
+const np = g.locator('[data-section="new-post"]');
+ok(await np.getByRole('button', { name: 'Publish on Google' }).isDisabled() && /0 of 1,500/.test(await np.innerText()), 'PO03 nothing to publish until something is written; the length is counted');
+await np.getByLabel(/What do you want to tell people/).fill('Open day this Sunday at the Dwarka centre.');
+await np.locator('select').selectOption('BOOK');
+ok(await np.getByLabel(/Where the button leads/).isVisible(), 'PO04 a button asks for its link');
+await np.locator('select').selectOption('CALL');
+ok(await np.getByLabel(/Where the button leads/).count() === 0 && /calls the phone number on your profile/.test(await np.innerText()), 'PO04b a Call button needs no link and says which number it calls');
+await np.locator('select').selectOption('LEARN_MORE'); await np.getByLabel(/Where the button leads/).fill('https://weoneaviation.in/open-day');
+c0 = (await calls()).length;
+await np.getByRole('button', { name: 'Publish on Google' }).click(); await page.waitForTimeout(1500);
+cw = (await calls()).slice(c0);
+ok(cw.some((x) => x.fn === 'api_gbp_post_create' && x.args.p_summary === 'Open day this Sunday at the Dwarka centre.' && x.args.p_cta_type === 'LEARN_MORE' && x.args.p_cta_url === 'https://weoneaviation.in/open-day' && x.args.p_photo_url === null && x.args.p_location === '11111111-1111-4111-8111-111111111111')
+  && cw.some((x) => x.fn === 'edge:crm-google-business' && x.args.jobs.join() === 'post') && /Published on Google/.test(await body()) && await np.getByLabel(/What do you want to tell people/).inputValue() === '',
+  'PO05 Publish saves the post, sends it to Google at once, says so and clears the form');
+await np.getByLabel(/What do you want to tell people/).fill('already posted today');
+c0 = (await calls()).length;
+await np.getByRole('button', { name: 'Publish on Google' }).click(); await page.waitForTimeout(900);
+ok(/already published on this profile in the last 24 hours/.test(await body()) && !(await calls()).slice(c0).some((x) => x.fn === 'edge:crm-google-business') && await np.getByLabel(/What do you want to tell people/).inputValue() === 'already posted today',
+  'PO06 a refused post shows the reason, is not sent, and the text stays in the box');
+await mode('gbpPostSend=fail');
+await np.getByLabel(/What do you want to tell people/).fill('Call 98110 00000 today');
+await np.getByRole('button', { name: 'Publish on Google' }).click(); await page.waitForTimeout(1500);
+ok(/Not published: .*Summary contains a phone number\./.test(await body()) && await np.getByLabel(/What do you want to tell people/).inputValue() === 'Call 98110 00000 today', 'PO07 when Google refuses, the screen says "not published" with Google\'s reason and keeps the text');
+await mode('gbpPostSend=ok'); await mode('gbpWaiting=yes');
+await page.reload(); await page.getByTestId('gbp').waitFor(); await page.waitForTimeout(1000);
+const wp = g.locator('[data-section="waiting-posts"]');
+ok(/Not on Google[\s\S]*Not published\s*24 Nov\s*Open day this Sunday\.\s*Google did not confirm this post\. Check the profile on Google before publishing it again\./.test(await wp.innerText()), 'PO08 a post whose outcome is unknown is listed with what to check first');
+c0 = (await calls()).length;
+await wp.getByRole('button', { name: 'Remove' }).click(); await page.waitForTimeout(700);
+ok((await calls()).slice(c0).some((x) => x.fn === 'api_gbp_post_cancel' && x.args.p_id === 9) && !(await calls()).slice(c0).some((x) => x.fn === 'api_gbp_post_create'), 'PO09 it can be removed without sending anything');
+await mode('gbpWaiting=no'); await mode('gbpPost=no');
+await page.reload(); await page.getByTestId('gbp').waitFor(); await page.waitForTimeout(1000);
+ok(await g.locator('[data-section="new-post"]').count() === 0 && /Google does not allow posts on this profile\./.test(await body()), 'PO10 a profile Google does not allow posts on has no form, and says why');
+await mode('gbpPost=yes'); await mode('gbpRole=viewer');
+await page.reload(); await page.getByTestId('gbp').waitFor(); await page.waitForTimeout(1000);
+ok(await g.locator('[data-section="new-post"]').count() === 0 && /New DGCA batch/.test(await body()), 'PO11 a viewer reads the posts but cannot publish');
+await mode('gbpRole=admin');
+await page.getByRole('tab', { name: 'Photos' }).click(); await page.waitForTimeout(800);
+b = await body();
+ok(/#\/gbp\/photos/.test(page.url()) && /4 of your own · 31 from customers · your last one added 14 Aug\. Google no longer reports how many people saw a photo\./.test(b) && /Cover 1/.test(b) && /Inside 2/.test(b) && /Logo 1/.test(b),
+  'PH01 photos: yours, customers\', when you last added one, and how many of each kind');
+ok(await g.locator('[data-photo]').count() === 3 && await g.locator('[data-photo="m1"] img').getAttribute('src') === 'https://lh3.googleusercontent.com/t1' && await g.locator('a[data-photo="m1"]').getAttribute('href') === 'https://lh3.googleusercontent.com/g1'
+  && await g.locator('a[data-photo="m2"]').count() === 0 && /Video/.test(await g.locator('[data-photo="m2"]').innerText()) && /From a customer · 2 Nov/.test(await g.locator('[data-photo="customers/c1"]').innerText()),
+  'PH02 each photo opens on Google; a video without a preview says so; a script link is never made clickable');
+await page.getByRole('tab', { name: 'From customers' }).click(); await page.waitForTimeout(300);
+ok(await g.locator('[data-photo]').count() === 1, 'PH03 "From customers" shows only those');
+await mode('gbp=waiting');
+await page.goto(`${APP}#/gbp/health?x=1`); await page.reload(); await page.getByTestId('gbp').waitFor(); await page.waitForTimeout(1000);
+ok(/Getting Google My Business connected/.test(await body()) && await g.locator('[data-section="health"]').count() === 0, 'HC06 with no tracked profile the three new tabs show the setup steps, not empty lists');
+await mode('gbp=data');
+await page.setViewportSize({ width: 390, height: 844 });
+for (const [h, name] of [['#/gbp/health', 'health check'], ['#/gbp/posts', 'posts'], ['#/gbp/photos', 'photos']]) {
+  await page.goto(`${APP}${h}`); await page.reload(); await page.getByTestId('gbp').waitFor(); await page.waitForTimeout(1100);
+  ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), `HC07 fits a phone screen: ${name}`);
+  await page.screenshot({ path: `/tmp/gbp_${h.split('/').pop()}_phone.png`, fullPage: true });
+}
+await page.setViewportSize({ width: 1280, height: 900 });
+await page.goto(`${APP}#/gbp/posts`); await page.reload(); await page.getByTestId('gbp').waitFor(); await page.waitForTimeout(1000);
+await page.screenshot({ path: '/tmp/gbp_posts.png', fullPage: true });
+await page.goto(`${APP}#/gbp/health`); await page.waitForTimeout(1000);
+await page.screenshot({ path: '/tmp/gbp_health.png', fullPage: true });
+await page.goto(`${APP}#/gbp/manage`); await page.waitForTimeout(900);
 await page.getByRole('tab', { name: 'Profiles & logins' }).click(); await page.waitForTimeout(600);
 b = await body();
 ok(/We One Aviation\s*Connected[\s\S]*Book My Charter\s*Sign in again[\s\S]*Google no longer accepts this sign-in/.test(b), 'GG18 every Google login with its own state and what to do');

@@ -159,3 +159,13 @@ Each unanswered review of a tracked profile (newer than 30 days by default) gets
 
 The AI never gets a Google token. `crm-google-business` sends approved text (job `reply`, every 10 minutes while something is queued, and at once when a person presses Send), after reading the review again: answered on Google meanwhile or deleted means nothing is sent. New reviews are looked for every 3 hours (job `reviews`). The Writer and Reviewer run in the ADS helper (`tools/ads-agents`, Mac or cloud runner) as a second lane that is asked only when the ADS queue is empty, through `crm-google-business` with the same agents token. Tests: RP01 to RP66 (`20_gbp_reply_tests.sql`), the collector and helper tests, and RV01 to RV21 in the shell checks.
 
+### Health check, posts and photos (migration 143, 2026-11-25)
+
+Three more tabs in Google My Business. They work as soon as a profile is tracked.
+
+- **Health check:** what Google has on each profile against a short list. "Basic" items are what a customer needs (verified, main category, phone, https website, address or service area, opening hours, marked open, no changes by Google waiting, a description). "Good practice" items are the CRM's advice, not Google rules (description of 250+ characters, additional categories, cover photo, logo, 10+ own photos, a photo in 90 days, a post in 30 days, recent reviews answered). Missing items come first. Before the detailed read it checks only what is known and says so.
+- **Posts:** the posts on the profile with their state (live, rejected, being checked, scheduled), and a form to publish one. A person writes the post; it goes out as written (text up to 1,500 characters, optional button with an https link, optional photo link). The post goes through a queue (`gbp_post_out`) sent by `crm-google-business` (job `post`) with one request and no retry: if Google does not answer, it is marked "not published" with what to check, because a second try could publish it twice.
+- **Photos:** the owner's photos by kind and customers' photos, with Google's own totals.
+
+Google no longer reports view counts for posts or photos, so none are shown. Profile details are read with the profile list (job `discover`), posts and photos with the nightly `sync`. Rolling back: 143 first, then 141, 140, 139. Tests: PF01 to PF41 (`30_gbp_profile_tests.sql`), the parser and collector tests, and HC, PO and PH checks in the shell suite.
+

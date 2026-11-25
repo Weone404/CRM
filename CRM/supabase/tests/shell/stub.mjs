@@ -185,7 +185,7 @@ http.createServer((req, res) => {
     let body = ''; req.on('data', (c) => { body += c; });
     return req.on('end', () => {
       const b = JSON.parse(body || '{}'); calls.push({ fn: 'edge:crm-google-business', args: b });
-      return send(res, 200, { results: Object.fromEntries((b.jobs || []).map((j) => [j, { status: 'ok', detail: j === 'discover' ? 'We One Aviation: 1 profile(s) in 1 account(s)' : j === 'reply' ? '1 sent, 0 not needed, 0 waiting, 0 refused' : 'We One Aviation: 1 profile(s), 300 day-numbers', ...(j === 'reply' && mode.gbpSend === 'waiting' ? { status: 'error', detail: '0 sent, 0 not needed, 1 waiting, 0 refused. Google has not approved this Cloud project yet.' } : {}) }])) });
+      return send(res, 200, { results: Object.fromEntries((b.jobs || []).map((j) => [j, { status: 'ok', detail: j === 'discover' ? 'We One Aviation: 1 profile(s) in 1 account(s)' : j === 'reply' ? '1 sent, 0 not needed, 0 waiting, 0 refused' : j === 'post' ? (mode.gbpPostSend === 'fail' ? '0 published, 1 not published. Summary contains a phone number.' : '1 published, 0 not published') : 'We One Aviation: 1 profile(s), 300 day-numbers', ...(j === 'post' && mode.gbpPostSend === 'fail' ? { status: 'error' } : {}), ...(j === 'reply' && mode.gbpSend === 'waiting' ? { status: 'error', detail: '0 sent, 0 not needed, 1 waiting, 0 refused. Google has not approved this Cloud project yet.' } : {}) }])) });
     });
   }
   if (u.pathname === '/functions/v1/ads-sync') {
@@ -248,6 +248,24 @@ http.createServer((req, res) => {
     if (fn === 'api_gbp_reply_action' || fn === 'api_gbp_reply_write' || fn === 'api_gbp_reply_request') return send(res, 200, { id: 1, status: 'queued' });
     if (fn === 'api_gbp_connection_add') { const a = calls[calls.length - 1].args || {};
       return /^1\/\//.test(a.p_refresh_token || '') ? send(res, 200, { id: 'c3c3c3c3-3333-4333-8333-333333333333' }) : send(res, 400, { code: 'PT422', message: 'That is not a Google refresh token (it starts with 1// and has no spaces)' }); }
+    if (fn === 'api_gbp_profile') { const ck = (key, level, ok, title, detail) => ({ key, level, ok, title, detail });
+      return send(res, 200, [{ id: G_LOCS[0].id, title: 'We One Aviation', maps_uri: G_LOCS[0].maps_uri, collected: mode.gbpHealth !== 'basic', checked_at: new Date(Date.now() - 7200000).toISOString(), ok: mode.gbpHealth === 'basic' ? 3 : 5, total: mode.gbpHealth === 'basic' ? 4 : 9, basic_missing: 2,
+        checks: [ck('verified', 'basic', true, 'Verified on Google', 'Google has verified that you own this business.'), ck('category', 'basic', true, 'Main category', 'Flight school'), ck('phone', 'basic', true, 'Phone number', '+91 98110 00000'),
+          ck('website', 'basic', false, 'Website link', 'The link does not start with https://: http://weoneaviation.in <img src=z onerror=alert(3)>'),
+          ...(mode.gbpHealth === 'basic' ? [] : [ck('hours', 'basic', false, 'Opening hours', 'No opening hours. Google shows "hours not available".'), ck('description', 'basic', true, 'Business description', '412 of 750 characters used.'),
+            ck('photo_count', 'practice', false, 'At least 10 photos of your own', 'You have 4; customers added 31.'), ck('post_fresh', 'practice', false, 'A post in the last 30 days', 'Last post on 2 Sep 2026.'),
+            ck('reviews_answered', 'practice', true, 'Recent reviews answered', 'No review from the last 90 days is without a reply.')])] }]); }
+    if (fn === 'api_gbp_posts') return send(res, 200, { can_run: mode.gbpRole !== 'viewer', profiles: [{ id: G_LOCS[0].id, title: 'We One Aviation', can_post: mode.gbpPost !== 'no', collected: true }],
+      posts: [{ post_id: 'p1', location_id: G_LOCS[0].id, profile: 'We One Aviation', topic: 'STANDARD', state: 'LIVE', summary: 'New DGCA batch from 1 December.\nWeekday and weekend timings.', cta_type: 'LEARN_MORE', cta_url: 'https://weoneaviation.in/dgca', media_url: 'https://lh3.googleusercontent.com/p1', search_url: 'https://local.google.com/place?id=1', created_at: '2026-11-20T10:00:00Z' },
+        { post_id: 'p2', location_id: G_LOCS[0].id, profile: 'We One Aviation', topic: 'STANDARD', state: 'REJECTED', summary: '<b>Call now</b> 98110', cta_type: null, cta_url: 'javascript:alert(1)', media_url: 'http://insecure/x.jpg', search_url: null, created_at: '2026-09-02T10:00:00Z' }],
+      waiting: mode.gbpWaiting === 'yes' ? [{ id: 9, location_id: G_LOCS[0].id, profile: 'We One Aviation', summary: 'Open day this Sunday.', cta_type: 'BOOK', cta_url: 'https://weoneaviation.in/open-day', photo_url: null, status: 'failed', error: 'Google did not confirm this post. Check the profile on Google before publishing it again.', created_at: '2026-11-24T10:00:00Z' }] : [] });
+    if (fn === 'api_gbp_media') return send(res, 200, { collected: true, owner: 4, customers: 31, last_added: '2026-08-14T00:00:00Z', by_category: { COVER: 1, PROFILE: 1, INTERIOR: 2 },
+      items: [{ media_id: 'm1', location_id: G_LOCS[0].id, by_owner: true, format: 'PHOTO', category: 'COVER', thumb_url: 'https://lh3.googleusercontent.com/t1', google_url: 'https://lh3.googleusercontent.com/g1', description: 'Campus', created_at: '2026-08-14T00:00:00Z' },
+        { media_id: 'm2', location_id: G_LOCS[0].id, by_owner: true, format: 'VIDEO', category: 'INTERIOR', thumb_url: null, google_url: 'javascript:alert(1)', description: '', created_at: '2026-05-01T00:00:00Z' },
+        { media_id: 'customers/c1', location_id: G_LOCS[0].id, by_owner: false, format: 'PHOTO', category: 'CUSTOMER', thumb_url: 'https://lh3.googleusercontent.com/t3', google_url: 'https://lh3.googleusercontent.com/g3', description: '', created_at: '2026-11-02T00:00:00Z' }] });
+    if (fn === 'api_gbp_post_create') { const a = calls[calls.length - 1].args || {};
+      return /already/.test(a.p_summary || '') ? send(res, 400, { code: 'PT422', message: 'The same post was already published on this profile in the last 24 hours' }) : send(res, 200, { id: 21, status: 'queued' }); }
+    if (fn === 'api_gbp_post_cancel') return send(res, 200, { id: 9, status: 'cancelled' });
     if (fn === 'api_gbp_location_track') return send(res, 200, { tracked: true });
     if (fn === 'api_gbp_connection_remove') return send(res, 200, { removed: true });
     if (fn === 'api_web_access') return send(res, 200, { can_view: true, can_run: true, is_admin: true });

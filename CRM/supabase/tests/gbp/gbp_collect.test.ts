@@ -21,9 +21,10 @@ function world(routes: Route[], opts: { expireAfter?: number; queue?: unknown[] 
         const x = r(url, init);
         if (x) { if (x.throws) return Promise.reject(new Error("network")); return Promise.resolve(new Response(JSON.stringify(x.body ?? {}), { status: x.status ?? 200 })); }
       }
+      if (/\/localPosts\?|\/media(\/customers)?\?/.test(url)) return Promise.resolve(new Response("{}", { status: 200 }));      // posts and photos: nothing there unless a test says otherwise
       return Promise.resolve(new Response("{}", { status: 404 }));
     },
-    rpc: (fn, args) => { saved.push({ fn, args }); if (fn === "svc_gbp_reply_queue") return Promise.resolve(opts.queue ?? []);
+    rpc: (fn, args) => { saved.push({ fn, args }); if (fn === "svc_gbp_reply_queue" || fn === "svc_gbp_post_queue") return Promise.resolve(opts.queue ?? []);
       const rows = args.p_rows as unknown[] | undefined; return Promise.resolve(Array.isArray(rows) ? rows.length : null); },
   };
   const status = () => saved.filter((s) => s.fn === "svc_gbp_connection_status").map((s) => `${s.args.p_id}:${s.args.p_status}`);
@@ -215,4 +216,72 @@ Deno.test("reviews: the 3-hourly look reads one page of the newest reviews per t
   const r = await runJob(w.deps, "reviews", work([{ locations: [loc(), loc({ id: "L2", name: "locations/222" })] }, {}]));
   eq(r, { status: "ok", detail: "Login 1: 2 review(s) read · Login 2: no tracked profile" }, "result");
   eq([w.calls.filter((u) => u.includes("/reviews?")).length, w.calls.some((u) => u.includes("fetchMulti") || u.includes("searchkeywords") || u.includes("pageToken"))], [2, false], "one page each; no numbers, no words");
+});
+
+// ---------------------------------------------------------------- health check, posts, photos (143)
+Deno.test("discover also saves what the health check needs, per profile", async () => {
+  const w = world([token, (u) => u.includes("mybusinessaccountmanagement") ? { body: { accounts: [{ name: "accounts/9" }] } } : undefined,
+    (u) => u.includes("accounts/9/locations") ? { body: { locations: [{ name: "locations/111", title: "We One", profile: { description: "Ground classes." }, metadata: { canOperateLocalPost: false } }] } } : undefined]);
+  await runJob(w.deps, "discover", work([{}]));
+  const d = w.saved.find((s) => s.fn === "svc_gbp_details_save")!;
+  eq([d.args.p_connection, (d.args.p_rows as { name: string; details: { description: string; can_post: boolean } }[]).map((r) => `${r.name}:${r.details.description}:${r.details.can_post}`)], ["C1", ["locations/111:Ground classes.:false"]], "details");
+  eq(w.calls.find((u) => u.includes("/locations?"))!.includes("profile,regularHours,specialHours,openInfo,serviceArea"), true, "asked for in the same request, no extra call");
+});
+
+Deno.test("sync reads posts and photos (owner's and customers'); a complete read is marked complete", async () => {
+  const w = world([token, (u) => u.includes("fetchMulti") ? { body: {} } : undefined, (u) => u.includes("searchkeywords") ? { body: {} } : undefined, (u) => u.includes("/reviews") ? { body: {} } : undefined,
+    (u) => u.includes("/localPosts?") && !u.includes("pageToken") ? { body: { localPosts: [{ name: "accounts/9/locations/111/localPosts/p1", state: "LIVE" }], nextPageToken: "n2" } } : undefined,
+    (u) => u.includes("/localPosts?") ? { body: { localPosts: [{ name: "accounts/9/locations/111/localPosts/p2", state: "LIVE" }] } } : undefined,
+    (u) => u.includes("/media/customers?") ? { body: { mediaItems: [{ name: "accounts/9/locations/111/media/customers/c1" }], totalMediaItemCount: 31 } } : undefined,
+    (u) => u.includes("/media?") ? { body: { mediaItems: [{ name: "accounts/9/locations/111/media/m1", locationAssociation: { category: "COVER" } }], totalMediaItemCount: 12 } } : undefined]);
+  const r = await runJob(w.deps, "sync", work([{ locations: [loc()] }]));
+  eq(r.detail.endsWith(", 2 posts, 2 photos"), true, "counted in the run note");
+  const ps = w.saved.find((s) => s.fn === "svc_gbp_posts_save")!.args, ms = w.saved.find((s) => s.fn === "svc_gbp_media_save")!.args;
+  eq([(ps.p_rows as { id: string }[]).map((x) => x.id), ps.p_complete], [["p1", "p2"], true], "both pages of posts, marked complete");
+  eq([(ms.p_rows as { id: string; by_owner: boolean }[]).map((x) => `${x.id}:${x.by_owner}`), ms.p_owner_total, ms.p_customer_total, ms.p_complete], [["m1:true", "customers/c1:false"], 12, 31, true], "photos with Google's totals");
+});
+
+Deno.test("sync: posts not available for this profile does not lose numbers, reviews or photos", async () => {
+  const w = world([token, (u) => u.includes("fetchMulti") ? { body: metrics } : undefined, (u) => u.includes("searchkeywords") ? { body: {} } : undefined, (u) => u.includes("/reviews") ? { body: {} } : undefined,
+    (u) => u.includes("/localPosts?") ? { status: 403, body: { error: { message: "The caller does not have permission" } } } : undefined]);
+  const r = await runJob(w.deps, "sync", work([{ locations: [loc()] }]));
+  eq([r.status, w.saved.some((s) => s.fn === "svc_gbp_metrics_save"), w.saved.some((s) => s.fn === "svc_gbp_media_save"), w.saved.some((s) => s.fn === "svc_gbp_posts_save"), /posts\)/.test(r.detail), w.status()],
+    ["ok", true, true, false, true, ["C1:connected"]], "the rest is saved and the problem is named");
+});
+
+const P = (over: Record<string, unknown> = {}) => ({ id: 3, location_id: "L1", connection_id: "C1", account: "accounts/9", location: "locations/111", summary: "New CPL batch starts 1 December.", cta_type: "LEARN_MORE", cta_url: "https://weoneaviation.in/cpl", photo_url: null, ...over });
+const isCreate = (u: string, i?: RequestInit) => u === "https://mybusiness.googleapis.com/v4/accounts/9/locations/111/localPosts" && i?.method === "POST";
+
+Deno.test("post: one request with exactly what the person wrote; shown in the list at once", async () => {
+  const w = world([token, (u, i) => isCreate(u, i) ? { body: { name: "accounts/9/locations/111/localPosts/777", state: "LIVE", summary: "New CPL batch starts 1 December.", topicType: "STANDARD", createTime: "2026-11-25T06:00:00Z" } } : undefined], { queue: [P()] });
+  const r = await runJob(w.deps, "post", work([{ locations: [loc()] }]));
+  eq(r, { status: "ok", detail: "1 published, 0 not published" }, "result");
+  eq([w.inits.filter((x) => x.method === "POST" && !x.url.includes("oauth2")).length, JSON.parse(w.inits[1].body)], [1, { languageCode: "en", topicType: "STANDARD", summary: "New CPL batch starts 1 December.", callToAction: { actionType: "LEARN_MORE", url: "https://weoneaviation.in/cpl" } }], "one request, the person's text");
+  eq(w.saved.find((s) => s.fn === "svc_gbp_post_result")!.args, { p_id: 3, p_state: "sent", p_error: null, p_name: "accounts/9/locations/111/localPosts/777" }, "recorded with Google's name");
+  const shown = w.saved.find((s) => s.fn === "svc_gbp_posts_save")!.args;
+  eq([shown.p_location, (shown.p_rows as { id: string }[])[0].id, shown.p_complete], ["L1", "777", false], "added to the list without deleting anything");
+});
+
+Deno.test("post: no answer from Google is never retried (it could publish twice); refusals carry Google's reason", async () => {
+  const silent = world([token, (u, i) => isCreate(u, i) ? { throws: true } : undefined], { queue: [P()] });
+  const r1 = await runJob(silent.deps, "post", work([{}]));
+  eq([silent.inits.filter((x) => x.method === "POST" && !x.url.includes("oauth2")).length, (silent.saved.find((s) => s.fn === "svc_gbp_post_result")!.args as { p_state: string }).p_state, /Check the profile on Google before publishing it again/.test(r1.detail)],
+    [1, "failed", true], "one attempt only, marked failed with what to check");
+  const rejected = world([token, (u, i) => isCreate(u, i) ? { body: { name: "accounts/9/locations/111/localPosts/9", state: "REJECTED" } } : undefined], { queue: [P()] });
+  await runJob(rejected.deps, "post", work([{}]));
+  eq((rejected.saved.find((s) => s.fn === "svc_gbp_post_result")!.args as { p_state: string; p_error: string }).p_error.includes("rejected the post"), true, "a post Google rejects is not called published");
+  const bad = world([token, (u, i) => isCreate(u, i) ? { status: 400, body: { error: { message: "Summary contains a phone number." } } } : undefined], { queue: [P()] });
+  const r3 = await runJob(bad.deps, "post", work([{}]));
+  eq([/phone number/.test(r3.detail), r3.status, bad.status()], [true, "error", []], "Google's own reason is shown; the login is fine");
+  const waiting = world([token, (u, i) => isCreate(u, i) ? QUOTA0 : undefined], { queue: [P()] });
+  await runJob(waiting.deps, "post", work([{}]));
+  eq(waiting.status(), ["C1:waiting_google"], "not approved by Google yet: the login says so");
+  const revoked = world([(u) => u.includes("oauth2") ? { status: 400, body: { error: "invalid_grant" } } : undefined], { queue: [P(), P({ id: 4 })] });
+  await runJob(revoked.deps, "post", work([{}]));
+  eq([revoked.calls.length, revoked.saved.filter((s) => s.fn === "svc_gbp_post_result").map((s) => `${s.args.p_id}:${s.args.p_state}`)], [1, ["3:failed", "4:failed"]], "sign-in lost: nothing reaches Google");
+  const none = world([token], { queue: [] });
+  eq([await runJob(none.deps, "post", work([{}])), none.calls.length], [{ status: "ok", detail: "No post is waiting to be published." }, 0], "nothing queued costs no call");
+  const inj = world([token], { queue: [P({ location: "locations/111/../../x" })] });
+  await runJob(inj.deps, "post", work([{}]));
+  eq(inj.calls.filter((u) => !u.includes("oauth2")).length, 0, "a profile name that is not a name never reaches Google");
 });

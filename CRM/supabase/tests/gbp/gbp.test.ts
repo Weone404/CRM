@@ -1,6 +1,6 @@
 // Google Business Profile: request addresses and every answer shape Google can send (139). deno test supabase/tests/gbp/
-import { DAILY_METRICS, accountsUrl, addDays, gbpError, keywordsUrl, locationsUrl, metricsUrl, monthsBack, parseAccounts, parseKeywords,
-  parseLocations, parseMetrics, parseReviews, reviewsUrl } from "../../functions/_shared/gbp.ts";
+import { DAILY_METRICS, accountsUrl, addDays, gbpError, keywordsUrl, locationsUrl, mediaUrl, metricsUrl, monthsBack, parseAccounts, parseDetails, parseKeywords,
+  parseLocations, parseMedia, parseMetrics, parsePosts, parseReviews, postBody, postsUrl, reviewsUrl } from "../../functions/_shared/gbp.ts";
 
 const eq = (a: unknown, b: unknown, what: string) => {
   if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}\n  got      ${JSON.stringify(a)}\n  expected ${JSON.stringify(b)}`);
@@ -71,10 +71,11 @@ Deno.test("profiles: address in one line, the fields the CRM shows, paging", () 
       metadata: { mapsUri: "https://maps.google.com/?cid=1", placeId: "ChIJ1", hasVoiceOfMerchant: true } },
     { name: "locations/456" }, { name: "accounts/1/locations/9" }, { title: "no name" }] }, "accounts/9");
   eq(p.rows[0], { account: "accounts/9", name: "locations/123", title: "We One Aviation", address: "Plot 5, Sector 7, Dwarka, Delhi, 110075", phone: "+91 98110 00000",
-    website: "https://weoneaviation.in/", category: "Flight school", maps_uri: "https://maps.google.com/?cid=1", place_id: "ChIJ1", verified: true }, "full profile");
+    website: "https://weoneaviation.in/", category: "Flight school", maps_uri: "https://maps.google.com/?cid=1", place_id: "ChIJ1", verified: true,
+    details: { description: "", hours: [], special_hours: 0, open_status: null, more_categories: [], can_post: null, pending_edits: false, google_updated: false, review_uri: null, service_area: false } }, "full profile");
   eq([p.rows.length, p.rows[1].title, p.rows[1].verified, p.next], [2, "", null, "p2"], "a bare profile is kept; malformed names are dropped");
   eq(parseAccounts({ accounts: [{ name: "accounts/9", accountName: "Nikhil" }, { name: "x" }, null] }), { rows: [{ name: "accounts/9", label: "Nikhil" }], next: null }, "accounts");
-  eq(locationsUrl("accounts/9").includes("readMask=name,title,storefrontAddress,websiteUri,phoneNumbers,categories,metadata"), true, "read mask");
+  eq(locationsUrl("accounts/9").includes("readMask=name,title,storefrontAddress,websiteUri,phoneNumbers,categories,metadata,profile,regularHours,specialHours,openInfo,serviceArea&"), true, "read mask");
   eq(accountsUrl("t").endsWith("pageToken=t"), true, "accounts paging");
 });
 
@@ -100,4 +101,48 @@ Deno.test("what a failed Google call means, in plain words", () => {
   eq(gbpError("X", 404, { error: { message: "Requested entity was not found." } }).state, "no_access", "profile gone");
   eq(gbpError("X", 500, {}).state, "error", "anything else");
   eq(gbpError("X", 503, null).message.length <= 300 && gbpError("X", 500, { error: { message: "y".repeat(900) } }).message.length <= 300, true, "messages stay short");
+});
+
+// ---------------------------------------------------------------- health check, posts, photos (143)
+Deno.test("profile details: description, hours as day/open/close, open status, extra categories, what Google allows", () => {
+  const d = parseDetails({ profile: { description: "DGCA ground classes in Dwarka." }, regularHours: { periods: [
+      { openDay: "MONDAY", openTime: { hours: 9, minutes: 30 }, closeDay: "MONDAY", closeTime: { hours: 18 } }, { openDay: "SUNDAY", openTime: {}, closeDay: "MONDAY", closeTime: { hours: 24 } },
+      { openDay: "FUNDAY", openTime: { hours: 1 } }, null] },
+    specialHours: { specialHourPeriods: [{}, {}] }, openInfo: { status: "CLOSED_TEMPORARILY" }, serviceArea: { businessType: "CUSTOMER_LOCATION_ONLY" },
+    categories: { primaryCategory: { displayName: "Flight school" }, additionalCategories: [{ displayName: " Aviation training institute " }, { displayName: "" }, null] },
+    metadata: { canOperateLocalPost: true, hasPendingEdits: true, hasGoogleUpdated: true, newReviewUri: "https://g.page/r/abc/review" } });
+  eq(d, { description: "DGCA ground classes in Dwarka.", hours: [{ d: "MONDAY", o: "09:30", c: "18:00" }, { d: "SUNDAY", o: "00:00", c: "24:00" }], special_hours: 2, open_status: "CLOSED_TEMPORARILY",
+    more_categories: ["Aviation training institute"], can_post: true, pending_edits: true, google_updated: true, review_uri: "https://g.page/r/abc/review", service_area: true }, "full");
+  for (const x of [null, undefined, {}, "x", { regularHours: "9-5", profile: 7, metadata: { newReviewUri: "javascript:alert(1)", canOperateLocalPost: "yes" }, openInfo: { status: "drop table" }, serviceArea: {} }])
+    eq(parseDetails(x), { description: x && typeof x === "object" && "profile" in x ? "" : "", hours: [], special_hours: 0, open_status: null, more_categories: [], can_post: null, pending_edits: false, google_updated: false, review_uri: null, service_area: false }, "junk gives empty details, never an error");
+});
+
+Deno.test("posts: state, button, first picture, link; ids that are not ids are dropped", () => {
+  const p = parsePosts({ nextPageToken: "n", localPosts: [
+    { name: "accounts/9/locations/111/localPosts/123abc", topicType: "STANDARD", state: "LIVE", summary: "New batch", callToAction: { actionType: "LEARN_MORE", url: "https://weoneaviation.in/dgca" },
+      media: [{ googleUrl: "https://lh3.googleusercontent.com/g", thumbnailUrl: "https://lh3.googleusercontent.com/t" }], searchUrl: "https://local.google.com/place?id=1", createTime: "2026-11-20T10:00:00Z", scheduledTime: "bad" },
+    { name: "accounts/9/locations/111/localPosts/2", state: "REJECTED", callToAction: { actionType: "BOOK", url: "javascript:alert(1)" }, media: [{ googleUrl: "http://x/y.jpg" }] },
+    { name: "accounts/9/locations/111/localPosts/../../x" }, { summary: "no name" }, null] });
+  eq(p.rows[0], { id: "123abc", topic: "STANDARD", state: "LIVE", summary: "New batch", cta_type: "LEARN_MORE", cta_url: "https://weoneaviation.in/dgca", media_url: "https://lh3.googleusercontent.com/t",
+    search_url: "https://local.google.com/place?id=1", created: "2026-11-20T10:00:00.000Z", updated: null, scheduled: null }, "full post");
+  eq([p.rows.length, p.rows[1].cta_url, p.rows[1].media_url, p.next], [2, "", "", "n"], "links that are not https are dropped; malformed posts are dropped");
+  eq(postsUrl("accounts/9", "locations/111", "a b"), "https://mybusiness.googleapis.com/v4/accounts/9/locations/111/localPosts?pageSize=100&pageToken=a%20b", "address");
+});
+
+Deno.test("a new post: only what the person wrote; Call carries no link; a photo is a link", () => {
+  eq(postBody({ summary: "New CPL batch starts 1 December." }), { languageCode: "en", topicType: "STANDARD", summary: "New CPL batch starts 1 December." }, "text only");
+  eq(postBody({ summary: "Hi", cta_type: "LEARN_MORE", cta_url: "https://weoneaviation.in/cpl", photo_url: "https://weoneaviation.in/a.jpg" }),
+    { languageCode: "en", topicType: "STANDARD", summary: "Hi", callToAction: { actionType: "LEARN_MORE", url: "https://weoneaviation.in/cpl" }, media: [{ mediaFormat: "PHOTO", sourceUrl: "https://weoneaviation.in/a.jpg" }] }, "button and photo");
+  eq(postBody({ summary: "Hi", cta_type: "CALL", cta_url: "https://ignored" }).callToAction, { actionType: "CALL" }, "Call");
+});
+
+Deno.test("photos: the owner's by kind, customers' marked as such, Google's own total", () => {
+  const o = parseMedia({ totalMediaItemCount: 14, nextPageToken: "p2", mediaItems: [
+    { name: "accounts/9/locations/111/media/AF1Qip", mediaFormat: "PHOTO", locationAssociation: { category: "COVER" }, googleUrl: "https://lh3.googleusercontent.com/g", thumbnailUrl: "https://lh3.googleusercontent.com/t", createTime: "2026-11-01T00:00:00Z", description: "Campus" },
+    { name: "accounts/9/locations/111/media/x2", mediaFormat: "VIDEO", googleUrl: "javascript:alert(1)" }, { mediaFormat: "PHOTO" }, null] }, true);
+  eq(o.rows[0], { id: "AF1Qip", by_owner: true, format: "PHOTO", category: "COVER", thumb: "https://lh3.googleusercontent.com/t", url: "https://lh3.googleusercontent.com/g", description: "Campus", created: "2026-11-01T00:00:00.000Z" }, "owner photo");
+  eq([o.rows.length, o.rows[1].url, o.rows[1].category, o.total, o.next], [2, "", "", 14, "p2"], "bad links dropped; items without a name dropped");
+  const c = parseMedia({ mediaItems: [{ name: "accounts/9/locations/111/media/customers/c1", mediaFormat: "PHOTO", locationAssociation: { category: "COVER" } }], totalMediaItemCount: -3 }, false);
+  eq([c.rows[0].id, c.rows[0].by_owner, c.rows[0].category, c.total], ["customers/c1", false, "CUSTOMER", null], "a customer photo is never counted as a cover; an impossible total is ignored");
+  eq(mediaUrl("accounts/9", "locations/111", true).includes("/media/customers?pageSize=100"), true, "customers address");
 });

@@ -33,11 +33,31 @@ export function parseAccounts(b: any): { rows: { name: string; label: string }[]
 }
 
 export function locationsUrl(account: string, pageToken?: string | null): string {
-  const mask = "name,title,storefrontAddress,websiteUri,phoneNumbers,categories,metadata";
+  const mask = "name,title,storefrontAddress,websiteUri,phoneNumbers,categories,metadata,profile,regularHours,specialHours,openInfo,serviceArea";
   return `https://mybusinessbusinessinformation.googleapis.com/v1/${okAcc(account)}/locations?readMask=${mask}&pageSize=100` +
     (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "");
 }
-export interface LocRow { account: string; name: string; title: string; address: string; phone: string; website: string; category: string; maps_uri: string; place_id: string; verified: boolean | null }
+// What the health check reads (migration 143). Hours as [{d: "MONDAY", o: "09:30", c: "18:00"}].
+export interface LocDetails { description: string; hours: { d: string; o: string; c: string }[]; special_hours: number; open_status: string | null; more_categories: string[];
+  can_post: boolean | null; pending_edits: boolean; google_updated: boolean; review_uri: string | null; service_area: boolean }
+const hhmm = (t: any) => `${String(Math.min(24, Math.max(0, Number(t?.hours ?? 0) || 0))).padStart(2, "0")}:${String(Math.min(59, Math.max(0, Number(t?.minutes ?? 0) || 0))).padStart(2, "0")}`;
+const DAYS = new Set(["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"]);
+export function parseDetails(l: any): LocDetails {
+  const m = l?.metadata ?? {};
+  return {
+    description: String(l?.profile?.description ?? "").slice(0, 2000),
+    hours: (Array.isArray(l?.regularHours?.periods) ? l.regularHours.periods : []).filter((p: any) => DAYS.has(String(p?.openDay))).slice(0, 60)
+      .map((p: any) => ({ d: String(p.openDay), o: hhmm(p.openTime), c: hhmm(p.closeTime) })),
+    special_hours: Array.isArray(l?.specialHours?.specialHourPeriods) ? l.specialHours.specialHourPeriods.length : 0,
+    open_status: typeof l?.openInfo?.status === "string" && /^[A-Z_]{1,40}$/.test(l.openInfo.status) && l.openInfo.status !== "OPEN_FOR_BUSINESS_UNSPECIFIED" ? l.openInfo.status : null,
+    more_categories: (Array.isArray(l?.categories?.additionalCategories) ? l.categories.additionalCategories : []).map((c: any) => String(c?.displayName ?? "").trim()).filter(Boolean).slice(0, 12),
+    can_post: typeof m.canOperateLocalPost === "boolean" ? m.canOperateLocalPost : null,
+    pending_edits: m.hasPendingEdits === true, google_updated: m.hasGoogleUpdated === true,
+    review_uri: typeof m.newReviewUri === "string" && /^https:\/\//.test(m.newReviewUri) ? m.newReviewUri : null,
+    service_area: !!l?.serviceArea && typeof l.serviceArea === "object" && Object.keys(l.serviceArea).length > 0,
+  };
+}
+export interface LocRow { account: string; name: string; title: string; address: string; phone: string; website: string; category: string; maps_uri: string; place_id: string; verified: boolean | null; details: LocDetails }
 export function parseLocations(b: any, account: string): { rows: LocRow[]; next: string | null } {
   const rows = (Array.isArray(b?.locations) ? b.locations : []).filter((l: any) => /^locations\/\d+$/.test(String(l?.name))).map((l: any) => {
     const a = l.storefrontAddress ?? {};
@@ -45,7 +65,7 @@ export function parseLocations(b: any, account: string): { rows: LocRow[]; next:
     return { account, name: String(l.name), title: String(l.title ?? ""), address, phone: String(l.phoneNumbers?.primaryPhone ?? ""),
       website: String(l.websiteUri ?? ""), category: String(l.categories?.primaryCategory?.displayName ?? ""),
       maps_uri: String(l.metadata?.mapsUri ?? ""), place_id: String(l.metadata?.placeId ?? ""),
-      verified: typeof l.metadata?.hasVoiceOfMerchant === "boolean" ? l.metadata.hasVoiceOfMerchant : null };
+      verified: typeof l.metadata?.hasVoiceOfMerchant === "boolean" ? l.metadata.hasVoiceOfMerchant : null, details: parseDetails(l) };
   });
   return { rows, next: b?.nextPageToken ? String(b.nextPageToken) : null };
 }
@@ -141,3 +161,40 @@ export function gbpError(api: string, status: number, b: any): { state: GbpState
     return { state: "no_access", message: `${api}: this Google user is not an owner or manager of the profile (or it no longer exists). ${msg}`.slice(0, 300) };
   return { state: "error", message: `${api}: ${msg}`.slice(0, 300) };
 }
+
+// ---------------------------------------------------------------- posts and photos (migration 143, My Business API v4)
+const httpsOr = (u: unknown) => (typeof u === "string" && /^https:\/\/[^\s<>"]+$/.test(u) ? u : "");
+export function postsUrl(account: string, location: string, pageToken?: string | null): string {
+  return `https://mybusiness.googleapis.com/v4/${okAcc(account)}/${okLoc(location)}/localPosts?pageSize=100` + (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "");
+}
+export interface PostRow { id: string; topic: string; state: string; summary: string; cta_type: string; cta_url: string; media_url: string; search_url: string; created: string | null; updated: string | null; scheduled: string | null }
+export function parsePosts(b: any): { rows: PostRow[]; next: string | null } {
+  const rows = (Array.isArray(b?.localPosts) ? b.localPosts : []).map((p: any) => {
+    const id = String(p?.name ?? "").split("/localPosts/")[1] ?? "";
+    const m = Array.isArray(p?.media) ? p.media[0] : null;
+    return { id, topic: String(p?.topicType ?? ""), state: String(p?.state ?? ""), summary: String(p?.summary ?? ""), cta_type: String(p?.callToAction?.actionType ?? ""),
+      cta_url: httpsOr(p?.callToAction?.url), media_url: httpsOr(m?.thumbnailUrl) || httpsOr(m?.googleUrl), search_url: httpsOr(p?.searchUrl),
+      created: iso(p?.createTime), updated: iso(p?.updateTime), scheduled: iso(p?.scheduledTime) };
+  }).filter((r: PostRow) => /^[A-Za-z0-9_-]{1,200}$/.test(r.id));
+  return { rows, next: b?.nextPageToken ? String(b.nextPageToken) : null };
+}
+// The body of a new post: a standard update, written by a person. Google takes the phone number for CALL from the profile.
+export function postBody(p: { summary: string; cta_type?: string | null; cta_url?: string | null; photo_url?: string | null }) {
+  const body: Record<string, unknown> = { languageCode: "en", topicType: "STANDARD", summary: p.summary };
+  if (p.cta_type) body.callToAction = p.cta_type === "CALL" ? { actionType: "CALL" } : { actionType: p.cta_type, url: p.cta_url };
+  if (p.photo_url) body.media = [{ mediaFormat: "PHOTO", sourceUrl: p.photo_url }];
+  return body;
+}
+export function mediaUrl(account: string, location: string, customers: boolean, pageToken?: string | null): string {
+  return `https://mybusiness.googleapis.com/v4/${okAcc(account)}/${okLoc(location)}/media${customers ? "/customers" : ""}?pageSize=100` + (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "");
+}
+export interface MediaRow { id: string; by_owner: boolean; format: string; category: string; thumb: string; url: string; description: string; created: string | null }
+export function parseMedia(b: any, byOwner: boolean): { rows: MediaRow[]; total: number | null; next: string | null } {
+  const rows = (Array.isArray(b?.mediaItems) ? b.mediaItems : []).map((m: any) => ({
+    id: String(m?.name ?? "").split("/media/")[1] ?? "", by_owner: byOwner, format: String(m?.mediaFormat ?? ""), category: byOwner ? String(m?.locationAssociation?.category ?? "") : "CUSTOMER",
+    thumb: httpsOr(m?.thumbnailUrl), url: httpsOr(m?.googleUrl), description: String(m?.description ?? ""), created: iso(m?.createTime) }))
+    .filter((r: MediaRow) => r.id.length > 0 && r.id.length <= 300);
+  const t = Number(b?.totalMediaItemCount);
+  return { rows, total: Number.isInteger(t) && t >= 0 ? t : null, next: b?.nextPageToken ? String(b.nextPageToken) : null };
+}
+

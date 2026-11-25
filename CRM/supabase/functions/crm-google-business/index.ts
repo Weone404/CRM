@@ -6,6 +6,7 @@
 //             the words people searched (month by month) and the reviews
 //   reviews   only the newest reviews of every tracked profile (every 3 hours, so a new review is seen the same day)
 //   reply     send the review replies that are approved (migration 140); each review is read again first
+//   post      publish the posts a person queued in the CRM (migration 143); one request each, never retried by itself
 // The AI helper (tools/ads-agents, header x-ads-agents-token) writes those replies through the same door:
 //   {action: "next", roles: [...]} -> {run, context} | {run: null};  {action: "finish", id, ok, output, error};  {action: "release", id}
 // It gets a review and returns text. It never gets a Google token and never talks to Google.
@@ -46,8 +47,8 @@ Deno.serve(async (req) => {
           return json(req, 422, { detail: "action must be next, finish or release" });
       }
     }
-    const jobs = ["discover", "sync", "reviews", "reply"].filter((j) => (Array.isArray(body.jobs) ? body.jobs : []).includes(j));       // always in this order
-    if (!jobs.length) return json(req, 422, { detail: "jobs: discover, sync, reviews or reply" });
+    const jobs = ["discover", "sync", "reviews", "reply", "post"].filter((j) => (Array.isArray(body.jobs) ? body.jobs : []).includes(j));       // always in this order
+    if (!jobs.length) return json(req, 422, { detail: "jobs: discover, sync, reviews, reply or post" });
     const only = typeof body.connection === "string" && /^[0-9a-f-]{36}$/i.test(body.connection) ? body.connection : null;
     if (!(await cronOk(req))) {
       const a = await asUser(req, "api_gbp_access") as { can_view: boolean; can_run: boolean };
