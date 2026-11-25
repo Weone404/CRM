@@ -289,3 +289,18 @@ changes, allowed bids and budget inside the spend limits, and has no Mac that st
 | MR | ads-sync | Report settings, Insights query, rows, totals, cache, health rules | Meta's limits; filters; leads / video / rankings; disjoint reach; warnings | meta_reports.test |
 | UI170-180 | Viewer / Admin | Reports and Overview health | Live table, breakdown and value filter, compare, presets, drill-down, rankings, custom columns, saved view, CSV, phone width, health card | ui_checks |
 
+
+## 11. Delivery watch: "Google Ads stopped showing" (migration 142)
+
+Run: `supabase/tests/ads/delivery/run.sh` (SQL, DW01 to DW24 and DR1) and `UI_SCRIPT=delivery_ui.mjs ./ui/run_ui.sh` (screen, UI110 to UI118).
+
+| Case | What is checked |
+|---|---|
+| The real case (13 to 15 Nov 2026) | Spend 399.88, 399.94, 47.55, then a trickle of impressions with no clicks: stopped since the day after the last spend, cause "funds", 847.37 + 18% = 999.90 = one payment of 1,000 |
+| Not an alarm | Spend yesterday; spending again today; one quiet day; still shown with no clicks; every campaign paused; no budget; account not connected; sync older than 36 hours; under 50 impressions a day |
+| The run | An older campaign months ago is not counted in the run or in "usual impressions" |
+| Money ledger | Money still recorded: cause "unknown" and it says so. Ledger used up: "funds" |
+| Tax | 18% for INR accounts, 0 otherwise, `ads_config.google_tax_pct` overrides |
+| Honesty | Changes the CRM made on the stop day are counted and shown; an unknown reason is never guessed |
+| Other platforms | A Meta campaign spending every day neither hides nor fakes a Google stop |
+| Access and safety | ADS viewers only; read-only; evidence shown as plain text; if the check fails, Today still works |

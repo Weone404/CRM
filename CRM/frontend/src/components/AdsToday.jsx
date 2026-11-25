@@ -31,6 +31,32 @@ const Explain = ({ text }) => (
 // Explanations: the browser's tooltip on desktop, a toast on tap (phones).
 function alertLike(text) { showToast(text, 'info'); }
 
+// Google Ads has stopped showing although a campaign is switched on (migration 142). Says the likely reason and shows the evidence.
+const dayOf = (d) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+function Stopped({ d }) {
+  const funds = d.cause === 'funds';
+  return (
+    <div className="flex flex-wrap items-start gap-3 p-3 rounded-2xl" style={{ background: '#FF3B3014' }} data-testid="ads-stopped">
+      <span className="mt-1.5 h-2.5 w-2.5 rounded-full shrink-0" style={{ background: '#FF3B30' }} />
+      <div className="flex-1 min-w-[12rem]">
+        <div className="text-sm font-semibold text-glass-primary">Google Ads stopped showing on {dayOf(d.since)} ({d.quiet_days} days ago).</div>
+        <div className="text-xs text-glass-secondary break-words">
+          {funds ? <>Most likely the prepaid balance is used up. Add money in Google Ads; about {money(d.topup_30d, d.currency, 0)} covers 30 days at this budget, tax included. The ads start again by themselves.</>
+            : <>The CRM cannot see why. Open Google Ads and look at the campaign's status and at Billing.</>}
+        </div>
+        <details className="mt-1.5 text-xs text-glass-secondary">
+          <summary className="cursor-pointer font-semibold" style={{ color: '#007AFF' }}>{funds ? 'Why the CRM thinks so' : 'What the CRM checked'}</summary>
+          <ul className="m-0 mt-1 pl-4 space-y-0.5">{(d.evidence || []).map((e) => <li key={e}>{e}</li>)}</ul>
+          {funds && <p className="m-0 mt-1">Google does not tell the CRM the balance of a prepaid account, so this is worked out from the numbers above. Google Ads &gt; Billing shows the real balance.</p>}
+        </details>
+      </div>
+      <a href={funds ? 'https://ads.google.com/aw/billing/summary' : 'https://ads.google.com/aw/campaigns'} target="_blank" rel="noreferrer"
+        className="px-3 py-2 rounded-xl text-sm font-semibold min-h-[38px] inline-flex items-center gap-1.5 text-white" style={{ background: '#FF3B30' }}>
+        {funds ? 'Add funds' : 'Open Google Ads'} <Icon name="external" size={14} /></a>
+    </div>
+  );
+}
+
 function Needs({ items }) {
   if (!items.length) return <div className="text-sm font-semibold" style={{ color: '#1E7B34' }} data-testid="all-good">All good — nothing needs you right now.</div>;
   return <div className="space-y-3">{items}</div>;
@@ -47,6 +73,7 @@ export default function AdsToday({ ctx, access, go, parts }) {
   const [camps, loadC] = useLoad(() => rpc('api_ads_campaigns', { p_client: ctx.client || null, p_from: from, p_to: to }), [ctx.client, from, to]);
   const [queue, loadQ] = useLoad(() => rpc('api_ads_queue', { p_status: 'pending' }), [], { refreshMs: 60000 });
   const [si] = useLoad(() => rpc('api_ads_search_insights', { p_limit: 6 }).catch(() => null), []);
+  const [dl] = useLoad(() => rpc('api_ads_delivery').catch(() => null), [], { refreshMs: 300000 });
   const reloadAll = () => { loadAp(); loadSt(); loadO(); loadC(); loadQ(); };
 
   const pendingOps = useMemo(() => (ap?.ops || []).filter((x) => x.status === 'pending'), [ap]);
@@ -81,7 +108,9 @@ export default function AdsToday({ ctx, access, go, parts }) {
   (o.accounts || []).filter((a) => a.status !== 'connected' && a.status !== 'disabled').forEach((a) => needs.push(row(`acc${a.id}`, '#FF3B30',
     `${a.platform === 'google' ? 'Google Ads' : 'Meta'} is not connected (${String(a.status).replace(/_/g, ' ')}).`,
     a.last_error || 'Sign in again: ADS › More › Settings.', access.is_admin && <Btn ghost onClick={() => go('settings')}>Reconnect</Btn>)));
-  if (ap.funds?.low) needs.push(<Funds key="funds" d={ap} reload={loadAp} />);
+  if (dl?.stopped) needs.push(<Stopped key="stopped" d={dl} />);
+  // the balance card ("I added money") also when the stop looks like an empty balance, so the top-up gets recorded
+  if (ap.funds?.low || (dl?.stopped && dl.cause === 'funds')) needs.push(<Funds key="funds" d={ap} reload={loadAp} />);
   if (st?.agents && !st.agents.online && !st.agents.healthy) needs.push(row('agents', '#FF9500', 'The AI agents have not checked in for over 90 minutes.',
     st.agents.last_seen ? `Last seen ${ago(st.agents.last_seen)}. They work from the cloud once an hour (GitHub > Actions) and from the Mac whenever it is on.`
       : 'Add the two secrets for the cloud runner in GitHub, or set up the helper on the Mac (tools/ads-agents/install.sh).', null));
