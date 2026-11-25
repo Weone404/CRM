@@ -3,7 +3,7 @@
 //   sync      its tracked profiles: daily numbers, the words people searched (month by month) and the reviews
 // A login's state is always saved in plain words: connected, waiting for Google's approval (quota 0), sign in again, API off, no access.
 import { accountsUrl, addDays, gbpError, keywordsUrl, locationsUrl, metricsUrl, monthsBack, parseAccounts, parseKeywords, parseLocations,
-  parseMetrics, parseReviews, reviewsUrl, type GbpState, type LocRow } from "./gbp.ts";
+  parseMetrics, parseReviews, replyUrl, reviewUrl, reviewsUrl, type GbpState, type LocRow } from "./gbp.ts";
 
 export type Loc = { id: string; account: string; name: string; first: boolean; reviews_stored: number; keyword_months: string[] };
 export type Conn = { id: string; label: string; refresh_token: string | null; locations: Loc[] };
@@ -116,11 +116,73 @@ export async function sync(d: Deps, w: Work, c: Conn): Promise<string> {
   return `${c.label}: ${c.locations.length} profile(s), ${days} day-numbers, ${words} search words, ${reviews} reviews` + (notes.size ? `. ${[...notes].join(" | ")}` : "");
 }
 
+// Reviews only, newest first, one page per tracked profile: the 3-hourly look for new reviews (the nightly sync reads everything).
+export async function syncReviews(d: Deps, w: Work, c: Conn): Promise<string> {
+  if (!c.locations.length) return `${c.label}: no tracked profile`;
+  const token = await signIn(d, w, c);
+  let n = 0;
+  for (const l of c.locations) {
+    if (d.expired()) break;
+    const r = parseReviews(await gget(d, token, "Google My Business API (reviews)", reviewsUrl(l.account, l.name)));
+    n += Number(await d.rpc("svc_gbp_reviews_save", { p_location: l.id, p_rows: r.rows, p_total: r.total, p_rating: r.rating }));
+  }
+  return `${c.label}: ${n} review(s) read`;
+}
+
+// Sends the approved replies (migration 140). Before each one the review is read once more: if it was answered on Google
+// in the meantime, or deleted, nothing is sent. A reply is sent at most once: any doubt about the outcome is a retry of
+// the read-then-write, and the read sees a reply that did arrive.
+type Queued = { id: number; connection_id: string; account: string; location: string; review_id: string; text: string };
+export async function sendReplies(d: Deps, w: Work): Promise<{ status: "ok" | "error"; detail: string }> {
+  const q = (await d.rpc("svc_gbp_reply_queue", { p_limit: 10 }) ?? []) as Queued[];
+  if (!Array.isArray(q) || !q.length) return { status: "ok", detail: "No reply is waiting to be sent." };
+  const tokens = new Map<string, string | GoogleSaid>(); let sent = 0, skipped = 0, later = 0, failed = 0; const notes = new Set<string>();
+  const result = (id: number, state: string, error: string | null) => d.rpc("svc_gbp_reply_result", { p_id: id, p_state: state, p_error: error });
+  for (const r of q) {
+    if (d.expired()) { later++; continue; }
+    const c = (w.connections ?? []).find((x) => x.id === r.connection_id);
+    try {
+      if (!c) throw new GoogleSaid("needs_signin", "The Google login of this profile was removed.");
+      if (!tokens.has(c.id)) { try { tokens.set(c.id, await signIn(d, w, c)); } catch (e) { tokens.set(c.id, e instanceof GoogleSaid ? e : new GoogleSaid("error", "Google sign-in failed.")); } }
+      const token = tokens.get(c.id)!;
+      if (token instanceof GoogleSaid) throw token;
+      const readAt = reviewUrl(r.account, r.location, r.review_id), writeAt = replyUrl(r.account, r.location, r.review_id);   // refuses anything that is not an id
+      let res: Response;
+      try { res = await d.fetch(readAt, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30000) }); }
+      catch { throw new GoogleSaid("busy", "Google did not answer in time."); }
+      const b = await res.json().catch(() => ({}));
+      if (res.status === 404) { await result(r.id, "skipped", "The review is no longer on Google"); skipped++; continue; }
+      if (!res.ok) { const e = gbpError("Google My Business API (reviews)", res.status, b); throw new GoogleSaid(e.state, e.message); }
+      const there = String(b?.reviewReply?.comment ?? "").trim();
+      if (there && there === r.text.trim()) { await result(r.id, "sent", null); sent++; continue; }      // an earlier try did arrive
+      if (there) { await result(r.id, "skipped", "Answered on Google"); skipped++; continue; }
+      let put: Response;
+      try { put = await d.fetch(writeAt, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: r.text }), signal: AbortSignal.timeout(30000) }); }
+      catch { throw new GoogleSaid("busy", "Google did not confirm the reply in time; it is checked again before another try."); }
+      const pb = await put.json().catch(() => ({}));
+      if (!put.ok) { const e = gbpError("Google My Business API (reviews)", put.status, pb); throw new GoogleSaid(e.state, e.message); }
+      await result(r.id, "sent", null); sent++;
+    } catch (e) {
+      const g = e instanceof GoogleSaid ? e : new GoogleSaid("error", String((e as Error)?.message ?? e).slice(0, 300));
+      notes.add(g.message);
+      // waiting for Google, a busy Google or an expired sign-in can clear up: keep the reply queued. Anything else is Google refusing this reply.
+      if (g.state === "busy" || g.state === "waiting_google" || g.state === "needs_signin" || g.state === "api_off") { await result(r.id, "retry", g.message); later++; }
+      else { await result(r.id, "failed", g.message); failed++; }
+      if (c && (g.state === "needs_signin" || g.state === "waiting_google")) await d.rpc("svc_gbp_connection_status", { p_id: c.id, p_status: g.state, p_error: g.message, p_email: null });
+    }
+  }
+  const detail = `${sent} sent, ${skipped} not needed, ${later} waiting, ${failed} refused` + (notes.size ? `. ${[...notes].join(" | ")}` : "");
+  return { status: failed || later ? "error" : "ok", detail: detail.slice(0, 900) };
+}
+
 // Runs one job over every login. A failing login never stops the others. "busy" is passing: it never overwrites what is known.
-export async function runJob(d: Deps, job: "discover" | "sync", w: Work): Promise<{ status: "ok" | "error"; detail: string }> {
+export type Job = "discover" | "sync" | "reviews" | "reply";
+export async function runJob(d: Deps, job: Job, w: Work): Promise<{ status: "ok" | "error"; detail: string }> {
+  if (job === "reply") return sendReplies(d, w);
   const lines: string[] = []; let bad = 0;
   for (const c of w.connections ?? []) {
-    try { lines.push(job === "discover" ? await discover(d, w, c) : await sync(d, w, c)); }
+    try { lines.push(job === "discover" ? await discover(d, w, c) : job === "reviews" ? await syncReviews(d, w, c) : await sync(d, w, c)); }
     catch (e) {
       bad++;
       const g = e instanceof GoogleSaid ? e : new GoogleSaid("error", String((e as Error)?.message ?? e).slice(0, 300));

@@ -246,42 +246,225 @@ function Words({ o }) {
   );
 }
 
-// ---------------------------------------------------------------- reviews
-const FILTERS = [['all', 'All'], ['unreplied', 'Without a reply'], ['low', '1 to 3 stars']];
-function Reviews({ o, filter, go }) {
+// ---------------------------------------------------------------- reviews and their replies
+// Replies (migration 140): the AI drafts, code checks and a second AI review it; 4-5 stars go out by themselves, 1-3 stars wait here.
+const FILTERS = [['all', 'All'], ['waiting', 'Waiting for you'], ['unreplied', 'Without a reply'], ['low', '1 to 3 stars']];
+const AI_STATE = { writing: ['AI is writing a reply', 'muted'], reviewing: ['AI is checking the reply', 'muted'], needs_owner: ['Waiting for you', 'warn'], queued: ['Sending shortly', 'good'],
+  failed: ['Google refused it', 'bad'], skipped: ['Skipped', 'muted'] };
+
+function ReplySettings({ st, onSaved }) {
+  const s = st.settings;
+  const [f, setF] = useState({ ...s });
+  const [busy, setBusy] = useState(false);
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  const dirty = Object.keys(s).some((k) => String(f[k]) !== String(s[k]));
+  const save = async (e) => {
+    e.preventDefault(); setBusy(true);
+    try {
+      const changed = Object.fromEntries(Object.keys(s).filter((k) => String(f[k]) !== String(s[k])).map((k) => [k, ['min_stars', 'daily_cap', 'max_age_days'].includes(k) ? Number(f[k]) : f[k]]));
+      await rpc('api_gbp_reply_settings_save', { p: changed }); showToast('Reply settings saved', 'success'); await onSaved();
+    } catch (err) { showToast(err.message, 'error'); }
+    setBusy(false);
+  };
+  const Toggle = ({ k, label, hint }) => (
+    <label className="flex items-start gap-2.5 text-sm cursor-pointer min-h-[40px]">
+      <input type="checkbox" className="mt-0.5 h-5 w-5 accent-[var(--accent)]" checked={!!f[k]} onChange={(e) => set(k, e.target.checked)} />
+      <span><span className="font-medium text-glass-primary">{label}</span><span className="block text-[13px] text-glass-secondary">{hint}</span></span>
+    </label>
+  );
+  const field = 'glass-input min-h-[40px] px-3 text-sm';
+  return (
+    <form onSubmit={save} className="grid gap-3.5 pt-3 max-w-2xl" data-testid="reply-settings">
+      <Toggle k="ai" label="The AI writes replies" hint="Each reply is written for that review, checked by rules and by a second AI. Off: you write every reply yourself." />
+      <Toggle k="auto" label="Send replies to good reviews automatically" hint="Off: every reply waits for you. 1 to 3 star reviews always wait for you, whatever is set here." />
+      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>
+        <label className="text-[13px] text-glass-secondary flex flex-col gap-1">Automatic from
+          <select className={field} value={f.min_stars} onChange={(e) => set('min_stars', Number(e.target.value))}><option value={4}>4 and 5 stars</option><option value={5}>5 stars only</option></select></label>
+        <label className="text-[13px] text-glass-secondary flex flex-col gap-1">Automatic replies a day, at most
+          <input type="number" min={1} max={50} className={field} value={f.daily_cap} onChange={(e) => set('daily_cap', e.target.value)} /></label>
+        <label className="text-[13px] text-glass-secondary flex flex-col gap-1">Only reviews newer than (days)
+          <input type="number" min={1} max={365} className={field} value={f.max_age_days} onChange={(e) => set('max_age_days', e.target.value)} /></label>
+      </div>
+      <label className="text-[13px] text-glass-secondary flex flex-col gap-1">Your guidance for the AI (tone, what to mention, what to avoid)
+        <textarea className="glass-input px-3 py-2 text-sm" rows={3} maxLength={1000} value={f.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Warm and short. Invite unhappy people to speak to the centre head." /></label>
+      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+        <label className="text-[13px] text-glass-secondary flex flex-col gap-1">Signature (last line of every reply)
+          <input className={field} maxLength={60} value={f.signature} onChange={(e) => set('signature', e.target.value)} placeholder="Team We One Aviation" /></label>
+        <label className="text-[13px] text-glass-secondary flex flex-col gap-1">Contact the AI may give to unhappy reviewers
+          <input className={field} maxLength={120} value={f.contact} onChange={(e) => set('contact', e.target.value)} placeholder="+91 …, name@…" /></label>
+      </div>
+      <div><button type="submit" disabled={!dirty || busy} className="glass-btn min-h-[40px] px-4 text-sm">{busy ? 'Saving…' : 'Save settings'}</button></div>
+    </form>
+  );
+}
+
+function ReplyBox({ r, canRun, aiOn, act }) {
+  const a = r.ai;
+  const [text, setText] = useState(a?.draft || '');
+  const [open, setOpen] = useState(false);          // writing by hand for a review the AI has not touched
+  const [asking, setAsking] = useState(false);
+  const [note, setNote] = useState('');
+  useEffect(() => { setText(a?.draft || ''); }, [a?.draft, a?.status]);
+  if (r.reply) {
+    return (
+      <div className="mt-2 ml-3 pl-3 border-l-2 border-[var(--hairline)]">
+        <div className="text-[12px] text-glass-secondary">Your reply{r.reply_at ? ` · ${day(r.reply_at)}` : ''}{a?.status === 'sent' ? (a.auto ? ' · sent by the AI' : ' · sent from the CRM') : ''}</div>
+        <p className="m-0 text-glass-secondary whitespace-pre-line break-words">{r.reply}</p>
+      </div>
+    );
+  }
+  if (!canRun) return a?.draft ? <p className="m-0 mt-2 ml-3 pl-3 border-l-2 border-[var(--hairline)] text-glass-secondary whitespace-pre-line break-words">{a.draft}</p> : null;
+  const edited = text.trim() !== (a?.draft || '').trim();
+  const btn = 'glass-btn-ghost min-h-[36px] px-3 text-[13px]';
+  const editor = (label) => (
+    <label className="block text-[12px] text-glass-secondary">{label}
+      <textarea className="glass-input mt-1 w-full px-3 py-2 text-sm text-glass-primary" rows={4} maxLength={1500} value={text} onChange={(e) => setText(e.target.value)} />
+    </label>
+  );
+  const askRow = asking && (
+    <div className="mt-2 flex flex-wrap items-end gap-2">
+      <label className="flex-1 min-w-[220px] text-[12px] text-glass-secondary">Anything the AI should know for this one (optional)
+        <input className="glass-input mt-1 w-full min-h-[38px] px-3 text-sm" maxLength={300} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Shorter, and mention the new batch timing" /></label>
+      <button type="button" className="glass-btn min-h-[38px] px-3.5 text-[13px]" onClick={() => { setAsking(false); act(r, a ? 'rewrite' : 'request', note); }}>Ask the AI</button>
+      <button type="button" className={btn} onClick={() => setAsking(false)}>Cancel</button>
+    </div>
+  );
+  if (!a || a.status === 'skipped') {
+    return (
+      <div className="mt-2" data-reply={r.review_id}>
+        {!open && !asking && (
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={btn} onClick={() => setOpen(true)}>Write a reply</button>
+            {aiOn && r.stars && <button type="button" className={btn} onClick={() => setAsking(true)}>Ask the AI to write one</button>}
+          </div>
+        )}
+        {open && <>{editor('Your reply (it goes on Google as written)')}
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button type="button" disabled={text.trim().length < 2} className="glass-btn min-h-[38px] px-3.5 text-[13px]" onClick={() => act(r, 'write', text)}>Send reply</button>
+            <button type="button" className={btn} onClick={() => { setOpen(false); setText(a?.draft || ''); }}>Cancel</button>
+          </div></>}
+        {askRow}
+      </div>
+    );
+  }
+  if (a.status === 'writing' || a.status === 'reviewing') return <p className="m-0 mt-2 text-[13px] text-glass-secondary" data-reply={r.review_id}>The reply appears here when the AI has finished. <button type="button" className="text-[var(--accent)] font-medium" onClick={() => act(r, 'skip')}>Skip this review</button></p>;
+  if (a.status === 'queued') {
+    return (
+      <div className="mt-2 ml-3 pl-3 border-l-2 border-[var(--accent)]" data-reply={r.review_id}>
+        <div className="text-[12px] text-glass-secondary">{a.auto ? 'Written and checked by the AI' : 'Approved by you'} · goes to Google within 10 minutes</div>
+        <p className="m-0 text-glass-primary whitespace-pre-line break-words">{a.draft}</p>
+        {a.error && <p className="m-0 mt-1 text-[13px]" style={{ color: '#8A5300' }}>Not sent yet: {a.error}</p>}
+        <button type="button" className={`${btn} mt-1.5`} onClick={() => act(r, 'cancel')}>Hold it back</button>
+      </div>
+    );
+  }
+  // needs_owner or failed: the draft is the person's to send, change or drop
+  const problems = Array.isArray(a.problems) ? a.problems : [];
+  return (
+    <div className="mt-2.5 rounded-[12px] p-3" style={{ background: 'var(--surface-sunken)' }} data-reply={r.review_id}>
+      {a.status === 'failed' && <p className="m-0 mb-2 text-[13px]" style={{ color: '#A42219' }}>Google did not take the reply: {a.error || 'no reason given'}</p>}
+      {a.status !== 'failed' && a.error && <p className="m-0 mb-2 text-[13px]" style={{ color: '#8A5300' }}>{a.error}</p>}
+      {a.flag && <p className="m-0 mb-2 text-[13px] text-glass-primary"><b>The AI left this to you:</b> {a.flag}</p>}
+      {problems.length > 0 && <div className="mb-2 text-[13px]" style={{ color: '#8A5300' }}><b>The AI's draft was stopped:</b><ul className="m-0 mt-0.5 pl-5">{problems.map((p) => <li key={p}>{p}</li>)}</ul></div>}
+      {editor(a.draft ? (a.source === 'owner' ? 'Your draft' : 'The AI\'s draft. Change anything you like; it goes on Google as written here.') : 'Your reply (it goes on Google as written)')}
+      {a.note && !problems.length && <p className="m-0 mt-1 text-[12px] text-glass-secondary">Second AI's note: {a.note}</p>}
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button type="button" disabled={text.trim().length < 2} className="glass-btn min-h-[38px] px-3.5 text-[13px]" onClick={() => act(r, edited || !a.draft ? 'write' : 'send', text)}>{a.status === 'failed' ? 'Send again' : 'Send reply'}</button>
+        {aiOn && r.stars && !asking && <button type="button" className={btn} onClick={() => setAsking(true)}>Ask the AI again</button>}
+        <button type="button" className={btn} onClick={() => act(r, 'skip')}>Skip</button>
+      </div>
+      {askRow}
+    </div>
+  );
+}
+
+function Reviews({ o, filter, go, stamp }) {
   const f = FILTERS.some(([k]) => k === filter) ? filter : 'all';
   const [rows, setRows] = useState(null);
+  const [st, setSt] = useState(null);
   const [err, setErr] = useState('');
+  const [showSettings, setShowSettings] = useState(false);
+  const [busy, setBusy] = useState(false);
   const many = (o.locations || []).filter((l) => l.tracked).length > 1 && !o.selected;
-  useEffect(() => {
-    let stop = false; setRows(null);
-    rpc('api_gbp_reviews', { p_location: o.selected || null, p_filter: f, p_limit: 200 }).then((d) => { if (!stop) { setRows(d || []); setErr(''); } }).catch((e) => { if (!stop) setErr(e.message); });
-    return () => { stop = true; };
-  }, [o.selected, f]);
-  const rv = o.reviews || {};
+  const load = useCallback(async () => {
+    try {
+      const [d, s] = await Promise.all([rpc('api_gbp_reviews', { p_location: o.selected || null, p_filter: f, p_limit: 200 }), rpc('api_gbp_reply_status').catch(() => null)]);
+      setRows(d || []); setSt(s); setErr('');
+    } catch (e) { setErr(e.message); }
+  }, [o.selected, f, stamp]);      // stamp: the last collection, so Refresh reloads the list too
+  useEffect(() => { setRows(null); load(); }, [load]);
+  const canRun = !!o.access?.can_run;
+  // one handler for every button under a review; a send is pushed to Google at once instead of waiting for the 10-minute run
+  const act = async (r, what, text) => {
+    if (busy) return; setBusy(true);
+    try {
+      let sendNow = false;
+      if (what === 'write') { await rpc('api_gbp_reply_write', { p_location: r.location_id, p_review: r.review_id, p_text: text, p_send: true }); sendNow = true; }
+      else if (what === 'request') await rpc('api_gbp_reply_request', { p_location: r.location_id, p_review: r.review_id, p_note: text || null });
+      else { await rpc('api_gbp_reply_action', { p_id: r.ai.id, p_action: what, p_note: what === 'rewrite' ? (text || null) : null }); sendNow = what === 'send'; }
+      if (sendNow) {
+        const out = await edge(['reply']).catch((e) => ({ results: { reply: { status: 'error', detail: e.message } } }));
+        const d = out.results?.reply;
+        showToast(d?.status === 'ok' ? 'Reply sent to Google' : `Saved. Not on Google yet: ${d?.detail || 'it will be tried again within 10 minutes'}`, d?.status === 'ok' ? 'success' : 'error');
+      } else {
+        showToast({ request: 'The AI will write it on its next run', rewrite: 'The AI will write it again on its next run', skip: 'Skipped', cancel: 'Held back. It waits for you now.', reopen: 'Reopened' }[what] || 'Done', 'success');
+      }
+    } catch (e) { showToast(e.message, 'error'); }
+    await load(); setBusy(false);
+  };
+  const rv = o.reviews || {}, c = st?.counts || {}, s = st?.settings;
+  const seenH = st?.helper_seen ? (Date.now() - new Date(st.helper_seen).getTime()) / 3600000 : null;
   return (
-    <Section id="reviews" title="Reviews" hint={`${rv.rating != null ? `${Number(rv.rating).toFixed(1)} of 5 · ` : ''}${fmt(rv.total)} on Google · ${fmt(rv.unreplied)} without a reply. Replies are written on Google for now; automatic replies are not switched on yet.`}>
-      <div role="tablist" aria-label="Which reviews" className="inline-flex flex-wrap p-0.5 rounded-[10px] bg-[var(--surface-sunken)] mb-2">
-        {FILTERS.map(([k, l]) => (
-          <button key={k} role="tab" aria-selected={f === k} type="button" onClick={() => go('reviews', { f: k === 'all' ? undefined : k })}
-            className={`min-h-[34px] px-3 rounded-[8px] text-[13px] ${f === k ? 'bg-white shadow-sm font-semibold text-glass-primary' : 'text-glass-secondary'}`}>{l}</button>
-        ))}
-      </div>
-      {err && <p role="alert" className="m-0 py-2 text-sm">{err}</p>}
-      {!rows && !err && <p className="m-0 py-3 text-sm text-glass-secondary">Loading…</p>}
-      {rows && !rows.length && <p className="m-0 py-3 text-sm text-glass-secondary">{f === 'all' ? 'No reviews collected yet.' : 'None. Nothing is waiting here.'}</p>}
-      {(rows || []).map((r) => (
-        <article key={`${r.location_id}${r.review_id}`} className="py-3.5 border-t border-[var(--hairline)] text-sm">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-            <Stars n={r.stars} /><span className="font-medium text-glass-primary">{r.reviewer || 'A Google user'}</span>
-            <span className="text-[12px] text-glass-secondary">{day(r.created_at)}{many ? ` · ${r.profile}` : ''}</span>
-            {!r.reply && <Chip tone={r.stars && r.stars <= 3 ? 'bad' : 'warn'}>No reply yet</Chip>}
+    <div className="flex flex-col gap-5">
+      {st && (
+        <section className="glass-card p-5" data-section="replies">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="m-0 text-base font-semibold text-glass-primary">Replies</h2>
+              <p className="m-0 text-[13px] text-glass-secondary">{!s.ai ? 'The AI is off. You write every reply yourself.'
+                : s.auto ? `The AI answers ${s.min_stars === 5 ? '5 star' : '4 and 5 star'} reviews by itself, at most ${s.daily_cap} a day. 1 to ${s.min_stars - 1} star reviews are drafted and wait for you.`
+                  : 'The AI drafts every reply. Nothing is sent until you press Send.'}</p>
+            </div>
+            {o.access?.is_admin && <button type="button" className="glass-btn-ghost min-h-[36px] px-3 text-[13px]" aria-expanded={showSettings} onClick={() => setShowSettings((x) => !x)}>{showSettings ? 'Close settings' : 'Reply settings'}</button>}
           </div>
-          {r.comment ? <p className="m-0 mt-1.5 text-glass-primary whitespace-pre-line break-words">{r.comment}</p> : <p className="m-0 mt-1.5 text-glass-secondary">Rating only, no text.</p>}
-          {r.reply && <div className="mt-2 ml-3 pl-3 border-l-2 border-[var(--hairline)]"><div className="text-[12px] text-glass-secondary">Your reply{r.reply_at ? ` · ${day(r.reply_at)}` : ''}</div><p className="m-0 text-glass-secondary whitespace-pre-line break-words">{r.reply}</p></div>}
-        </article>
-      ))}
-    </Section>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {Number(c.needs_owner) + Number(c.failed) > 0 && <button type="button" onClick={() => go('reviews', { f: 'waiting' })}><Chip tone="warn">{fmt(Number(c.needs_owner) + Number(c.failed))} waiting for you</Chip></button>}
+            {Number(c.queued) > 0 && <Chip tone="good">{fmt(c.queued)} sending shortly</Chip>}
+            {Number(c.with_ai) > 0 && <Chip>{fmt(c.with_ai)} with the AI</Chip>}
+            <Chip>{fmt(c.sent_7d)} sent in 7 days</Chip>
+            {s.ai && s.auto && <Chip>{fmt(c.sent_auto_today)} of {s.daily_cap} automatic today</Chip>}
+          </div>
+          {s.ai && (seenH == null || seenH > 26) && <p className="m-0 mt-3 text-[13px]" style={{ color: '#8A5300' }}>
+            {seenH == null ? 'The AI helper has not run yet, so no reply is being written.' : `The AI helper last ran ${ago(st.helper_seen)}, so new reviews are waiting to be written.`} It runs on your Mac or on the cloud runner (CRM &gt; Google Ads &gt; Autopilot shows its state).</p>}
+          {showSettings && <ReplySettings st={st} onSaved={load} />}
+        </section>
+      )}
+      <Section id="reviews" title="Reviews" hint={`${rv.rating != null ? `${Number(rv.rating).toFixed(1)} of 5 · ` : ''}${fmt(rv.total)} on Google · ${fmt(rv.unreplied)} without a reply`}>
+        <div role="tablist" aria-label="Which reviews" className="inline-flex flex-wrap p-0.5 rounded-[10px] bg-[var(--surface-sunken)] mb-2">
+          {FILTERS.map(([k, l]) => (
+            <button key={k} role="tab" aria-selected={f === k} type="button" onClick={() => go('reviews', { f: k === 'all' ? undefined : k })}
+              className={`min-h-[34px] px-3 rounded-[8px] text-[13px] ${f === k ? 'bg-white shadow-sm font-semibold text-glass-primary' : 'text-glass-secondary'}`}>{l}</button>
+          ))}
+        </div>
+        {err && <p role="alert" className="m-0 py-2 text-sm">{err}</p>}
+        {!rows && !err && <p className="m-0 py-3 text-sm text-glass-secondary">Loading…</p>}
+        {rows && !rows.length && <p className="m-0 py-3 text-sm text-glass-secondary">{f === 'all' ? 'No reviews collected yet.' : 'None. Nothing is waiting here.'}</p>}
+        {(rows || []).map((r) => {
+          const state = !r.reply && r.ai ? AI_STATE[r.ai.status] : null;
+          return (
+            <article key={`${r.location_id}${r.review_id}`} className="py-3.5 border-t border-[var(--hairline)] text-sm" data-review={r.review_id}>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <Stars n={r.stars} /><span className="font-medium text-glass-primary">{r.reviewer || 'A Google user'}</span>
+                <span className="text-[12px] text-glass-secondary">{day(r.created_at)}{many ? ` · ${r.profile}` : ''}</span>
+                {!r.reply && (state ? <Chip tone={state[1]}>{state[0]}</Chip> : <Chip tone={r.stars && r.stars <= 3 ? 'bad' : 'warn'}>No reply yet</Chip>)}
+              </div>
+              {r.comment ? <p className="m-0 mt-1.5 text-glass-primary whitespace-pre-line break-words">{r.comment}</p> : <p className="m-0 mt-1.5 text-glass-secondary">Rating only, no text.</p>}
+              <ReplyBox r={r} canRun={canRun && !busy} aiOn={!!s?.ai} act={act} />
+            </article>
+          );
+        })}
+      </Section>
+    </div>
   );
 }
 
@@ -428,7 +611,7 @@ export default function GoogleBusiness() {
   };
   const tracked = (o?.locations || []).filter((l) => l.tracked);
   const current = tracked.find((l) => l.id === o?.selected);
-  const lastRun = o ? Object.values(o.runs || {}).map((r) => r.at).sort().pop() : null;
+  const lastRun = o ? ['discover', 'sync', 'reviews'].map((j) => o.runs?.[j]?.at).filter(Boolean).sort().pop() : null;   // collecting, not sending replies
   const s = o?.setup || {};
   const who = current ? current.title : tracked.length === 1 ? tracked[0].title : tracked.length ? `All ${tracked.length} profiles` : 'No profile yet';
   return (
@@ -465,7 +648,7 @@ export default function GoogleBusiness() {
       {o && tab !== 'manage' && !s.has_data && <Setup o={o} isAdmin={o.access?.is_admin} />}
       {o && tab === 'overview' && s.has_data && <Overview o={o} go={go} />}
       {o && tab === 'words' && s.has_data && <Words o={o} />}
-      {o && tab === 'reviews' && s.has_data && <Reviews o={o} filter={route.params.f} go={go} />}
+      {o && tab === 'reviews' && s.has_data && <Reviews o={o} filter={route.params.f} go={go} stamp={lastRun} />}
       {o && tab === 'manage' && <Manage o={o} reload={load} />}
       <p className="m-0 text-xs text-glass-secondary">Source: Google Business Profile (Performance API and reviews). Google reports people, not page loads, and publishes with a delay of a few days.</p>
     </div>

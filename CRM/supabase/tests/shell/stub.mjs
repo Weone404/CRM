@@ -16,8 +16,27 @@ const G_REVIEWS = [
   { review_id: 'r1', location_id: G_LOCS[0].id, profile: 'We One Aviation', reviewer: 'Asha Verma', stars: 5, comment: 'Great faculty and honest guidance.', created_at: '2026-11-20T10:00:00Z', reply: 'Thank you, Asha.', reply_at: '2026-11-21T05:00:00Z' },
   { review_id: 'r2', location_id: G_LOCS[0].id, profile: 'We One Aviation', reviewer: 'A Google user', stars: 2, comment: '<img src=x onerror=alert(1)> Nobody picked up my call.', created_at: '2026-11-12T10:00:00Z', reply: null, reply_at: null },
   { review_id: 'r3', location_id: G_LOCS[0].id, profile: 'We One Aviation', reviewer: 'Ravi', stars: 4, comment: '', created_at: '2026-10-30T10:00:00Z', reply: null, reply_at: null }];
+// Review replies (140): one review in every state a reply can be in
+const gAi = (id, status, extra = {}) => ({ id, status, source: 'ai', draft: null, problems: [], flag: null, note: null, error: null, auto: false, sent_at: null, updated_at: new Date().toISOString(), ...extra });
+const G_REVIEWS_ALL = () => [
+  { ...G_REVIEWS[0], ai: null },
+  { ...G_REVIEWS[1], ai: gAi(102, 'needs_owner', { draft: 'We are sorry nobody picked up your call. That is not the service we want to give. Please ring the centre once more and ask for the centre head.', note: 'Calm and specific.' }) },
+  { ...G_REVIEWS[2], ai: null },
+  { review_id: 'r4', location_id: G_LOCS[0].id, profile: 'We One Aviation', reviewer: 'Meera S', stars: 5, comment: 'Loved the simulator sessions.', created_at: '2026-11-19T10:00:00Z', reply: null, reply_at: null,
+    ai: gAi(104, 'queued', { auto: true, draft: 'Thank you, Meera. We are glad the simulator sessions were worth it.' }) },
+  { review_id: 'r5', location_id: G_LOCS[0].id, profile: 'We One Aviation', reviewer: 'Karan', stars: 1, comment: 'They took my money and I want it back.', created_at: '2026-11-18T10:00:00Z', reply: null, reply_at: null,
+    ai: gAi(105, 'needs_owner', { flag: 'A money dispute: this needs a person.' }) },
+  { review_id: 'r6', location_id: G_LOCS[0].id, profile: 'We One Aviation', reviewer: 'Sana', stars: 5, comment: 'Best decision I made this year.', created_at: '2026-11-17T10:00:00Z', reply: 'Thank you, Sana. Wishing you clear skies.', reply_at: '2026-11-17T12:00:00Z',
+    ai: gAi(106, 'sent', { auto: true, draft: 'Thank you, Sana. Wishing you clear skies.', sent_at: '2026-11-17T12:00:00Z' }) },
+  { review_id: 'r7', location_id: G_LOCS[0].id, profile: 'We One Aviation', reviewer: 'Dev', stars: 5, comment: 'Good classes.', created_at: '2026-11-16T10:00:00Z', reply: null, reply_at: null,
+    ai: gAi(107, 'failed', { draft: 'Thank you, Dev. Glad the classes helped.', error: 'Reply violates the content policy. <img src=y onerror=alert(2)>' }) },
+  { review_id: 'r8', location_id: G_LOCS[0].id, profile: 'We One Aviation', reviewer: 'Isha', stars: 4, comment: 'Helpful staff.', created_at: '2026-11-15T10:00:00Z', reply: null, reply_at: null, ai: gAi(108, 'writing') },
+  { review_id: 'r9', location_id: G_LOCS[0].id, profile: 'We One Aviation', reviewer: 'Om', stars: 3, comment: 'Average.', created_at: '2026-11-14T10:00:00Z', reply: null, reply_at: null,
+    ai: gAi(109, 'needs_owner', { draft: 'Thank you for the refund request, Om.', problems: ['Offers money, a gift or a discount'] }) },
+];
+const G_SETTINGS = { ai: true, auto: true, min_stars: 4, daily_cap: 10, max_age_days: 30, notes: '', signature: '', contact: '' };
 const gbpOverview = (args) => {
-  const access = { can_view: true, can_run: true, is_admin: true };
+  const access = mode.gbpRole === 'viewer' ? { can_view: true, can_run: false, is_admin: false } : { can_view: true, can_run: true, is_admin: true };
   const empty = { access, setup: { client: true, connections: 0, connected: 0, waiting_google: false, locations: 0, tracked: 0, has_data: false }, connections: [], locations: [], selected: null,
     period: { days: 28, from: '2026-10-25', to: '2026-11-21', last_day: null }, totals: gSum([]), prev: gSum([]), days: [], prev_days: [], weekdays: [], keywords: { month: null, count: 0, rows: [] },
     reviews: { total: 0, rating: null, stored: 0, by_star: {}, unreplied: 0, new: 0, new_prev: 0, latest: [] }, runs: {} };
@@ -166,7 +185,7 @@ http.createServer((req, res) => {
     let body = ''; req.on('data', (c) => { body += c; });
     return req.on('end', () => {
       const b = JSON.parse(body || '{}'); calls.push({ fn: 'edge:crm-google-business', args: b });
-      return send(res, 200, { results: Object.fromEntries((b.jobs || []).map((j) => [j, { status: 'ok', detail: j === 'discover' ? 'We One Aviation: 1 profile(s) in 1 account(s)' : 'We One Aviation: 1 profile(s), 300 day-numbers' }])) });
+      return send(res, 200, { results: Object.fromEntries((b.jobs || []).map((j) => [j, { status: 'ok', detail: j === 'discover' ? 'We One Aviation: 1 profile(s) in 1 account(s)' : j === 'reply' ? '1 sent, 0 not needed, 0 waiting, 0 refused' : 'We One Aviation: 1 profile(s), 300 day-numbers', ...(j === 'reply' && mode.gbpSend === 'waiting' ? { status: 'error', detail: '0 sent, 0 not needed, 1 waiting, 0 refused. Google has not approved this Cloud project yet.' } : {}) }])) });
     });
   }
   if (u.pathname === '/functions/v1/ads-sync') {
@@ -219,7 +238,14 @@ http.createServer((req, res) => {
         : { connections: 2, tracked: 1, waiting_google: false, last_day: '2026-11-21', totals: gSum(G_CUR), prev: gSum(G_PREV), rating: 4.7, reviews: 213 } });
     if (fn === 'api_gbp_overview') return send(res, 200, gbpOverview(calls[calls.length - 1].args || {}));
     if (fn === 'api_gbp_reviews') { const a = calls[calls.length - 1].args || {};
-      return send(res, 200, G_REVIEWS.filter((r) => (a.p_filter === 'unreplied' ? !r.reply : a.p_filter === 'low' ? r.stars <= 3 : true))); }
+      return send(res, 200, G_REVIEWS_ALL().filter((r) => (a.p_filter === 'unreplied' ? !r.reply : a.p_filter === 'low' ? r.stars <= 3
+        : a.p_filter === 'waiting' ? !r.reply && ['needs_owner', 'failed'].includes(r.ai?.status) : true))); }
+    if (fn === 'api_gbp_reply_status') return send(res, 200, { settings: G_SETTINGS, counts: { needs_owner: 3, failed: 1, queued: 1, with_ai: 1, sent_7d: 4, sent_auto_today: 2 },
+      helper_seen: mode.gbpHelper === 'never' ? null : mode.gbpHelper === 'old' ? new Date(Date.now() - 3 * 86400000).toISOString() : new Date(Date.now() - 3600000).toISOString(),
+      access: { can_view: true, can_run: mode.gbpRole !== 'viewer', is_admin: mode.gbpRole !== 'viewer' } });
+    if (fn === 'api_gbp_reply_settings_save') { const a = calls[calls.length - 1].args || {};
+      return Number(a.p?.daily_cap) > 50 ? send(res, 400, { code: 'PT422', message: 'Automatic replies per day: 1 to 50' }) : send(res, 200, { ...G_SETTINGS, ...a.p }); }
+    if (fn === 'api_gbp_reply_action' || fn === 'api_gbp_reply_write' || fn === 'api_gbp_reply_request') return send(res, 200, { id: 1, status: 'queued' });
     if (fn === 'api_gbp_connection_add') { const a = calls[calls.length - 1].args || {};
       return /^1\/\//.test(a.p_refresh_token || '') ? send(res, 200, { id: 'c3c3c3c3-3333-4333-8333-333333333333' }) : send(res, 400, { code: 'PT422', message: 'That is not a Google refresh token (it starts with 1// and has no spaces)' }); }
     if (fn === 'api_gbp_location_track') return send(res, 200, { tracked: true });

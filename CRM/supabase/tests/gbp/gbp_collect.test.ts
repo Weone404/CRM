@@ -1,5 +1,6 @@
 // Google My Business collector against a fake Google and a fake database (139): what gets saved, and what each failure turns into.
 import { runJob, type Conn, type Deps, type Work } from "../../functions/_shared/gbp_collect.ts";
+import { replyUrl, reviewUrl } from "../../functions/_shared/gbp.ts";
 
 const eq = (a: unknown, b: unknown, what: string) => {
   if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}\n  got      ${JSON.stringify(a)}\n  expected ${JSON.stringify(b)}`);
@@ -8,23 +9,26 @@ type Reply = { status?: number; body?: unknown; throws?: boolean };
 type Route = (url: string, init?: RequestInit) => Reply | undefined;
 const QUOTA0 = { status: 429, body: { error: { code: 429, message: "Quota exceeded", details: [{ metadata: { quota_limit_value: "0" } }] } } };
 
-function world(routes: Route[], opts: { expireAfter?: number } = {}) {
+function world(routes: Route[], opts: { expireAfter?: number; queue?: unknown[] } = {}) {
+  const inits: { url: string; method: string; body: string }[] = [];
   const calls: string[] = []; const saved: { fn: string; args: Record<string, unknown> }[] = []; let n = 0;
   const deps: Deps = {
     today: "2026-11-24",
     expired: () => opts.expireAfter !== undefined && n >= opts.expireAfter,
     fetch: (url, init) => {
-      calls.push(url); n++;
+      calls.push(url); n++; inits.push({ url, method: String(init?.method ?? "GET"), body: String(init?.body ?? "") });
       for (const r of routes) {
         const x = r(url, init);
         if (x) { if (x.throws) return Promise.reject(new Error("network")); return Promise.resolve(new Response(JSON.stringify(x.body ?? {}), { status: x.status ?? 200 })); }
       }
       return Promise.resolve(new Response("{}", { status: 404 }));
     },
-    rpc: (fn, args) => { saved.push({ fn, args }); const rows = args.p_rows as unknown[] | undefined; return Promise.resolve(Array.isArray(rows) ? rows.length : null); },
+    rpc: (fn, args) => { saved.push({ fn, args }); if (fn === "svc_gbp_reply_queue") return Promise.resolve(opts.queue ?? []);
+      const rows = args.p_rows as unknown[] | undefined; return Promise.resolve(Array.isArray(rows) ? rows.length : null); },
   };
   const status = () => saved.filter((s) => s.fn === "svc_gbp_connection_status").map((s) => `${s.args.p_id}:${s.args.p_status}`);
-  return { deps, calls, saved, status };
+  const results = () => saved.filter((x) => x.fn === "svc_gbp_reply_result").map((x) => `${x.args.p_id}:${x.args.p_state}`);
+  return { deps, calls, saved, status, inits, results };
 }
 const token: Route = (u) => u.startsWith("https://oauth2.googleapis.com/token") ? { body: { access_token: "ya29.a0TESTaccess" } } : undefined;
 const loc = (over: Partial<Conn["locations"][0]> = {}) => ({ id: "L1", account: "accounts/9", name: "locations/111", first: false, reviews_stored: 5, keyword_months: [], ...over });
@@ -144,4 +148,71 @@ Deno.test("nothing secret is written to the database or the run note", async () 
   const r = await runJob(w.deps, "sync", work([{ locations: [loc()] }]));
   const all = JSON.stringify(w.saved) + r.detail;
   eq([all.includes("1//0gTESTtoken_abc"), all.includes("ya29.a0TESTaccess"), all.includes('"sec"')], [false, false, false], "no refresh token, access token or client secret");
+});
+
+// ---------------------------------------------------------------- review replies (140)
+const Q = (over: Record<string, unknown> = {}) => ({ id: 7, connection_id: "C1", account: "accounts/9", location: "locations/111", review_id: "AbC-123_x", text: "Thank you, Asha. See you soon.", ...over });
+const isReview = (u: string) => /\/reviews\/[A-Za-z0-9_-]+$/.test(u), isReply = (u: string) => u.endsWith("/reply");
+
+Deno.test("reply: the review is read again, then the reply is written once with exactly the approved text", async () => {
+  const w = world([token, (u) => isReview(u) ? { body: { reviewId: "AbC-123_x", starRating: "FIVE" } } : undefined, (u, i) => isReply(u) && i?.method === "PUT" ? { body: { comment: "ok" } } : undefined], { queue: [Q()] });
+  const r = await runJob(w.deps, "reply", work([{}]));
+  eq(r, { status: "ok", detail: "1 sent, 0 not needed, 0 waiting, 0 refused" }, "result");
+  eq(w.inits.slice(1).map((x) => `${x.method} ${x.url}`), [`GET ${reviewUrl("accounts/9", "locations/111", "AbC-123_x")}`, `PUT ${replyUrl("accounts/9", "locations/111", "AbC-123_x")}`], "one read, one write, on Google's reviews API");
+  eq(JSON.parse(w.inits[2].body), { comment: "Thank you, Asha. See you soon." }, "the body is the approved text, nothing added");
+  eq(w.results(), ["7:sent"], "recorded as sent");
+});
+
+Deno.test("reply: answered on Google meanwhile, or deleted -> nothing is sent", async () => {
+  const answered = world([token, (u) => isReview(u) ? { body: { reviewReply: { comment: "The owner answered from the phone." } } } : undefined], { queue: [Q()] });
+  await runJob(answered.deps, "reply", work([{}]));
+  eq([answered.results(), answered.inits.some((x) => x.method === "PUT")], [["7:skipped"], false], "already answered");
+  const gone = world([token, (u) => isReview(u) ? { status: 404, body: { error: { message: "Requested entity was not found." } } } : undefined], { queue: [Q()] });
+  await runJob(gone.deps, "reply", work([{}]));
+  eq([gone.results(), gone.inits.some((x) => x.method === "PUT")], [["7:skipped"], false], "review deleted");
+  const ours = world([token, (u) => isReview(u) ? { body: { reviewReply: { comment: " Thank you, Asha. See you soon. " } } } : undefined], { queue: [Q()] });
+  await runJob(ours.deps, "reply", work([{}]));
+  eq([ours.results(), ours.inits.some((x) => x.method === "PUT")], [["7:sent"], false], "our own reply from an earlier try that did arrive: marked sent, not written twice");
+});
+
+Deno.test("reply: a dropped connection, a busy Google or a pending approval keeps the reply for later; a refusal is final", async () => {
+  const drop = world([token, (u) => isReview(u) ? { body: {} } : undefined, (u) => isReply(u) ? { throws: true } : undefined], { queue: [Q()] });
+  const r1 = await runJob(drop.deps, "reply", work([{}]));
+  eq([drop.results(), r1.status], [["7:retry"], "error"], "no confirmation from Google is never recorded as sent");
+  const quota = world([token, (u) => isReview(u) ? QUOTA0 : undefined], { queue: [Q(), Q({ id: 8, review_id: "r8" })] });
+  await runJob(quota.deps, "reply", work([{}]));
+  eq([quota.results(), quota.status(), quota.inits.some((x) => x.method === "PUT")], [["7:retry", "8:retry"], ["C1:waiting_google", "C1:waiting_google"], false], "Google has not approved the project: both wait");
+  const refused = world([token, (u) => isReview(u) ? { body: {} } : undefined, (u) => isReply(u) ? { status: 400, body: { error: { message: "Reply violates the content policy." } } } : undefined], { queue: [Q()] });
+  const r3 = await runJob(refused.deps, "reply", work([{}]));
+  eq([refused.results(), /content policy/.test(r3.detail), refused.status()], [["7:failed"], true, []], "Google refuses this reply: failed, with Google's reason; the login is fine");
+});
+
+Deno.test("reply: one sign-in per login; a revoked login or a removed one sends nothing; an empty queue costs no calls", async () => {
+  const two = world([token, (u) => isReview(u) ? { body: {} } : undefined, (u) => isReply(u) ? { body: {} } : undefined], { queue: [Q(), Q({ id: 8, review_id: "r8" }), Q({ id: 9, connection_id: "C2", review_id: "r9" })] });
+  await runJob(two.deps, "reply", work([{}, {}]));
+  eq([two.calls.filter((u) => u.includes("oauth2")).length, two.results()], [2, ["7:sent", "8:sent", "9:sent"]], "three replies over two logins: two sign-ins");
+  const revoked = world([(u) => u.includes("oauth2") ? { status: 400, body: { error: "invalid_grant" } } : undefined], { queue: [Q(), Q({ id: 8, review_id: "r8" })] });
+  await runJob(revoked.deps, "reply", work([{}]));
+  eq([revoked.calls.length, revoked.results(), revoked.status()[0]], [1, ["7:retry", "8:retry"], "C1:needs_signin"], "revoked sign-in: asked once, replies kept, login marked");
+  const removed = world([token], { queue: [Q({ connection_id: "gone" })] });
+  await runJob(removed.deps, "reply", work([{}]));
+  eq([removed.calls.length, removed.results()], [0, ["7:retry"]], "the profile's login was removed");
+  const empty = world([token], { queue: [] });
+  eq([await runJob(empty.deps, "reply", work([{}])), empty.calls.length], [{ status: "ok", detail: "No reply is waiting to be sent." }, 0], "nothing queued");
+});
+
+Deno.test("reply: a review id that is not an id never reaches Google; time limit leaves the rest queued", async () => {
+  const bad = world([token], { queue: [Q({ review_id: "x/../../accounts/1" })] });
+  await runJob(bad.deps, "reply", work([{}]));
+  eq([bad.results(), bad.calls.filter((u) => !u.includes("oauth2")).length], [["7:failed"], 0], "malformed id");
+  const slow = world([token, (u) => isReview(u) ? { body: {} } : undefined, (u) => isReply(u) ? { body: {} } : undefined], { queue: [Q(), Q({ id: 8, review_id: "r8" })], expireAfter: 3 });
+  const r = await runJob(slow.deps, "reply", work([{}]));
+  eq([slow.results(), /1 sent, 0 not needed, 1 waiting/.test(r.detail)], [["7:sent"], true], "the second one is simply left in the queue");
+});
+
+Deno.test("reviews: the 3-hourly look reads one page of the newest reviews per tracked profile and nothing else", async () => {
+  const w = world([token, (u) => u.includes("/reviews?") ? { body: { reviews: [{ reviewId: "n1", starRating: "FIVE", comment: "New" }], averageRating: 4.8, totalReviewCount: 214, nextPageToken: "more" } } : undefined]);
+  const r = await runJob(w.deps, "reviews", work([{ locations: [loc(), loc({ id: "L2", name: "locations/222" })] }, {}]));
+  eq(r, { status: "ok", detail: "Login 1: 2 review(s) read · Login 2: no tracked profile" }, "result");
+  eq([w.calls.filter((u) => u.includes("/reviews?")).length, w.calls.some((u) => u.includes("fetchMulti") || u.includes("searchkeywords") || u.includes("pageToken"))], [2, false], "one page each; no numbers, no words");
 });

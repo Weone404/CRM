@@ -98,6 +98,12 @@ export function reviewsUrl(account: string, location: string, pageToken?: string
   return `https://mybusiness.googleapis.com/v4/${okAcc(account)}/${okLoc(location)}/reviews?pageSize=50&orderBy=${encodeURIComponent("updateTime desc")}` +
     (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "");
 }
+// One review, and its reply (PUT {comment} writes or replaces the reply; migration 140).
+const okRev = (id: string) => { if (!/^[A-Za-z0-9_-]{1,200}$/.test(String(id))) throw new Error("bad review id"); return id; };
+export function reviewUrl(account: string, location: string, reviewId: string): string {
+  return `https://mybusiness.googleapis.com/v4/${okAcc(account)}/${okLoc(location)}/reviews/${okRev(reviewId)}`;
+}
+export const replyUrl = (account: string, location: string, reviewId: string) => `${reviewUrl(account, location, reviewId)}/reply`;
 const STARS: Record<string, number> = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5 };
 const iso = (t: unknown) => { const d = new Date(String(t ?? "")); return Number.isNaN(d.getTime()) ? null : d.toISOString(); };
 export interface ReviewRow { id: string; reviewer: string; stars: number | null; comment: string; created: string | null; updated: string | null; reply: string; reply_at: string | null }

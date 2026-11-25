@@ -322,6 +322,92 @@ await page.getByRole('tab', { name: 'Reviews' }).click(); await page.waitForTime
 b = await body();
 ok(/Asha Verma[\s\S]*Great faculty[\s\S]*Your reply · 21 Nov\s*Thank you, Asha\./.test(b) && /Rating only, no text\./.test(b) && /No reply yet/.test(b), 'GG16 reviews with stars, text and your reply; rating-only reviews say so');
 ok(/<img src=x onerror=alert\(1\)> Nobody picked up/.test(b) && await page.locator('img[src="x"]').count() === 0, 'GG16b review text is shown as text, never run as HTML');
+// Replies to reviews (140)
+const rep = g.locator('[data-section="replies"]');
+ok(/The AI answers 4 and 5 star reviews by itself, at most 10 a day\. 1 to 3 star reviews are drafted and wait for you\./.test(await rep.innerText())
+  && /4 waiting for you\s*1 sending shortly\s*1 with the AI\s*4 sent in 7 days\s*2 of 10 automatic today/.test(await rep.innerText()) && !/AI helper/.test(await rep.innerText()),
+  'RV01 one sentence says how reviews are answered; counts of what waits, what is going out and what was sent');
+const card = (id) => g.locator(`[data-review="${id}"]`);
+ok(/Waiting for you/.test(await card('r2').innerText()) && (await card('r2').locator('textarea').inputValue()).startsWith('We are sorry nobody picked up your call') && /Second AI's note: Calm and specific\./.test(await card('r2').innerText()),
+  'RV02 a 2-star review: the AI draft sits in a box you can change, with the second AI\'s note');
+ok(/Sending shortly/.test(await card('r4').innerText()) && /Written and checked by the AI · goes to Google within 10 minutes\s*Thank you, Meera/.test(await card('r4').innerText()), 'RV03 a 5-star reply on its way says who wrote it and when it goes');
+ok(/Your reply · 17 Nov · sent by the AI\s*Thank you, Sana/.test(await card('r6').innerText()) && !/sent by the AI/.test(await card('r1').innerText()), 'RV04 a sent reply says whether the AI sent it');
+ok(/The AI left this to you: A money dispute: this needs a person\./.test(await card('r5').innerText()) && await card('r5').getByRole('button', { name: 'Send reply' }).isDisabled(), 'RV05 a review the AI would not answer: its reason, and nothing to send until you write');
+ok(/Google did not take the reply: Reply violates the content policy\. <img src=y/.test(await card('r7').innerText()) && await page.locator('img[src="y"]').count() === 0 && await card('r7').getByRole('button', { name: 'Send again' }).isVisible(),
+  'RV06 a reply Google refused: Google\'s reason as plain text, and a way to send again');
+ok(/AI is writing a reply/.test(await card('r8').innerText()) && /The AI's draft was stopped:\s*Offers money, a gift or a discount/.test(await card('r9').innerText()), 'RV07 "AI is writing"; and a draft stopped by the rules says which rule');
+let c0 = (await calls()).length;
+await card('r2').getByRole('button', { name: 'Send reply' }).click(); await page.waitForTimeout(1300);
+cw = (await calls()).slice(c0);
+ok(cw.some((x) => x.fn === 'api_gbp_reply_action' && x.args.p_id === 102 && x.args.p_action === 'send') && cw.some((x) => x.fn === 'edge:crm-google-business' && x.args.jobs.join() === 'reply')
+  && /Reply sent to Google/.test(await body()), 'RV08 Send on an unchanged draft approves it and pushes it to Google at once');
+c0 = (await calls()).length;
+await card('r9').locator('textarea').fill('Thank you for telling us, Om. Please visit the centre so we can talk it through.');
+await card('r9').getByRole('button', { name: 'Send reply' }).click(); await page.waitForTimeout(1300);
+cw = (await calls()).slice(c0);
+ok(cw.some((x) => x.fn === 'api_gbp_reply_write' && x.args.p_review === 'r9' && x.args.p_send === true && x.args.p_text.startsWith('Thank you for telling us, Om')) && !cw.some((x) => x.fn === 'api_gbp_reply_action'),
+  'RV09 a draft you changed goes out as your own words');
+c0 = (await calls()).length;
+await card('r4').getByRole('button', { name: 'Hold it back' }).click(); await page.waitForTimeout(900);
+cw = (await calls()).slice(c0);
+ok(cw.some((x) => x.fn === 'api_gbp_reply_action' && x.args.p_id === 104 && x.args.p_action === 'cancel') && !cw.some((x) => x.fn === 'edge:crm-google-business'), 'RV10 an automatic reply can be held back before it goes');
+c0 = (await calls()).length;
+await card('r3').getByRole('button', { name: 'Ask the AI to write one' }).click();
+await card('r3').getByLabel(/Anything the AI should know/).fill('Keep it to one line');
+await card('r3').getByRole('button', { name: 'Ask the AI', exact: true }).click(); await page.waitForTimeout(900);
+cw = (await calls()).slice(c0);
+ok(cw.some((x) => x.fn === 'api_gbp_reply_request' && x.args.p_review === 'r3' && x.args.p_note === 'Keep it to one line'), 'RV11 any unanswered review can be handed to the AI, with a note');
+c0 = (await calls()).length;
+await card('r3').getByRole('button', { name: 'Write a reply' }).click();
+ok(await card('r3').getByRole('button', { name: 'Send reply' }).isDisabled(), 'RV12 an empty reply cannot be sent');
+await card('r3').locator('textarea').fill('Thank you for the rating, Ravi.');
+await card('r3').getByRole('button', { name: 'Send reply' }).click(); await page.waitForTimeout(1300);
+cw = (await calls()).slice(c0);
+ok(cw.some((x) => x.fn === 'api_gbp_reply_write' && x.args.p_review === 'r3' && x.args.p_text === 'Thank you for the rating, Ravi.'), 'RV12b or you write it yourself');
+await mode('gbpSend=waiting');
+await card('r7').getByRole('button', { name: 'Send again' }).click(); await page.waitForTimeout(1300);
+ok(/Saved\. Not on Google yet: .*Google has not approved this Cloud project yet/.test(await body()), 'RV13 if Google is not ready the reply is kept and the screen says why, it does not claim it was sent');
+await mode('gbpSend=ok');
+c0 = (await calls()).length;
+await card('r5').getByRole('button', { name: 'Skip' }).click(); await page.waitForTimeout(800);
+ok((await calls()).slice(c0).some((x) => x.fn === 'api_gbp_reply_action' && x.args.p_id === 105 && x.args.p_action === 'skip'), 'RV14 a review can be skipped');
+await rep.getByRole('button', { name: 'Reply settings' }).click();
+const set = page.getByTestId('reply-settings');
+ok(await set.getByRole('button', { name: 'Save settings' }).isDisabled() && await set.getByLabel(/Send replies to good reviews automatically/).isChecked(), 'RV15 settings open with the saved values; nothing to save until something changes');
+await set.getByLabel(/Automatic replies a day/).fill('99');
+c0 = (await calls()).length;
+await set.getByRole('button', { name: 'Save settings' }).click(); await page.waitForTimeout(500);
+ok(await set.getByLabel(/Automatic replies a day/).evaluate((el) => el.validity.rangeOverflow) && !(await calls()).slice(c0).some((x) => x.fn === 'api_gbp_reply_settings_save'), 'RV16 99 automatic replies a day is stopped in the form (1 to 50)');
+await set.getByLabel(/Automatic replies a day/).fill('10');
+await set.getByLabel(/Send replies to good reviews automatically/).uncheck();
+await set.getByLabel(/Signature/).fill('Team We One Aviation');
+c0 = (await calls()).length;
+await set.getByRole('button', { name: 'Save settings' }).click(); await page.waitForTimeout(800);
+cw = (await calls()).slice(c0).filter((x) => x.fn === 'api_gbp_reply_settings_save');
+ok(cw.length === 1 && JSON.stringify(cw[0].args.p) === JSON.stringify({ auto: false, signature: 'Team We One Aviation' }) && /Reply settings saved/.test(await body()), 'RV17 only what changed is sent to be saved');
+await page.getByRole('tab', { name: 'Waiting for you' }).click(); await page.waitForTimeout(700);
+ok(/[?&]f=waiting/.test(page.url()) && (await calls()).some((x) => x.fn === 'api_gbp_reviews' && x.args.p_filter === 'waiting') && await g.locator('[data-review]').count() === 4 && !/Asha Verma/.test(await body()),
+  'RV18 "Waiting for you" lists only the reviews that need a person');
+await mode('gbpHelper=never');
+await page.goto(`${APP}#/gbp/reviews`); await page.getByTestId('gbp').waitFor(); await page.waitForTimeout(900);
+ok(/The AI helper has not run yet, so no reply is being written\./.test(await rep.innerText()), 'RV19 if the AI helper has never run, the screen says so instead of looking busy');
+await mode('gbpHelper=old');
+await page.reload(); await page.getByTestId('gbp').waitFor(); await page.waitForTimeout(1200);
+ok(/The AI helper last ran 3 days ago/.test(await rep.innerText()), 'RV19b or when it last ran, if that was long ago');
+await mode('gbpHelper=ok'); await mode('gbpRole=viewer');
+await page.reload(); await page.getByTestId('gbp').waitFor(); await page.waitForTimeout(1200);
+ok(await g.getByRole('button', { name: /Send reply|Send again|Skip|Hold it back|Write a reply|Ask the AI|Reply settings/ }).count() === 0 && await g.locator('textarea').count() === 0
+  && /We are sorry nobody picked up your call/.test(await card('r2').innerText()), 'RV20 a viewer sees the drafts and states but has nothing to press');
+await mode('gbpRole=admin');
+await page.setViewportSize({ width: 390, height: 844 });
+await page.reload(); await page.getByTestId('gbp').waitFor(); await page.waitForTimeout(1200);
+await rep.getByRole('button', { name: 'Reply settings' }).click(); await page.waitForTimeout(300);
+ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'RV21 replies, drafts and settings fit a phone screen');
+await page.screenshot({ path: '/tmp/gbp_reviews_phone.png', fullPage: true });
+await page.setViewportSize({ width: 1280, height: 900 });
+await page.reload(); await page.getByTestId('gbp').waitFor(); await page.waitForTimeout(1200);
+await page.screenshot({ path: '/tmp/gbp_reviews.png', fullPage: true });
+await page.goto(`${APP}#/gbp/reviews?d=7`); await page.waitForTimeout(900);
 await page.getByRole('tab', { name: '1 to 3 stars' }).click(); await page.waitForTimeout(600);
 ok(/[?&]f=low/.test(page.url()) && (await calls()).some((x) => x.fn === 'api_gbp_reviews' && x.args.p_filter === 'low') && !/Asha Verma/.test(await body()), 'GG17 low-star filter is in the address and asks the server');
 await page.getByRole('tab', { name: 'Profiles & logins' }).click(); await page.waitForTimeout(600);

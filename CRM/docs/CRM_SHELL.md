@@ -141,7 +141,19 @@ Google My Business (`#/gbp`) shows Google's own Business Profile numbers for any
 
 - **Overview:** profile views, calls, website clicks, direction requests and messages for 7, 28 or 90 days against the period before, day by day; Search vs Maps; phone vs computer; busiest weekdays; top search words; reviews.
 - **Search words:** the searches that showed the profile, month by month (Google gives only "fewer than N" for rare words).
-- **Reviews:** all, without a reply, or 1 to 3 stars.
+- **Reviews:** all, waiting for you, without a reply, or 1 to 3 stars, each with the state of its reply (see "Replies to reviews" below).
 - **Profiles & logins:** Admin adds a Google login (a refresh token with the `business.manage` scope, made with the CRM's own OAuth client; stored in Vault as `crm_gbp_refresh_<id>`, never returned). Every profile that login manages is listed; Admin and ADS approvers tick the ones to track.
 
 The `crm-google-business` Edge Function collects the data (jobs `discover` and `sync`), nightly at 05:05 IST and on Refresh. Google keeps the Business Profile APIs at quota 0 until it approves the Cloud project ("Application for Basic API Access"); until then the login shows "Waiting for Google" and the screen shows a checklist instead of empty charts. Tests: `supabase/tests/gbp/` (SQL `run.sh`, Deno `deno test tests/gbp/`), and GG01 to GG30 in `supabase/tests/shell/app_checks.mjs`.
+
+### Replies to reviews (migration 140, 2026-11-25)
+
+Each unanswered review of a tracked profile (newer than 30 days by default) gets a reply written by the AI:
+
+1. **Writer** (AI, no tools) drafts a reply to that review. The review text is handed over as data; the Writer may also leave a review to a person (safety, money, legal, misconduct, spam).
+2. **Code checks** (`crm_private.gbp_reply_check`) stop a draft with a link, a phone or email other than the saved contact, an offer or refund, a guarantee, a request to change the review, arguing, a mention of AI, shouting, placeholders, or the same wording as an earlier reply. A stopped draft goes back to the Writer with the reason, three rounds at most.
+3. **Reviewer** (a second AI, a different model, no tools) approves or rejects, and marks risky reviews.
+4. **Send:** approved replies to 4 and 5 star reviews go to Google by themselves (settings: on/off, from 4 or 5 stars, at most N a day). 1 to 3 star reviews, risky ones and anything a person asked to be rewritten always wait under Reviews > Waiting for you, where Admin and approvers can send, edit, ask again or skip. A person can also write any reply by hand.
+
+The AI never gets a Google token. `crm-google-business` sends approved text (job `reply`, every 10 minutes while something is queued, and at once when a person presses Send), after reading the review again: answered on Google meanwhile or deleted means nothing is sent. New reviews are looked for every 3 hours (job `reviews`). The Writer and Reviewer run in the ADS helper (`tools/ads-agents`, Mac or cloud runner) as a second lane that is asked only when the ADS queue is empty, through `crm-google-business` with the same agents token. Tests: RP01 to RP66 (`20_gbp_reply_tests.sql`), the collector and helper tests, and RV01 to RV21 in the shell checks.
+

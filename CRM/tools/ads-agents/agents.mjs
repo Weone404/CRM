@@ -26,11 +26,17 @@ const CONF = join(homedir(), ".ads-agents");
 let TOKEN = null;   // read on first use
 const CFG = existsSync(join(CONF, "config.json")) ? JSON.parse(readFileSync(join(CONF, "config.json"), "utf8")) : {};
 const URL_ = process.env.ADS_AGENTS_URL || CFG.url || "https://syytqcadmtgowckdnbqh.supabase.co/functions/v1/ads-agents";
+// Second lane: Google My Business review replies (migration 140). Same token, its own door (crm-google-business), asked only when
+// the ADS queue is empty. Off when the ADS address is not the standard one and no address is given for it.
+const GBP_URL = process.env.GBP_AGENTS_URL || CFG.gbp_url || (/\/ads-agents\/?$/.test(URL_) ? URL_.replace(/\/ads-agents\/?$/, "/crm-google-business") : "");
+export const GBP_ROLES = ["gbp_reply_writer", "gbp_reply_reviewer"];
 const CLAUDE = process.env.CLAUDE_BIN || (existsSync(join(CONF, "claude-path")) ? readFileSync(join(CONF, "claude-path"), "utf8").trim() : "claude");
 const MODELS = { researcher: "sonnet", builder: "opus", reviewer: "opus", learner: "opus",
-  meta_researcher: "sonnet", meta_strategist: "opus", meta_reviewer: "opus", meta_content_analyst: "sonnet", meta_content_planner: "opus", ...(CFG.models || {}) };
+  meta_researcher: "sonnet", meta_strategist: "opus", meta_reviewer: "opus", meta_content_analyst: "sonnet", meta_content_planner: "opus",
+  gbp_reply_writer: "sonnet", gbp_reply_reviewer: "opus", ...(CFG.models || {}) };
 const TIMEOUT = { researcher: 15 * 60e3, builder: 8 * 60e3, reviewer: 6 * 60e3, learner: 8 * 60e3,
-  meta_researcher: 15 * 60e3, meta_strategist: 12 * 60e3, meta_reviewer: 8 * 60e3, meta_content_analyst: 12 * 60e3, meta_content_planner: 10 * 60e3 };
+  meta_researcher: 15 * 60e3, meta_strategist: 12 * 60e3, meta_reviewer: 8 * 60e3, meta_content_analyst: 12 * 60e3, meta_content_planner: 10 * 60e3,
+  gbp_reply_writer: 4 * 60e3, gbp_reply_reviewer: 4 * 60e3 };
 export const WEB_ROLES = new Set(["researcher", "meta_researcher", "meta_content_analyst"]);
 const ONCE = process.env.ADS_AGENTS_ONCE === "1";
 let STOP = false;                  // one-pass mode: a usage limit ends the pass instead of waiting
@@ -40,9 +46,9 @@ const WORKDIR = mkdtempSync(join(tmpdir(), "ads-agents-"));
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function call(body) {
+async function callAt(body, url = URL_) {
   TOKEN ??= (process.env.ADS_AGENTS_TOKEN || readFileSync(join(CONF, "token"), "utf8")).trim();
-  const res = await fetch(URL_, { method: "POST", headers: { "Content-Type": "application/json", "x-ads-agents-token": TOKEN },
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "x-ads-agents-token": TOKEN },
     body: JSON.stringify(body), signal: AbortSignal.timeout(90000) });
   const out = await res.json().catch(() => ({}));
   if (res.status === 401) { const e = new Error("token rejected"); e.code = 401; throw e; }
@@ -117,9 +123,11 @@ const SUMMARY = {
 };
 SUMMARY.meta_reviewer = SUMMARY.reviewer;
 
-async function step() {
+async function step(lane = "ads") {
+  const url = lane === "gbp" ? GBP_URL : URL_;
+  const call = (body) => callAt(body, url);
   // meta: this helper knows the Meta strategy roles; roles: every role it can run (the CRM never hands it another one)
-  const job = await call({ action: "next", meta: true, roles: Object.keys(PROMPTS) });
+  const job = await call(lane === "gbp" ? { action: "next", roles: GBP_ROLES } : { action: "next", meta: true, roles: Object.keys(PROMPTS) });
   if (job.update && !ONCE && (await selfUpdate())) process.exit(0);   // the CRM has work for a newer helper
   if (!job.run) return false;
   const { run, context } = job;
@@ -148,6 +156,18 @@ async function step() {
   const res = await call({ action: "finish", id: run.id, ok: true, output: out, summary: SUMMARY[run.role]?.(out) });
   log(`step ${run.id} done`, ONCE ? "" : JSON.stringify(res).slice(0, 200));
   return true;
+}
+
+// One piece of work from either lane. The review-reply door being closed or broken must never stop the ADS work.
+let gbpNote = "";
+async function work() {
+  if (await step("ads")) return true;
+  if (!GBP_URL || STOP) return false;
+  try { return await step("gbp"); }
+  catch (e) {      // also a 401: the ADS door has just accepted this token, so the fault is that door's (not deployed yet, older build)
+    if (gbpNote !== e.message) { gbpNote = e.message; log("review replies:", e.message, "- skipped this time"); }
+    return false;
+  }
 }
 
 // Self-update: on start, every 30 minutes and when the CRM says newer work is waiting, fetch the latest helper and role instructions from the repo. If they changed
@@ -181,7 +201,7 @@ export async function once() {
   log(`ADS agents helper: one pass (${URL_}); models ${JSON.stringify(MODELS)}`);
   let n = 0;
   while (!STOP && Date.now() < until) {
-    try { if (!(await step())) break; n++; }
+    try { if (!(await work())) break; n++; }
     catch (e) {
       if (e.code === 401) { log("The CRM rejected the token. Make a new one in CRM > ADS > Autopilot and save it as the ADS_AGENTS_TOKEN secret."); process.exitCode = 1; }
       else log("error:", e.message, "- the next pass will try again");
@@ -199,7 +219,7 @@ async function main() {
   let backoff = 0;
   for (;;) {
     try {
-      const worked = await step();
+      const worked = await work();
       backoff = 0;
       if (!worked) await sleep(IDLE_MS);
     } catch (e) {
