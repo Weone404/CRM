@@ -148,6 +148,8 @@ The `crm-google-business` Edge Function collects the data (jobs `discover` and `
 
 ### Replies to reviews (migration 140, 2026-11-25)
 
+**Built, not in use (migration 141).** The business already answers its reviews elsewhere, so the whole feature sits behind one switch, `gbp_config.reply_enabled`, which is off. While it is off the Reviews tab is a read-only list, the AI helper is given nothing and the send queue is always empty. To use it later: `UPDATE public.gbp_config SET value = 'on' WHERE key IN ('reply_enabled', 'reply_ai', 'reply_auto');`. What follows describes it switched on.
+
 Each unanswered review of a tracked profile (newer than 30 days by default) gets a reply written by the AI:
 
 1. **Writer** (AI, no tools) drafts a reply to that review. The review text is handed over as data; the Writer may also leave a review to a person (safety, money, legal, misconduct, spam).

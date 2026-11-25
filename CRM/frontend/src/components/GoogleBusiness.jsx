@@ -248,6 +248,8 @@ function Words({ o }) {
 
 // ---------------------------------------------------------------- reviews and their replies
 // Replies (migration 140): the AI drafts, code checks and a second AI review it; 4-5 stars go out by themselves, 1-3 stars wait here.
+// The whole feature sits behind one switch (141, gbp_config.reply_enabled) and is off: the business answers its reviews elsewhere.
+// While it is off this tab is a read-only list, exactly as before 140.
 const FILTERS = [['all', 'All'], ['waiting', 'Waiting for you'], ['unreplied', 'Without a reply'], ['low', '1 to 3 stars']];
 const AI_STATE = { writing: ['AI is writing a reply', 'muted'], reviewing: ['AI is checking the reply', 'muted'], needs_owner: ['Waiting for you', 'warn'], queued: ['Sending shortly', 'good'],
   failed: ['Google refused it', 'bad'], skipped: ['Skipped', 'muted'] };
@@ -298,7 +300,7 @@ function ReplySettings({ st, onSaved }) {
   );
 }
 
-function ReplyBox({ r, canRun, aiOn, act }) {
+function ReplyBox({ r, on, canRun, aiOn, act }) {
   const a = r.ai;
   const [text, setText] = useState(a?.draft || '');
   const [open, setOpen] = useState(false);          // writing by hand for a review the AI has not touched
@@ -308,11 +310,12 @@ function ReplyBox({ r, canRun, aiOn, act }) {
   if (r.reply) {
     return (
       <div className="mt-2 ml-3 pl-3 border-l-2 border-[var(--hairline)]">
-        <div className="text-[12px] text-glass-secondary">Your reply{r.reply_at ? ` · ${day(r.reply_at)}` : ''}{a?.status === 'sent' ? (a.auto ? ' · sent by the AI' : ' · sent from the CRM') : ''}</div>
+        <div className="text-[12px] text-glass-secondary">Your reply{r.reply_at ? ` · ${day(r.reply_at)}` : ''}{on && a?.status === 'sent' ? (a.auto ? ' · sent by the AI' : ' · sent from the CRM') : ''}</div>
         <p className="m-0 text-glass-secondary whitespace-pre-line break-words">{r.reply}</p>
       </div>
     );
   }
+  if (!on) return null;
   if (!canRun) return a?.draft ? <p className="m-0 mt-2 ml-3 pl-3 border-l-2 border-[var(--hairline)] text-glass-secondary whitespace-pre-line break-words">{a.draft}</p> : null;
   const edited = text.trim() !== (a?.draft || '').trim();
   const btn = 'glass-btn-ghost min-h-[36px] px-3 text-[13px]';
@@ -379,9 +382,11 @@ function ReplyBox({ r, canRun, aiOn, act }) {
 }
 
 function Reviews({ o, filter, go, stamp }) {
-  const f = FILTERS.some(([k]) => k === filter) ? filter : 'all';
-  const [rows, setRows] = useState(null);
   const [st, setSt] = useState(null);
+  const on = !!st?.enabled;                                   // review replies in use at all (off by default)
+  const filters = on ? FILTERS : FILTERS.filter(([k]) => k !== 'waiting');
+  const f = filters.some(([k]) => k === filter) ? filter : 'all';
+  const [rows, setRows] = useState(null);
   const [err, setErr] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -416,7 +421,7 @@ function Reviews({ o, filter, go, stamp }) {
   const seenH = st?.helper_seen ? (Date.now() - new Date(st.helper_seen).getTime()) / 3600000 : null;
   return (
     <div className="flex flex-col gap-5">
-      {st && (
+      {st && on && (
         <section className="glass-card p-5" data-section="replies">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
@@ -439,9 +444,9 @@ function Reviews({ o, filter, go, stamp }) {
           {showSettings && <ReplySettings st={st} onSaved={load} />}
         </section>
       )}
-      <Section id="reviews" title="Reviews" hint={`${rv.rating != null ? `${Number(rv.rating).toFixed(1)} of 5 · ` : ''}${fmt(rv.total)} on Google · ${fmt(rv.unreplied)} without a reply`}>
+      <Section id="reviews" title="Reviews" hint={`${rv.rating != null ? `${Number(rv.rating).toFixed(1)} of 5 · ` : ''}${fmt(rv.total)} on Google · ${fmt(rv.unreplied)} without a reply${on ? '' : '. Replies are written outside the CRM and show here after the next refresh.'}`}>
         <div role="tablist" aria-label="Which reviews" className="inline-flex flex-wrap p-0.5 rounded-[10px] bg-[var(--surface-sunken)] mb-2">
-          {FILTERS.map(([k, l]) => (
+          {filters.map(([k, l]) => (
             <button key={k} role="tab" aria-selected={f === k} type="button" onClick={() => go('reviews', { f: k === 'all' ? undefined : k })}
               className={`min-h-[34px] px-3 rounded-[8px] text-[13px] ${f === k ? 'bg-white shadow-sm font-semibold text-glass-primary' : 'text-glass-secondary'}`}>{l}</button>
           ))}
@@ -450,7 +455,7 @@ function Reviews({ o, filter, go, stamp }) {
         {!rows && !err && <p className="m-0 py-3 text-sm text-glass-secondary">Loading…</p>}
         {rows && !rows.length && <p className="m-0 py-3 text-sm text-glass-secondary">{f === 'all' ? 'No reviews collected yet.' : 'None. Nothing is waiting here.'}</p>}
         {(rows || []).map((r) => {
-          const state = !r.reply && r.ai ? AI_STATE[r.ai.status] : null;
+          const state = on && !r.reply && r.ai ? AI_STATE[r.ai.status] : null;
           return (
             <article key={`${r.location_id}${r.review_id}`} className="py-3.5 border-t border-[var(--hairline)] text-sm" data-review={r.review_id}>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
@@ -459,7 +464,7 @@ function Reviews({ o, filter, go, stamp }) {
                 {!r.reply && (state ? <Chip tone={state[1]}>{state[0]}</Chip> : <Chip tone={r.stars && r.stars <= 3 ? 'bad' : 'warn'}>No reply yet</Chip>)}
               </div>
               {r.comment ? <p className="m-0 mt-1.5 text-glass-primary whitespace-pre-line break-words">{r.comment}</p> : <p className="m-0 mt-1.5 text-glass-secondary">Rating only, no text.</p>}
-              <ReplyBox r={r} canRun={canRun && !busy} aiOn={!!s?.ai} act={act} />
+              <ReplyBox r={r} on={on} canRun={canRun && !busy} aiOn={!!s?.ai} act={act} />
             </article>
           );
         })}

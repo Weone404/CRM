@@ -240,7 +240,7 @@ http.createServer((req, res) => {
     if (fn === 'api_gbp_reviews') { const a = calls[calls.length - 1].args || {};
       return send(res, 200, G_REVIEWS_ALL().filter((r) => (a.p_filter === 'unreplied' ? !r.reply : a.p_filter === 'low' ? r.stars <= 3
         : a.p_filter === 'waiting' ? !r.reply && ['needs_owner', 'failed'].includes(r.ai?.status) : true))); }
-    if (fn === 'api_gbp_reply_status') return send(res, 200, { settings: G_SETTINGS, counts: { needs_owner: 3, failed: 1, queued: 1, with_ai: 1, sent_7d: 4, sent_auto_today: 2 },
+    if (fn === 'api_gbp_reply_status') return send(res, 200, { enabled: mode.gbpReplies === 'on', settings: G_SETTINGS, counts: { needs_owner: 3, failed: 1, queued: 1, with_ai: 1, sent_7d: 4, sent_auto_today: 2 },
       helper_seen: mode.gbpHelper === 'never' ? null : mode.gbpHelper === 'old' ? new Date(Date.now() - 3 * 86400000).toISOString() : new Date(Date.now() - 3600000).toISOString(),
       access: { can_view: true, can_run: mode.gbpRole !== 'viewer', is_admin: mode.gbpRole !== 'viewer' } });
     if (fn === 'api_gbp_reply_settings_save') { const a = calls[calls.length - 1].args || {};

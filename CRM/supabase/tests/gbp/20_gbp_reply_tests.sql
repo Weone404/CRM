@@ -44,6 +44,24 @@ INSERT INTO public.gbp_review (location_id, review_id, reviewer, stars, comment,
 INSERT INTO public.ads_config (key, value) VALUES ('agents_last_seen', '2026-11-25T04:00:00Z') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 \set L1 'a0000000-0000-4000-8000-000000000001'
 
+-- ---------------------------------------------------------------- 141: built, but not in use
+SELECT pg_temp.ok((SELECT string_agg(key || '=' || value, ',' ORDER BY key) FROM public.gbp_config WHERE key IN ('reply_enabled', 'reply_ai', 'reply_auto')) = 'reply_ai=off,reply_auto=off,reply_enabled=off',
+  'RP00 as installed, review replies are switched off: the AI does not write, nothing is sent automatically');
+INSERT INTO public.gbp_reply (location_id, review_id, stars, status, source, draft) VALUES (:'L1', 'a5', 5, 'queued', 'owner', 'Thank you for the review, we are glad you liked it.');
+SET ROLE service_role;
+SELECT pg_temp.ok(public.svc_gbp_reply_next(ARRAY['gbp_reply_writer', 'gbp_reply_reviewer']) IS NULL AND public.svc_gbp_reply_queue() = '[]', 'RP00b while it is off the AI helper is given nothing and the send queue is empty, even if a reply is somehow queued');
+RESET ROLE;
+SET ROLE authenticated;
+SELECT pg_temp.as_('a');
+SELECT pg_temp.ok(public.api_gbp_reply_status() @> '{"enabled": false, "settings": {"ai": false, "auto": false}}' AND jsonb_array_length(public.api_gbp_reviews()) = 7, 'RP00c the screen is told it is off; the reviews are still listed');
+RESET ROLE;
+DELETE FROM public.gbp_reply;
+UPDATE public.gbp_config SET value = 'on' WHERE key IN ('reply_enabled', 'reply_ai', 'reply_auto');      -- everything below tests the feature switched on
+SET ROLE authenticated;
+SELECT pg_temp.as_('c');
+SELECT pg_temp.ok(public.api_gbp_reply_status() @> '{"enabled": true}', 'RP00d switched on with one setting');
+RESET ROLE;
+
 -- ---------------------------------------------------------------- who may do what
 SET ROLE anon;
 SELECT pg_temp.fails($q$SELECT public.api_gbp_reply_status()$q$, '%permission denied%', 'RP01 signed-out visitors cannot see reply settings');

@@ -322,7 +322,16 @@ await page.getByRole('tab', { name: 'Reviews' }).click(); await page.waitForTime
 b = await body();
 ok(/Asha Verma[\s\S]*Great faculty[\s\S]*Your reply · 21 Nov\s*Thank you, Asha\./.test(b) && /Rating only, no text\./.test(b) && /No reply yet/.test(b), 'GG16 reviews with stars, text and your reply; rating-only reviews say so');
 ok(/<img src=x onerror=alert\(1\)> Nobody picked up/.test(b) && await page.locator('img[src="x"]').count() === 0, 'GG16b review text is shown as text, never run as HTML');
-// Replies to reviews (140)
+// Review replies are built but not in use (141): the tab is a plain list, nothing to press, nothing sent
+ok(await g.locator('[data-section="replies"]').count() === 0 && await g.locator('textarea').count() === 0 && await g.getByRole('tab', { name: 'Waiting for you' }).count() === 0
+  && await g.getByRole('button', { name: /Send reply|Send again|Skip|Hold it back|Write a reply|Ask the AI|Reply settings/ }).count() === 0
+  && /Replies are written outside the CRM/.test(await body()) && /Your reply · 17 Nov\s*Thank you, Sana/.test(await g.locator('[data-review="r6"]').innerText())
+  && !/sent by the AI|Waiting for you|Sending shortly|AI is writing/.test(await body()), 'RV00 with review replies switched off (as shipped): a read-only list, no drafts, no buttons');
+await page.goto(`${APP}#/gbp/reviews?d=7&f=waiting`); await page.waitForTimeout(800);
+ok(await g.getByRole('tab', { name: 'All' }).getAttribute('aria-selected') === 'true' && (await calls()).filter((x) => x.fn === 'api_gbp_reviews').pop().args.p_filter === 'all', 'RV00b an old "waiting for you" link falls back to all reviews');
+await mode('gbpReplies=on');
+await page.goto(`${APP}#/gbp/reviews?d=7`); await page.reload(); await page.getByTestId('gbp').waitFor(); await page.waitForTimeout(1200);
+// Replies to reviews (140), switched on
 const rep = g.locator('[data-section="replies"]');
 ok(/The AI answers 4 and 5 star reviews by itself, at most 10 a day\. 1 to 3 star reviews are drafted and wait for you\./.test(await rep.innerText())
   && /4 waiting for you\s*1 sending shortly\s*1 with the AI\s*4 sent in 7 days\s*2 of 10 automatic today/.test(await rep.innerText()) && !/AI helper/.test(await rep.innerText()),

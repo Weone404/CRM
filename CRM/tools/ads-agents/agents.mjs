@@ -159,13 +159,20 @@ async function step(lane = "ads") {
 }
 
 // One piece of work from either lane. The review-reply door being closed or broken must never stop the ADS work.
-let gbpNote = "";
+// When that door has nothing (the feature is switched off, or no review is waiting) it is asked again only after 15 minutes:
+// new reviews are read every 3 hours, so asking every minute would be wasted calls.
+let gbpNote = "", gbpAskAfter = 0;
+const GBP_IDLE_MS = 15 * 60e3;
 async function work() {
   if (await step("ads")) return true;
-  if (!GBP_URL || STOP) return false;
-  try { return await step("gbp"); }
-  catch (e) {      // also a 401: the ADS door has just accepted this token, so the fault is that door's (not deployed yet, older build)
+  if (!GBP_URL || STOP || Date.now() < gbpAskAfter) return false;
+  try {
+    const worked = await step("gbp");
+    if (!worked) gbpAskAfter = Date.now() + GBP_IDLE_MS;
+    return worked;
+  } catch (e) {      // also a 401: the ADS door has just accepted this token, so the fault is that door's (not deployed yet, older build)
     if (gbpNote !== e.message) { gbpNote = e.message; log("review replies:", e.message, "- skipped this time"); }
+    gbpAskAfter = Date.now() + GBP_IDLE_MS;
     return false;
   }
 }
