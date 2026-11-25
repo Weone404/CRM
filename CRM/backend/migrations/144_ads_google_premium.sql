@@ -1,8 +1,11 @@
 -- 144 ADS > Google Ads: premium targeting (owner decision, 25 Nov 2026).
 -- Goal: counselling enquiries from people searching for pilot training, CPL and ground classes, in premium areas only.
 -- Two new Google operations, both for the owner only (an agent may propose them, never run them on its own):
---   campaign_create   a new Search campaign: its own daily budget (inside the owner's limits), Maximize Clicks with a click limit,
---                     Google Search only, "people physically there" and its first locations (PIN codes or cities).
+--   campaign_create   a whole new Search campaign in ONE approval and one all-or-nothing request: its own daily budget (inside
+--                     the owner's limits; part of a running campaign's budget can be moved to it), Maximize Clicks with a click
+--                     limit, Google Search only, "people physically there", its locations (PIN codes or cities), the income
+--                     filter, the shared negative list, its own negatives, and its ad groups with keywords and ads. Every ad
+--                     and keyword goes through the same checks as a single ad or keyword.
 --   income_filter     Google's household-income groups: shut some out of a campaign (or an ad group), or let them back in.
 -- While google_targeting_locked is "on", location changes made by an agent also wait for the owner.
 -- The big gate is not copied: it is renamed to ads_google_gate_v143 and the new gate calls it for everything it already knew.
@@ -20,7 +23,8 @@ ALTER TABLE public.ads_google_ops ADD CONSTRAINT ads_google_ops_kind_check
     'campaign_create', 'income_filter'));
 
 INSERT INTO public.ads_rules (code, label, severity, value) VALUES
-  ('g_campaigns_per_day', 'New Google campaigns per day', 'blocker', '{"max": 1}')
+  ('g_campaigns_per_day', 'New Google campaigns per day', 'blocker', '{"max": 1}'),
+  ('g_campaign_locations_max', 'Locations in a new Google campaign', 'blocker', '{"max": 150}')
 ON CONFLICT (code) DO NOTHING;
 INSERT INTO public.ads_config (key, value) VALUES ('google_targeting_locked', 'on') ON CONFLICT (key) DO NOTHING;
 
@@ -36,12 +40,13 @@ CREATE OR REPLACE FUNCTION crm_private.ads_google_gate(p_account uuid, p_kind te
 RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
 DECLARE g jsonb := crm_private.ads_google_gate_v143(p_account, p_kind, p_payload, p_exclude);
         a public.ads_accounts; b jsonb; w jsonb; r jsonb; v numeric; tot numeric; cap numeric; mtd numeric; n int; s text; lvl text;
+        mv public.ads_campaigns; mvb numeric; freed numeric := 0; x jsonb; y jsonb; e text; i int;
         tiers CONSTANT text[] := ARRAY['INCOME_RANGE_0_50', 'INCOME_RANGE_50_60', 'INCOME_RANGE_60_70', 'INCOME_RANGE_70_80',
                                        'INCOME_RANGE_80_90', 'INCOME_RANGE_90_UP', 'INCOME_RANGE_UNDETERMINED'];
 BEGIN
   IF p_kind IS NULL OR p_kind NOT IN ('campaign_create', 'income_filter') THEN RETURN g; END IF;
   -- the old gate already checked the account, the emergency stop and the operations-per-day limit; only its "unknown type" line goes
-  SELECT coalesce(jsonb_agg(x), '[]') INTO b FROM jsonb_array_elements(g->'blockers') x WHERE x #>> '{}' <> 'Unknown operation type.';
+  SELECT coalesce(jsonb_agg(bl), '[]') INTO b FROM jsonb_array_elements(g->'blockers') bl WHERE bl #>> '{}' <> 'Unknown operation type.';
   w := coalesce(g->'warnings', '[]');
   SELECT * INTO a FROM public.ads_accounts WHERE id = p_account;
   IF a.id IS NULL OR a.platform <> 'google' OR jsonb_typeof(p_payload) <> 'object' THEN RETURN jsonb_build_object('blockers', b, 'warnings', w); END IF;
@@ -65,15 +70,31 @@ BEGIN
         coalesce(crm_private.ads_rule('g_cpc_cap_min')->>'min', '1'), coalesce(crm_private.ads_rule('g_cpc_max')->>'max', '150')));
     END IF;
     -- locations: a campaign with no location shows everywhere, so at least one is required
-    r := crm_private.ads_rule('g_geo_ids_max');
+    r := crm_private.ads_rule('g_campaign_locations_max');
     IF jsonb_typeof(p_payload->'locations') IS DISTINCT FROM 'array' OR jsonb_array_length(p_payload->'locations') = 0 THEN
       b := b || to_jsonb('Give at least one location; a campaign without one shows in every country.'::text);
-    ELSIF jsonb_array_length(p_payload->'locations') > coalesce((r->>'max')::int, 25) THEN
-      b := b || to_jsonb(format('At most %s locations per operation; add the rest with location changes.', coalesce(r->>'max', '25')));
+    ELSIF jsonb_array_length(p_payload->'locations') > coalesce((r->>'max')::int, 150) THEN
+      b := b || to_jsonb(format('At most %s locations in a new campaign; add the rest with location changes.', coalesce(r->>'max', '150')));
     ELSIF EXISTS (SELECT 1 FROM jsonb_array_elements(p_payload->'locations') l WHERE jsonb_typeof(l) NOT IN ('string', 'number') OR (l #>> '{}') !~ '^\d+$') THEN
       b := b || to_jsonb('Location ids must be numeric Google geo target ids.'::text);
     ELSIF (SELECT count(DISTINCT l #>> '{}') FROM jsonb_array_elements(p_payload->'locations') l) <> jsonb_array_length(p_payload->'locations') THEN
       b := b || to_jsonb('A location is listed twice.'::text);
+    END IF;
+    -- money moved from a running campaign: only ever down, by the same rules as any budget change (step size, once in 24 hours)
+    IF p_payload ? 'move_budget' THEN
+      SELECT * INTO mv FROM public.ads_campaigns c WHERE c.account_id = a.id AND c.external_id = p_payload->'move_budget'->>'campaign_id' AND coalesce(c.status, '') <> 'REMOVED';
+      BEGIN mvb := (p_payload->'move_budget'->>'daily_budget')::numeric; EXCEPTION WHEN others THEN mvb := NULL; END;
+      IF jsonb_typeof(p_payload->'move_budget') <> 'object' OR mv.id IS NULL OR mvb IS NULL THEN
+        b := b || to_jsonb('move_budget needs campaign_id (a campaign of this account) and daily_budget.'::text);
+      ELSIF mvb >= coalesce(mv.daily_budget, 0) THEN
+        b := b || to_jsonb(format('move_budget can only lower a budget; "%s" has %s a day now.', mv.name, coalesce(mv.daily_budget::text, 'an unknown budget')));
+      ELSE
+        FOR e IN SELECT m FROM jsonb_array_elements_text(crm_private.ads_google_gate_v143(p_account, 'budget',
+                   jsonb_build_object('campaign_id', mv.external_id, 'daily_budget', mvb), p_exclude)->'blockers') m LOOP
+          IF NOT b @> to_jsonb(e) THEN b := b || to_jsonb(format('Moving budget from "%s": %s', mv.name, e)); END IF;
+        END LOOP;
+        IF mv.status = 'ENABLED' THEN freed := mv.daily_budget - mvb; END IF;
+      END IF;
     END IF;
     -- daily budget: the owner's limits always win, whatever the first status (a paused campaign can be switched on later)
     BEGIN v := (p_payload->>'daily_budget')::numeric; EXCEPTION WHEN others THEN v := NULL; END;
@@ -81,8 +102,8 @@ BEGIN
        OR v < coalesce((crm_private.ads_rule('budget_min')->>'min')::numeric, 1) THEN
       b := b || to_jsonb(format('daily_budget must be a number of at least %s (at most 2 decimals).', coalesce(crm_private.ads_rule('budget_min')->>'min', '1')));
     ELSE
-      SELECT coalesce(sum(c.daily_budget), 0) + v INTO tot FROM public.ads_campaigns c JOIN public.ads_accounts x ON x.id = c.account_id
-       WHERE x.platform = 'google' AND c.status = 'ENABLED';
+      SELECT coalesce(sum(c.daily_budget), 0) - freed + v INTO tot FROM public.ads_campaigns c JOIN public.ads_accounts x2 ON x2.id = c.account_id
+       WHERE x2.platform = 'google' AND c.status = 'ENABLED';
       cap := nullif(crm_private.ads_cfg('google_cap_daily'), '')::numeric;
       IF cap IS NULL THEN
         b := b || to_jsonb('Set a daily spend limit first (Google Ads > Autopilot > Spend limits).'::text);
@@ -99,6 +120,60 @@ BEGIN
       END IF;
       SELECT cl.max_daily_budget INTO cap FROM public.ads_clients cl WHERE cl.id = a.client_id;
       IF cap IS NOT NULL AND v > cap THEN b := b || to_jsonb(format('%s is above the client''s max daily budget of %s.', v, cap)); END IF;
+    END IF;
+    -- what comes with the campaign: income filter, negative lists, ad groups. Same rules as when each is sent on its own.
+    IF p_payload ? 'income_exclude' THEN
+      IF jsonb_typeof(p_payload->'income_exclude') <> 'array' OR EXISTS (SELECT 1 FROM jsonb_array_elements(p_payload->'income_exclude') t
+            WHERE jsonb_typeof(t) <> 'string' OR NOT (upper(t #>> '{}') = ANY (tiers))) THEN
+        b := b || to_jsonb(format('Income groups are: %s.', array_to_string(tiers, ', ')));
+      ELSIF (SELECT count(DISTINCT upper(t #>> '{}')) FROM jsonb_array_elements(p_payload->'income_exclude') t) <> jsonb_array_length(p_payload->'income_exclude') THEN
+        b := b || to_jsonb('An income group is listed twice.'::text);
+      ELSIF jsonb_array_length(p_payload->'income_exclude') >= array_length(tiers, 1) THEN
+        b := b || to_jsonb('At least one income group must stay; shutting all of them out stops the ads.'::text);
+      ELSIF EXISTS (SELECT 1 FROM jsonb_array_elements_text(p_payload->'income_exclude') t WHERE upper(t) = 'INCOME_RANGE_UNDETERMINED') THEN
+        w := w || to_jsonb('Google does not know the income of many people. Shutting out "unknown" can cut how often the ads show sharply.'::text);
+      END IF;
+    END IF;
+    IF p_payload ? 'shared_set_ids' AND (jsonb_typeof(p_payload->'shared_set_ids') <> 'array' OR jsonb_array_length(p_payload->'shared_set_ids') > 5
+        OR EXISTS (SELECT 1 FROM jsonb_array_elements(p_payload->'shared_set_ids') t WHERE (t #>> '{}') !~ '^\d+$')) THEN
+      b := b || to_jsonb('shared_set_ids takes up to 5 numeric shared negative list ids.'::text);
+    END IF;
+    IF p_payload ? 'negatives' THEN
+      FOR e IN SELECT m FROM jsonb_array_elements_text(crm_private.ads_google_gate_v143(p_account, 'negative_add',
+                 jsonb_build_object('level', 'campaign', 'campaign_id', '1', 'keywords', p_payload->'negatives'), p_exclude)->'blockers') m LOOP
+        IF NOT b @> to_jsonb(e) THEN b := b || to_jsonb(format('Negatives: %s', e)); END IF;
+      END LOOP;
+    END IF;
+    IF p_payload ? 'ad_groups' THEN
+      IF jsonb_typeof(p_payload->'ad_groups') <> 'array' OR jsonb_array_length(p_payload->'ad_groups') NOT BETWEEN 1 AND 5 THEN
+        b := b || to_jsonb('Give 1-5 ad groups.'::text);
+      ELSE
+        IF (SELECT count(DISTINCT lower(trim(grp->>'name'))) FROM jsonb_array_elements(p_payload->'ad_groups') grp) <> jsonb_array_length(p_payload->'ad_groups') THEN
+          b := b || to_jsonb('Ad group names must all be different.'::text);
+        END IF;
+        FOR x IN SELECT grp FROM jsonb_array_elements(p_payload->'ad_groups') grp LOOP
+          s := left(trim(coalesce(x->>'name', '')), 60);
+          IF jsonb_typeof(x) <> 'object' OR length(trim(coalesce(x->>'name', ''))) NOT BETWEEN 2 AND 255 THEN
+            b := b || to_jsonb('Every ad group needs a name.'::text); CONTINUE;
+          END IF;
+          FOR e IN SELECT m FROM jsonb_array_elements_text(crm_private.ads_google_gate_v143(p_account, 'keyword_add',
+                     jsonb_build_object('ad_group_id', '1', 'keywords', x->'keywords'), p_exclude)->'blockers') m LOOP
+            IF NOT b @> to_jsonb(e) THEN b := b || to_jsonb(format('Ad group "%s": %s', s, e)); END IF;
+          END LOOP;
+          IF jsonb_typeof(x->'ads') IS DISTINCT FROM 'array' OR jsonb_array_length(x->'ads') NOT BETWEEN 1 AND 3 THEN
+            b := b || to_jsonb(format('Ad group "%s": give 1-3 ads.', s));
+          ELSE
+            i := 0;
+            FOR y IN SELECT ad FROM jsonb_array_elements(x->'ads') ad LOOP
+              i := i + 1;
+              FOR e IN SELECT m FROM jsonb_array_elements_text(crm_private.ads_google_gate_v143(p_account, 'rsa_create',
+                         CASE WHEN jsonb_typeof(y) = 'object' THEN y ELSE '{}'::jsonb END || '{"ad_group_id": "1"}'::jsonb, p_exclude)->'blockers') m LOOP
+                IF NOT b @> to_jsonb(e) THEN b := b || to_jsonb(format('Ad group "%s", ad %s: %s', s, i, e)); END IF;
+              END LOOP;
+            END LOOP;
+          END IF;
+        END LOOP;
+      END IF;
     END IF;
     r := crm_private.ads_rule('g_campaigns_per_day');
     IF r IS NOT NULL THEN
@@ -173,17 +248,69 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
      WHERE o.kind NOT IN ('campaign_create', 'income_filter')
        AND (o.status = 'approved' OR (o.status = 'executing' AND o.executed_at < now() - interval '10 minutes'))) END
 $$;
+-- The executor needs the budget's own resource name for money moved from a running campaign; the CRM knows it from the sync.
+CREATE OR REPLACE FUNCTION crm_private.ads_google_build_payload(o public.ads_google_ops) RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+  SELECT CASE WHEN o.kind = 'campaign_create' AND o.payload ? 'move_budget' THEN o.payload || jsonb_build_object('move_budget_resource',
+      (SELECT c.budget_ref FROM public.ads_campaigns c WHERE c.account_id = o.account_id AND c.external_id = o.payload->'move_budget'->>'campaign_id'))
+    ELSE o.payload END
+$$;
+REVOKE ALL ON FUNCTION crm_private.ads_google_build_payload(public.ads_google_ops) FROM PUBLIC, anon, authenticated;
 CREATE OR REPLACE FUNCTION public.svc_ads_google_build_work() RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
   SELECT CASE WHEN crm_private.ads_cfg('execution_paused') = 'true' OR crm_private.ads_cfg('google_paused') = 'true' THEN '[]'::jsonb ELSE (
-    SELECT coalesce(jsonb_agg(jsonb_build_object('id', o.id, 'kind', o.kind, 'payload', o.payload,
+    SELECT coalesce(jsonb_agg(jsonb_build_object('id', o.id, 'kind', o.kind, 'payload', crm_private.ads_google_build_payload(o),
       'account_external_id', a.external_id, 'login_customer_id', a.login_customer_id, 'status', o.status) ORDER BY o.approved_at), '[]')
       FROM public.ads_google_ops o JOIN public.ads_accounts a ON a.id = o.account_id
      WHERE o.kind IN ('campaign_create', 'income_filter')
        AND (o.status = 'approved' OR (o.status = 'executing' AND o.executed_at < now() - interval '10 minutes'))) END
 $$;
-REVOKE ALL ON FUNCTION public.svc_ads_google_op_work(), public.svc_ads_google_build_work() FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.svc_ads_google_op_work(), public.svc_ads_google_build_work() TO service_role;
+-- One waiting or approved operation of the new kinds, for Google's own dry run (validate only: nothing changes in Google Ads).
+CREATE OR REPLACE FUNCTION public.svc_ads_google_build_peek(p_id uuid) RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+  SELECT jsonb_build_object('id', o.id, 'kind', o.kind, 'payload', crm_private.ads_google_build_payload(o),
+      'account_external_id', a.external_id, 'login_customer_id', a.login_customer_id, 'status', o.status)
+    FROM public.ads_google_ops o JOIN public.ads_accounts a ON a.id = o.account_id
+   WHERE o.id = p_id AND o.kind IN ('campaign_create', 'income_filter') AND o.status IN ('pending', 'approved')
+$$;
+CREATE OR REPLACE FUNCTION public.svc_ads_google_build_checked(p_id uuid, p_ok boolean, p_detail text) RETURNS void
+LANGUAGE sql SECURITY DEFINER SET search_path = '' AS $$
+  INSERT INTO public.ads_activity_log (actor_type, action, entity, entity_id, details)
+  VALUES ('system', 'google_op_dry_run', 'google_op', p_id::text, jsonb_build_object('ok', p_ok, 'detail', left(p_detail, 600)))
+$$;
+REVOKE ALL ON FUNCTION public.svc_ads_google_op_work(), public.svc_ads_google_build_work(), public.svc_ads_google_build_peek(uuid),
+  public.svc_ads_google_build_checked(uuid, boolean, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.svc_ads_google_op_work(), public.svc_ads_google_build_work(), public.svc_ads_google_build_peek(uuid),
+  public.svc_ads_google_build_checked(uuid, boolean, text) TO service_role;
+
+-- A verified new campaign is the CRM's truth at once (the spend limits read ads_campaigns), not only after the next sync:
+-- the moved budget is lowered and the new campaign is listed with its budget. The sync fills in the rest.
+CREATE OR REPLACE FUNCTION crm_private.ads_google_campaign_applied() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE moved text; camp text; bref text;
+BEGIN
+  IF NEW.kind = 'campaign_create' AND NEW.status = 'verified' AND OLD.status IS DISTINCT FROM 'verified' THEN
+    IF NEW.payload ? 'move_budget' THEN
+      UPDATE public.ads_campaigns SET daily_budget = (NEW.payload->'move_budget'->>'daily_budget')::numeric
+       WHERE account_id = NEW.account_id AND external_id = NEW.payload->'move_budget'->>'campaign_id' RETURNING budget_ref INTO moved;
+    END IF;
+    SELECT substring(n FROM '/campaigns/(\d+)$') INTO camp FROM jsonb_array_elements_text(coalesce(NEW.result->'resource_names', '[]')) n
+     WHERE n ~ '^customers/\d+/campaigns/\d+$' LIMIT 1;
+    SELECT n INTO bref FROM jsonb_array_elements_text(coalesce(NEW.result->'resource_names', '[]')) n
+     WHERE n ~ '^customers/\d+/campaignBudgets/\d+$' AND n IS DISTINCT FROM moved LIMIT 1;
+    IF camp IS NOT NULL THEN
+      INSERT INTO public.ads_campaigns (account_id, external_id, name, status, platform_status, channel, daily_budget, budget_ref)
+      VALUES (NEW.account_id, camp, trim(NEW.payload->>'name'), upper(coalesce(NEW.payload->>'status', 'ENABLED')),
+              upper(coalesce(NEW.payload->>'status', 'ENABLED')), 'SEARCH', (NEW.payload->>'daily_budget')::numeric, bref)
+      ON CONFLICT (account_id, external_id) DO NOTHING;
+    END IF;
+  END IF;
+  RETURN NULL;
+END $$;
+REVOKE ALL ON FUNCTION crm_private.ads_google_campaign_applied() FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS trg_ads_google_campaign_applied ON public.ads_google_ops;
+CREATE TRIGGER trg_ads_google_campaign_applied AFTER UPDATE ON public.ads_google_ops
+  FOR EACH ROW EXECUTE FUNCTION crm_private.ads_google_campaign_applied();
 
 -- ---------------------------------------------------------------- what the AI team must know (owner decisions, 25 Nov 2026)
 UPDATE public.ads_config SET value = value || E'\nOwner decisions (25 Nov 2026; source: owner):\n'

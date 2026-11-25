@@ -1,6 +1,6 @@
 // Unit tests for _shared/ads_google_ops.ts with a fake Google Ads API (no network).
 import { AdsError, GoogleAds } from "../../functions/_shared/ads_core.ts";
-import { buildOps, executeGoogleOp, flatRow, resultNames, verifyNames } from "../../functions/_shared/ads_google_ops.ts";
+import { buildOps, dryRunGoogleOp, executeGoogleOp, flatRow, resultNames, verifyNames, verifyNamesBatched } from "../../functions/_shared/ads_google_ops.ts";
 
 const eq = (a: unknown, b: unknown, m: string) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${m}\n got ${JSON.stringify(a)}\nwant ${JSON.stringify(b)}`); };
 const CID = "6318538100";
@@ -295,4 +295,69 @@ Deno.test("income_filter refuses an unknown group, another account's row, the wr
     try { buildOps(CID, "income_filter", p); } catch { threw = true }
     if (!threw) throw new Error(`income_filter accepted ${JSON.stringify(p)}`);
   }
+});
+
+Deno.test("campaign_create: the whole campaign in one request (moved budget first, ad groups on temporary ids)", () => {
+  const b = buildOps(CID, "campaign_create", { name: "Other cities", daily_budget: 60, max_cpc: 20, locations: ["1007801"],
+    move_budget: { campaign_id: "24283129095", daily_budget: 140 }, move_budget_resource: `customers/${CID}/campaignBudgets/777`,
+    income_exclude: ["INCOME_RANGE_0_50", "income_range_undetermined"], shared_set_ids: ["11955185109"],
+    negatives: [{ text: "pdf", match: "BROAD" }],
+    ad_groups: [
+      { name: "Counselling", keywords: [{ text: "pilot training", match: "PHRASE" }], ads: [{ final_url: "https://weoneaviation.in/pilot-career-counselling", headlines: ["A", "B", "C"], descriptions: ["d1", "d2"] }] },
+      { name: "DGCA online", keywords: [{ text: "dgca ground classes", match: "PHRASE" }, { text: "cpl ground classes", match: "PHRASE" }], ads: [{ final_url: "https://weoneaviation.in/online-dgca-ground-classes", headlines: ["A", "B", "C"], descriptions: ["d1", "d2"], path1: "online" }] },
+    ] });
+  const kinds = b.ops.map((o) => Object.keys(o)[0]);
+  eq(kinds, ["campaignBudgetOperation", "campaignBudgetOperation", "campaignOperation", "campaignCriterionOperation", "campaignCriterionOperation", "campaignCriterionOperation",
+    "campaignSharedSetOperation", "campaignCriterionOperation", "adGroupOperation", "adGroupCriterionOperation", "adGroupAdOperation",
+    "adGroupOperation", "adGroupCriterionOperation", "adGroupCriterionOperation", "adGroupAdOperation"], "order: money down, budget, campaign, locations, income, lists, negatives, ad groups");
+  eq(b.ops[0].campaignBudgetOperation, { update: { resourceName: `customers/${CID}/campaignBudgets/777`, amountMicros: "140000000" }, updateMask: "amountMicros" }, "the running campaign is lowered first");
+  eq(b.checks[0], { mode: "field", field: "amount_micros", value: "140000000" }, "and read back as an amount");
+  eq(b.checks.slice(1).every((c) => c.mode === "exists"), true, "everything created is read back");
+  eq(b.ops[4].campaignCriterionOperation.create, { campaign: `customers/${CID}/campaigns/-2`, negative: true, incomeRange: { type: "INCOME_RANGE_0_50" } }, "income filter on the new campaign");
+  eq(b.ops[6].campaignSharedSetOperation.create, { campaign: `customers/${CID}/campaigns/-2`, sharedSet: `customers/${CID}/sharedSets/11955185109` }, "shared negative list");
+  eq(b.ops[7].campaignCriterionOperation.create, { campaign: `customers/${CID}/campaigns/-2`, negative: true, keyword: { text: "pdf", matchType: "BROAD" } }, "campaign negative");
+  eq([b.ops[8].adGroupOperation.create.resourceName, b.ops[11].adGroupOperation.create.resourceName], [`customers/${CID}/adGroups/-3`, `customers/${CID}/adGroups/-4`], "ad groups -3, -4");
+  eq(b.ops[9].adGroupCriterionOperation.create.adGroup, `customers/${CID}/adGroups/-3`, "keyword in its own group");
+  eq(b.ops[13].adGroupCriterionOperation.create.adGroup, `customers/${CID}/adGroups/-4`, "second group's keyword");
+  eq(b.ops[14].adGroupAdOperation.create.ad, { finalUrls: ["https://weoneaviation.in/online-dgca-ground-classes"], responsiveSearchAd: { headlines: [{ text: "A" }, { text: "B" }, { text: "C" }], descriptions: [{ text: "d1" }, { text: "d2" }], path1: "online" } }, "ad");
+});
+
+Deno.test("campaign_create: moved budget needs this account's own budget row", () => {
+  const base = { name: "Other cities", daily_budget: 60, max_cpc: 20, locations: ["1"], move_budget: { campaign_id: "9", daily_budget: 140 } };
+  for (const rn of [undefined, "", "customers/1111111111/campaignBudgets/7", `customers/${CID}/campaigns/7`]) {
+    let threw = false;
+    try { buildOps(CID, "campaign_create", { ...base, move_budget_resource: rn }); } catch { threw = true }
+    if (!threw) throw new Error(`accepted move_budget_resource ${rn}`);
+  }
+});
+
+Deno.test("verifyNamesBatched: reads created rows in groups, keeps the order, falls back for other checks", async () => {
+  const names = [`customers/${CID}/campaignBudgets/777`, `customers/${CID}/campaignBudgets/900`, `customers/${CID}/campaigns/55`,
+    ...Array.from({ length: 45 }, (_, i) => `customers/${CID}/campaignCriteria/55~${9000 + i}`), `customers/${CID}/adGroups/66`];
+  const checks: any[] = [{ mode: "field", field: "amount_micros", value: "140000000" }, ...names.slice(1).map(() => ({ mode: "exists" }))];
+  const queries: string[] = [];
+  const missing = `customers/${CID}/campaignCriteria/55~9044`;
+  const g: any = { search: (_c: string, q: string) => {
+    queries.push(q);
+    if (q.includes("amount_micros")) return Promise.resolve([{ campaignBudget: { resourceName: names[0], amountMicros: "140000000" } }]);
+    const res = /FROM (\w+) WHERE/.exec(q)![1];
+    const key = res.replace(/_([a-z])/g, (_m: string, c: string) => c.toUpperCase());
+    return Promise.resolve([...q.matchAll(/'([^']+)'/g)].map((m) => m[1]).filter((n) => n !== missing).map((n) => ({ [key]: { resourceName: n } })));
+  } };
+  const v = await verifyNamesBatched(g, CID, names, checks);
+  eq(v.map((x: any) => x.rn), names, "same order as the request");
+  eq(v.filter((x: any) => !x.ok).map((x: any) => x.rn), [missing], "the one row Google does not return is reported");
+  eq(queries.length, 6, "49 rows read in 6 requests (budget amount, new budget, campaign, 45 locations in 2, ad group)");
+  eq(v[0], { rn: names[0], ok: true, got: "140000000", want: "140000000" }, "the moved budget keeps its amount check");
+});
+
+Deno.test("dryRunGoogleOp: validate only, never the real request; reports Google's refusal", async () => {
+  const calls: boolean[] = [];
+  const ok: any = { withLogin: () => ({ mutate: (_c: string, _o: unknown[], validateOnly: boolean) => { calls.push(validateOnly); return Promise.resolve({}); } }) };
+  const op = { id: "1", kind: "income_filter", payload: { campaign_id: "9", exclude: ["INCOME_RANGE_0_50"] }, account_external_id: CID };
+  eq(await dryRunGoogleOp(ok, op), { ok: true, operations: 1 }, "accepted");
+  eq(calls, [true], "one call, validate only");
+  const no: any = { withLogin: () => ({ mutate: () => Promise.reject(new Error("POLICY_FINDING: unproven claim")) }) };
+  eq(await dryRunGoogleOp(no, op), { ok: false, operations: 1, error: "POLICY_FINDING: unproven claim" }, "refused, with Google's words");
+  eq(await dryRunGoogleOp(ok, { ...op, payload: { campaign_id: "9" } }), { ok: false, operations: 0, error: "nothing to change" }, "a bad operation never reaches Google");
 });

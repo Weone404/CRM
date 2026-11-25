@@ -3,10 +3,11 @@
 // the gate is re-checked when an operation is claimed, Google's own pre-check runs first (nothing changes), the real request is
 // sent once, and only a successful read-back counts as verified. Interrupted operations are never re-sent.
 // Called by the crm-ads-google-build schedule (x-cron-token) only; no browser calls this.
+// With {"check": "<operation id>"} it only asks Google to validate a waiting operation (nothing changes) and logs the answer.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { cors, cronOk, json, rpc } from "../_shared/ads_deno.ts";
 import { GoogleAds, scrubSecrets } from "../_shared/ads_core.ts";
-import { executeGoogleOp, type GoogleOp } from "../_shared/ads_google_ops.ts";
+import { dryRunGoogleOp, executeGoogleOp, type GoogleOp } from "../_shared/ads_google_ops.ts";
 
 const DEADLINE_MS = 110_000;
 
@@ -22,6 +23,18 @@ Deno.serve(async (req) => {
     if (!s.GOOGLE_ADS_CLIENT_ID || !s.GOOGLE_ADS_CLIENT_SECRET || !s.GOOGLE_ADS_REFRESH_TOKEN) return json(req, 200, { done: 0, detail: "Google Ads is not connected." });
     const google = new GoogleAds({ clientId: s.GOOGLE_ADS_CLIENT_ID, clientSecret: s.GOOGLE_ADS_CLIENT_SECRET, refreshToken: s.GOOGLE_ADS_REFRESH_TOKEN,
       loginCustomerId: s.GOOGLE_ADS_LOGIN_CUSTOMER_ID, version: s.GOOGLE_API_VERSION }, fetch);
+    // {"check": "<operation id>"}: Google's own dry run of a waiting operation. Nothing is sent for real and nothing changes.
+    let body: { check?: string } = {};
+    try { body = await req.json(); } catch { /* empty body */ }
+    if (body.check) {
+      if (!/^[0-9a-f-]{36}$/i.test(body.check)) return json(req, 422, { detail: "check must be an operation id" });
+      const o = (await rpc("svc_ads_google_build_peek", { p_id: body.check })) as GoogleOp | null;
+      if (!o) return json(req, 404, { detail: "No waiting operation of that kind" });
+      const r = await dryRunGoogleOp(google, o);
+      const detail = r.ok ? `Google accepts all ${r.operations} parts.` : scrubSecrets(r.error ?? "", s);
+      await rpc("svc_ads_google_build_checked", { p_id: o.id, p_ok: r.ok, p_detail: detail });
+      return json(req, 200, { check: o.id, ok: r.ok, operations: r.operations, detail });
+    }
     const out: { id: string; kind: string; status: string }[] = [];
     for (const o of (await rpc("svc_ads_google_build_work")) as GoogleOp[]) {
       if (Date.now() - t0 > DEADLINE_MS) break;

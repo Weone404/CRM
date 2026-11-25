@@ -132,13 +132,20 @@ export function buildOps(cid: string, kind: string, p: any): Built {
         { mode: "field", field: "amount_micros", value: m });
       break;
     }
-    case "campaign_create": {   // budget + Search campaign + first locations, in one atomic request (temporary ids -1 and -2)
+    case "campaign_create": {   // a whole Search campaign in one atomic request; temporary ids: budget -1, campaign -2, ad groups -3...
       const name = String(p.name ?? "").trim();
       if (name.length < 3) throw new AdsError("sync_failed", "campaign name is required");
       const st = String(p.status ?? "ENABLED").toUpperCase();
       if (st !== "ENABLED" && st !== "PAUSED") throw new AdsError("sync_failed", "status must be ENABLED or PAUSED");
       if (!Array.isArray(p.locations) || !p.locations.length) throw new AdsError("sync_failed", "a campaign needs at least one location");
       const budget = `${C}/campaignBudgets/-1`, camp = `${C}/campaigns/-2`;
+      if (p.move_budget) {       // money taken from a running campaign first, so the total never goes above the limit
+        const rn = String(p.move_budget_resource ?? "");
+        if (!/^customers\/\d+\/campaignBudgets\/\d+$/.test(rn)) throw new AdsError("sync_failed", "the budget to move from is not known yet; sync first");
+        if (!rn.startsWith(`${C}/`)) throw new AdsError("sync_failed", "resource belongs to another account");
+        const m = micros(p.move_budget.daily_budget, "move_budget.daily_budget");
+        add({ campaignBudgetOperation: { update: { resourceName: rn, amountMicros: m }, updateMask: "amountMicros" } }, { mode: "field", field: "amount_micros", value: m });
+      }
       add({ campaignBudgetOperation: { create: { resourceName: budget, name: `${name} budget`, deliveryMethod: "STANDARD",
         amountMicros: micros(p.daily_budget, "daily_budget"), explicitlyShared: false } } }, { mode: "exists" });
       add({ campaignOperation: { create: { resourceName: camp, name, advertisingChannelType: "SEARCH", status: st, campaignBudget: budget,
@@ -148,6 +155,25 @@ export function buildOps(cid: string, kind: string, p: any): Built {
         containsEuPoliticalAdvertising: "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING" } } }, { mode: "exists" });
       for (const g of p.locations) add({ campaignCriterionOperation: { create: { campaign: camp,
         location: { geoTargetConstant: `geoTargetConstants/${digits(g, "location")}` } } } }, { mode: "exists" });
+      for (const t of p.income_exclude ?? []) {
+        const type = String(t).toUpperCase();
+        if (!INCOME_TIERS.includes(type)) throw new AdsError("sync_failed", `unknown income group ${type}`);
+        add({ campaignCriterionOperation: { create: { campaign: camp, negative: true, incomeRange: { type } } } }, { mode: "exists" });
+      }
+      for (const id of p.shared_set_ids ?? []) add({ campaignSharedSetOperation: { create: { campaign: camp,
+        sharedSet: `${C}/sharedSets/${digits(id, "shared_set_id")}` } } }, { mode: "exists" });
+      for (const k of p.negatives ?? []) add({ campaignCriterionOperation: { create: { campaign: camp, negative: true, keyword: kw(k) } } }, { mode: "exists" });
+      (p.ad_groups ?? []).forEach((g: any, i: number) => {
+        const ag = `${C}/adGroups/${-3 - i}`;
+        add({ adGroupOperation: { create: { resourceName: ag, campaign: camp, name: String(g.name).trim(), status: "ENABLED", type: "SEARCH_STANDARD" } } }, { mode: "exists" });
+        for (const k of g.keywords ?? []) add({ adGroupCriterionOperation: { create: { adGroup: ag, status: "ENABLED", keyword: kw(k) } } }, { mode: "exists" });
+        for (const a of g.ads ?? []) {
+          const rsa: any = { headlines: a.headlines.map((t: string) => ({ text: t.trim() })), descriptions: a.descriptions.map((t: string) => ({ text: t.trim() })) };
+          if (a.path1) rsa.path1 = a.path1;
+          if (a.path2) rsa.path2 = a.path2;
+          add({ adGroupAdOperation: { create: { adGroup: ag, status: "ENABLED", ad: { finalUrls: [a.final_url], responsiveSearchAd: rsa } } } }, { mode: "exists" });
+        }
+      });
       break;
     }
     case "income_filter": {     // household income groups shut out of a campaign or an ad group (negative), or let back in (remove)
@@ -202,6 +228,41 @@ export async function verifyNames(g: GoogleAds, cid: string, names: string[], ch
   return out;
 }
 
+// The same read-back for a large request (a whole new campaign): "exists" rows are read 40 at a time per resource type instead
+// of one by one; every other check goes through verifyNames. Same answer shape, same order.
+export async function verifyNamesBatched(g: GoogleAds, cid: string, names: string[], checks: Check[]) {
+  const out: any[] = new Array(names.length);
+  const groups = new Map<string, number[]>(), single: number[] = [];
+  names.forEach((rn, i) => {
+    const res = RES[rn.split("/")[2] ?? ""];
+    if (res && checks[i].mode === "exists" && /^customers\/\d+\/[A-Za-z]+\/[\d~]+$/.test(rn)) groups.set(res, [...(groups.get(res) ?? []), i]);
+    else single.push(i);
+  });
+  for (const [res, idx] of groups) {
+    for (let k = 0; k < idx.length; k += 40) {
+      const part = idx.slice(k, k + 40);
+      const rows = await g.search(cid, `SELECT ${res}.resource_name FROM ${res} WHERE ${res}.resource_name IN (${part.map((i) => `'${names[i]}'`).join(", ")})`);
+      const found = new Set(rows.map((r: any) => String(r[camel(res)]?.resourceName ?? "")));
+      for (const i of part) out[i] = { rn: names[i], ok: found.has(names[i]) };
+    }
+  }
+  if (single.length) {
+    const v = await verifyNames(g, cid, single.map((i) => names[i]), single.map((i) => checks[i]));
+    single.forEach((i, k) => { out[i] = v[k]; });
+  }
+  return out;
+}
+
+// Google's own pre-check of an operation that has not been sent (validate only: nothing changes). Used before the owner is
+// asked to approve, so an approval is not wasted on something Google would refuse (ad policy, a bad location, a limit).
+export async function dryRunGoogleOp(google: GoogleAds, op: GoogleOp): Promise<{ ok: boolean; operations: number; error?: string }> {
+  let built: Built;
+  try { built = buildOps(op.account_external_id, op.kind, op.payload); } catch (e) { return { ok: false, operations: 0, error: (e as Error).message }; }
+  try { await google.withLogin(op.login_customer_id).mutate(op.account_external_id, built.ops, true); }
+  catch (e) { return { ok: false, operations: built.ops.length, error: (e as Error).message }; }
+  return { ok: true, operations: built.ops.length };
+}
+
 // Runs one approved operation end to end. Never reports success without a read-back.
 export async function executeGoogleOp(google: GoogleAds, op: GoogleOp):
   Promise<{ status: "verified" | "failed" | "outcome_unknown"; error?: string; result?: any; verify?: any }> {
@@ -220,7 +281,7 @@ export async function executeGoogleOp(google: GoogleAds, op: GoogleOp):
   const names = resultNames(resp);
   const result = { resource_names: names };
   try {
-    const v = await verifyNames(g, cid, names, built.checks);
+    const v = await (op.kind === "campaign_create" ? verifyNamesBatched : verifyNames)(g, cid, names, built.checks);
     const bad = v.filter((x) => !x.ok);
     return bad.length ? { status: "failed", result, verify: v, error: `Google accepted it, but ${bad.length} item(s) do not read back as expected.` }
                       : { status: "verified", result, verify: v };

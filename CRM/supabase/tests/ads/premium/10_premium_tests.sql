@@ -55,9 +55,9 @@ SELECT pg_temp.ok(pg_temp.blocks('campaign_create', pg_temp.camp() - 'locations'
   AND pg_temp.blocks('campaign_create', pg_temp.camp('{"locations":["1007801","delhi"]}'), 'Location ids must be numeric%')
   AND pg_temp.blocks('campaign_create', pg_temp.camp('{"locations":["1007801",{"id":1}]}'), 'Location ids must be numeric%')
   AND pg_temp.blocks('campaign_create', pg_temp.camp('{"locations":["1007801","1007801"]}'), 'A location is listed twice.')
-  AND pg_temp.blocks('campaign_create', pg_temp.camp(jsonb_build_object('locations', (SELECT jsonb_agg(g::text) FROM generate_series(1, 26) g))), 'At most 25 locations%')
-  AND pg_temp.clean('campaign_create', pg_temp.camp(jsonb_build_object('locations', (SELECT jsonb_agg(g::text) FROM generate_series(1, 25) g)))),
-  'PT07 locations: at least one (worldwide is never possible), numeric, no repeats, at most 25');
+  AND pg_temp.blocks('campaign_create', pg_temp.camp(jsonb_build_object('locations', (SELECT jsonb_agg(g::text) FROM generate_series(1, 151) g))), 'At most 150 locations%')
+  AND pg_temp.clean('campaign_create', pg_temp.camp(jsonb_build_object('locations', (SELECT jsonb_agg(g::text) FROM generate_series(1, 150) g)))),
+  'PT07 locations: at least one (worldwide is never possible), numeric, no repeats, at most 150');
 SELECT pg_temp.ok(pg_temp.blocks('campaign_create', pg_temp.camp('{"name":"ab"}'), 'Campaign name must be%')
   AND pg_temp.blocks('campaign_create', pg_temp.camp() - 'name', 'Campaign name must be%')
   AND pg_temp.blocks('campaign_create', pg_temp.camp('{"name":"we-aviation-SEARCH-sep-2026"}'), 'A campaign named%already exists.')
@@ -72,6 +72,68 @@ UPDATE public.ads_accounts SET status = 'auth_required' WHERE id = 'a1440000-000
 SELECT pg_temp.ok(pg_temp.blocks('campaign_create', pg_temp.camp(), '%not connected%') AND pg_temp.blocks('income_filter', '{"campaign_id":"1","exclude":["INCOME_RANGE_0_50"]}', '%not connected%')
   AND NOT pg_temp.blocks('campaign_create', pg_temp.camp(), 'Unknown operation type.'), 'PT11 the shared checks still apply to the new kinds (account not connected)');
 UPDATE public.ads_accounts SET status = 'connected' WHERE id = 'a1440000-0000-4000-8000-000000000001';
+
+-- the whole campaign in one operation
+UPDATE public.ads_campaigns SET daily_budget = 200, budget_ref = 'customers/6318538100/campaignBudgets/777' WHERE external_id = '24283129095';
+CREATE OR REPLACE FUNCTION pg_temp.full(p_change jsonb DEFAULT '{}') RETURNS jsonb LANGUAGE sql AS $$
+  SELECT pg_temp.camp() || '{"move_budget":{"campaign_id":"24283129095","daily_budget":140},
+    "income_exclude":["INCOME_RANGE_0_50","INCOME_RANGE_50_60","INCOME_RANGE_60_70","INCOME_RANGE_70_80","INCOME_RANGE_UNDETERMINED"],
+    "shared_set_ids":["11955185109"], "negatives":[{"text":"pdf","match":"BROAD"},{"text":"mock test","match":"BROAD"}],
+    "ad_groups":[{"name":"Counselling","keywords":[{"text":"pilot training","match":"PHRASE"}],
+       "ads":[{"final_url":"https://weoneaviation.in/pilot-career-counselling","headlines":["Pilot Training Guidance","Free Career Counselling","Commercial Pilot Course"],"descriptions":["Free career counselling for future pilots.","Call or WhatsApp us to enquire."]}]},
+      {"name":"DGCA online","keywords":[{"text":"dgca ground classes","match":"PHRASE"}],
+       "ads":[{"final_url":"https://weoneaviation.in/online-dgca-ground-classes","headlines":["Online DGCA Ground Classes","Ground Classes for CPL","Ask Us About Fees"],"descriptions":["Online batches for students outside Delhi.","Call or WhatsApp us to enquire."]}]}]}'::jsonb || p_change $$;
+SELECT pg_temp.ok(pg_temp.blocks('campaign_create', pg_temp.camp(), '%up to 260.00 a day, above the daily limit of 200%')
+  AND pg_temp.clean('campaign_create', pg_temp.full())
+  AND (pg_temp.gate('campaign_create', pg_temp.full())->'warnings'->>0) LIKE 'Google does not know the income%',
+  'PT30 with 200 running, 60 more is blocked; moving 60 out of the running campaign in the same operation makes it fit (warned about "unknown" income)');
+SELECT pg_temp.ok(pg_temp.blocks('campaign_create', pg_temp.full('{"move_budget":{"campaign_id":"24283129095","daily_budget":139}}'), 'Moving budget from "We-Aviation-Search-sep-2026": %31% change, more than the 30% allowed%')
+  AND pg_temp.blocks('campaign_create', pg_temp.full('{"move_budget":{"campaign_id":"24283129095","daily_budget":200}}'), 'move_budget can only lower a budget%')
+  AND pg_temp.blocks('campaign_create', pg_temp.full('{"move_budget":{"campaign_id":"24283129095","daily_budget":250}}'), 'move_budget can only lower a budget%')
+  AND pg_temp.blocks('campaign_create', pg_temp.full('{"move_budget":{"campaign_id":"999","daily_budget":10}}'), 'move_budget needs campaign_id%')
+  AND pg_temp.blocks('campaign_create', pg_temp.full('{"move_budget":"all of it"}'), 'move_budget needs campaign_id%')
+  AND pg_temp.blocks('campaign_create', pg_temp.full('{"move_budget":{"campaign_id":"24283129095","daily_budget":150}}'), '%up to 210.00 a day, above the daily limit of 200%'),
+  'PT31 moved money: only down, within the 30% step, from a real campaign, and the total still has to fit the limit');
+SELECT pg_temp.ok(pg_temp.blocks('campaign_create', pg_temp.full('{"move_budget":{"campaign_id":"111","daily_budget":100}}'), '%up to 260.00 a day%'),
+  'PT32 money taken from a paused campaign frees nothing (it was not spending)');
+SELECT pg_temp.ok(pg_temp.blocks('campaign_create', pg_temp.full('{"income_exclude":["RICH"]}'), 'Income groups are:%')
+  AND pg_temp.blocks('campaign_create', pg_temp.full('{"income_exclude":"INCOME_RANGE_0_50"}'), 'Income groups are:%')
+  AND pg_temp.blocks('campaign_create', pg_temp.full('{"income_exclude":["INCOME_RANGE_0_50","INCOME_RANGE_50_60","INCOME_RANGE_60_70","INCOME_RANGE_70_80","INCOME_RANGE_80_90","INCOME_RANGE_90_UP","INCOME_RANGE_UNDETERMINED"]}'), 'At least one income group must stay%')
+  AND pg_temp.blocks('campaign_create', pg_temp.full('{"shared_set_ids":["abc"]}'), 'shared_set_ids takes%')
+  AND pg_temp.blocks('campaign_create', pg_temp.full('{"negatives":[{"text":"pilot training","match":"PHRASE"}]}'), 'Negatives: Negative "pilot training" would block the core search%')
+  AND pg_temp.blocks('campaign_create', pg_temp.full('{"negatives":"pdf"}'), 'Negatives: Give 1-200 negative keywords.'),
+  'PT33 its income filter, shared lists and negatives pass the same checks as when sent on their own (a negative may not block a core search)');
+SELECT pg_temp.ok(pg_temp.blocks('campaign_create', pg_temp.full('{"ad_groups":[]}'), 'Give 1-5 ad groups.')
+  AND pg_temp.blocks('campaign_create', pg_temp.full('{"ad_groups":[{"name":"A","keywords":[],"ads":[]}]}'), 'Every ad group needs a name.')
+  AND pg_temp.blocks('campaign_create', pg_temp.full(jsonb_build_object('ad_groups', jsonb_build_array(pg_temp.full()->'ad_groups'->0, pg_temp.full()->'ad_groups'->0))), 'Ad group names must all be different.')
+  AND pg_temp.blocks('campaign_create', pg_temp.full(jsonb_build_object('ad_groups', jsonb_build_array(jsonb_set(pg_temp.full()->'ad_groups'->0, '{keywords}', '[{"text":"pilot training","match":"BROAD"}]')))), 'Ad group "Counselling": %')
+  AND pg_temp.blocks('campaign_create', pg_temp.full(jsonb_build_object('ad_groups', jsonb_build_array(jsonb_set(pg_temp.full()->'ad_groups'->0, '{keywords}', '[]')))), 'Ad group "Counselling": Give 1-50 keywords.')
+  AND pg_temp.blocks('campaign_create', pg_temp.full(jsonb_build_object('ad_groups', jsonb_build_array((pg_temp.full()->'ad_groups'->0) - 'ads'))), 'Ad group "Counselling": give 1-3 ads.'),
+  'PT34 ad groups: 1-5, named, different, phrase or exact keywords only, 1-3 ads each');
+SELECT pg_temp.ok(pg_temp.blocks('campaign_create', pg_temp.full(jsonb_build_object('ad_groups', jsonb_build_array(jsonb_set(pg_temp.full()->'ad_groups'->0, '{ads,0,headlines,0}', '"Guaranteed Pilot Job"')))), 'Ad group "Counselling", ad 1: %claim "guarantee%')
+  AND pg_temp.blocks('campaign_create', pg_temp.full(jsonb_build_object('ad_groups', jsonb_build_array(jsonb_set(pg_temp.full()->'ad_groups'->0, '{ads,0,final_url}', '"https://example.com/x"')))), 'Ad group "Counselling", ad 1: Final URL must be https and on:%')
+  AND pg_temp.blocks('campaign_create', pg_temp.full(jsonb_build_object('ad_groups', jsonb_build_array(jsonb_set(pg_temp.full()->'ad_groups'->0, '{ads,0,headlines}', '["Only one"]')))), 'Ad group "Counselling", ad 1: Give 3-15 headlines.')
+  AND pg_temp.blocks('campaign_create', pg_temp.full(jsonb_build_object('ad_groups', jsonb_build_array(jsonb_set(pg_temp.full()->'ad_groups'->0, '{ads,0}', '"an ad"')))), 'Ad group "Counselling", ad 1: %'),
+  'PT35 every ad in it passes the ad checks: no unprovable claim, our own website only, 3-15 headlines');
+-- sent and verified: the CRM knows the new campaign and the lowered budget at once (before any sync)
+CREATE TEMP TABLE o AS SELECT (pg_temp.gop('campaign_create', pg_temp.full())).id;
+GRANT ALL ON o TO authenticated, service_role;
+SELECT pg_temp.ok((SELECT public.svc_ads_google_build_peek(id)->'payload'->>'move_budget_resource' = 'customers/6318538100/campaignBudgets/777' FROM o)
+  AND public.svc_ads_google_build_peek(gen_random_uuid()) IS NULL, 'PT36 the dry run and the executor get the budget''s own row to move money from; an unknown id gets nothing');
+UPDATE public.ads_google_ops SET status = 'approved', approved_by = '00000000-0000-0000-0000-00000000000a', approved_at = now() WHERE id = (SELECT id FROM o);
+CREATE TEMP TABLE c2 AS SELECT public.svc_ads_google_op_claim((SELECT id FROM o)) c;
+SELECT public.svc_ads_google_op_finish((SELECT id FROM o), 'verified', NULL,
+  '{"resource_names":["customers/6318538100/campaignBudgets/777","customers/6318538100/campaignBudgets/900","customers/6318538100/campaigns/555","customers/6318538100/campaignCriteria/555~9061645"]}', '[]');
+SELECT pg_temp.ok((SELECT c FROM c2)
+  AND (SELECT daily_budget = 140 FROM public.ads_campaigns WHERE external_id = '24283129095')
+  AND (SELECT name = 'WOA Search - Other cities' AND status = 'ENABLED' AND daily_budget = 60 AND budget_ref = 'customers/6318538100/campaignBudgets/900' AND channel = 'SEARCH'
+         FROM public.ads_campaigns WHERE external_id = '555'),
+  'PT37 once verified: the running campaign shows 140, the new campaign is listed with 60 and its own budget row');
+SELECT pg_temp.ok(pg_temp.blocks('budget', '{"campaign_id":"24283129095","daily_budget":150}', '%up to 210.00 a day, above the daily limit of 200%')
+  AND pg_temp.blocks('campaign_create', pg_temp.camp('{"name":"Third"}'), '%up to 260.00 a day%'),
+  'PT38 the spend limit counts the new campaign straight away (140 + 60 = 200: no raise, no third campaign)');
+DELETE FROM public.ads_google_ops WHERE id = (SELECT id FROM o);
+DELETE FROM public.ads_campaigns WHERE external_id = '555';
 
 -- income_filter
 SELECT pg_temp.ok(pg_temp.clean('income_filter', '{"campaign_id":"24283129095","exclude":["INCOME_RANGE_0_50","INCOME_RANGE_50_60","INCOME_RANGE_60_70","INCOME_RANGE_70_80"]}')

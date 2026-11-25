@@ -12,7 +12,12 @@ END $$;
 
 DROP TRIGGER IF EXISTS trg_ads_google_ops_owner_only ON public.ads_google_ops;
 DROP FUNCTION IF EXISTS crm_private.ads_google_ops_owner_only();
+DROP TRIGGER IF EXISTS trg_ads_google_campaign_applied ON public.ads_google_ops;
+DROP FUNCTION IF EXISTS crm_private.ads_google_campaign_applied();
 DROP FUNCTION IF EXISTS public.svc_ads_google_build_work();
+DROP FUNCTION IF EXISTS public.svc_ads_google_build_peek(uuid);
+DROP FUNCTION IF EXISTS public.svc_ads_google_build_checked(uuid, boolean, text);
+DROP FUNCTION IF EXISTS crm_private.ads_google_build_payload(public.ads_google_ops);
 
 -- the 099 work list (every kind)
 CREATE OR REPLACE FUNCTION public.svc_ads_google_op_work() RETURNS jsonb
@@ -43,6 +48,6 @@ ALTER TABLE public.ads_google_ops ADD CONSTRAINT ads_google_ops_kind_check
   CHECK (kind IN ('keyword_add', 'negative_add', 'keyword_status', 'rsa_create', 'ad_status', 'ad_group_create', 'campaign_geo',
     'shared_set_attach', 'callout_add', 'asset_unlink', 'sitelink_add', 'conversion_goal', 'cpc_cap', 'budget'));
 
-DELETE FROM public.ads_rules WHERE code = 'g_campaigns_per_day';
+DELETE FROM public.ads_rules WHERE code IN ('g_campaigns_per_day', 'g_campaign_locations_max');
 DELETE FROM public.ads_config WHERE key = 'google_targeting_locked';
 -- The owner's decisions in google_brand_facts and the playbook lesson are kept: they are still what the owner decided.
