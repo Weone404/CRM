@@ -8,6 +8,7 @@ import { ClientWizard, ImportAccounts } from './AdsClientWizard';
 import AdsLeads from './AdsLeads';
 import AdsAutopilot from './AdsAutopilot';
 import AdsToday from './AdsToday';
+import AdsGoogleHome from './AdsGoogleHome';
 import AdsSetup, { SetupBanner, useSetup } from './AdsSetup';
 import AdsMetaSettings from './AdsMetaSettings';
 import { rpc, run, useLoad, Btn, friendly, WorkingBar, OfflineBar } from './adsKit';
@@ -818,13 +819,15 @@ export function Settings({ platform = 'google' }) {
 }
 
 // ---------------------------------------------------------------- shell
+// Overview is the simple screen (146); everything else is one tap away under Advanced, at the same addresses as before.
 const TABS = [
-  { id: 'home', label: 'Today', icon: 'chart' },
-  { id: 'campaigns', label: 'Campaigns', icon: 'rocket' },
+  { id: 'home', label: 'Overview', icon: 'home' },
   { id: 'adsleads', label: 'Ads Leads', short: 'Leads', icon: 'leads' },
-  { id: 'more', label: 'More', icon: 'more' },
+  { id: 'more', label: 'Advanced', icon: 'more' },
 ];
 const MORE = [
+  { id: 'today', label: 'Today (detailed)', icon: 'chart', hint: 'Autopilot status, every number, searches, campaign health, ask the AI team' },
+  { id: 'campaigns', label: 'Campaigns', icon: 'rocket', hint: 'Every campaign with spend, clicks, CRM leads, budget and status' },
   { id: 'autopilot', label: 'Autopilot', icon: 'plane', hint: 'Spend limits, suggestions, instructions and everything the agents did' },
   { id: 'approvals', label: 'Approvals', icon: 'check', hint: 'Budget and status changes waiting for approval, and their history' },
   { id: 'report', label: 'Full report', icon: 'chart', hint: 'Every number for the period: leads, customers, revenue, ROAS, platforms' },
@@ -869,7 +872,7 @@ export default function Ads({ access }) {
       <OfflineBar />
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div><h2 className="text-xl font-bold text-glass-primary">Google Ads</h2><div className="text-xs text-glass-muted">Google Ads · CRM outcomes</div></div>
-        <div className="flex flex-wrap gap-2 items-center">
+        {tab !== 'home' && <div className="flex flex-wrap gap-2 items-center">
           <select aria-label="Client" className="glass-input px-3 py-2 text-sm" value={ctx.client} onChange={(e) => setParams({ client: e.target.value })}>
             <option value="">All clients</option>{(clients || []).filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
@@ -880,11 +883,11 @@ export default function Ads({ access }) {
             <input type="date" aria-label="From" className="glass-input px-2 py-2 text-sm" value={from} onChange={(e) => setParams({ from: e.target.value })} />
             <input type="date" aria-label="To" className="glass-input px-2 py-2 text-sm" value={to} onChange={(e) => setParams({ to: e.target.value })} />
           </>}
-        </div>
+        </div>}
       </div>
       {access.is_admin && view !== 'setup' && <SetupBanner platform="google" st={setupSt} onOpen={() => go('setup')} />}
-      <div className="text-[11px] text-glass-muted -mt-2">{from} to {to} · time zone {tz}{client ? ` · ${client.name}` : ' · every client'}</div>
-      <div role="tablist" aria-label="ADS" className="glass-card p-1 grid grid-cols-4 gap-1">
+      {tab !== 'home' && <div className="text-[11px] text-glass-muted -mt-2">{from} to {to} · time zone {tz}{client ? ` · ${client.name}` : ' · every client'}</div>}
+      <div role="tablist" aria-label="ADS" className="glass-card p-1 grid grid-cols-3 gap-1">
         {TABS.map((t) => {
           const active = tab === t.id;
           return (
@@ -899,7 +902,7 @@ export default function Ads({ access }) {
           );
         })}
       </div>
-      {sub && <button type="button" onClick={() => go('more')} className="text-sm font-semibold inline-flex items-center gap-1" style={{ color: 'var(--accent)' }}><Icon name="chevronLeft" size={16} />More</button>}
+      {sub && <button type="button" onClick={() => go('more')} className="text-sm font-semibold inline-flex items-center gap-1" style={{ color: 'var(--accent)' }}><Icon name="chevronLeft" size={16} />Advanced</button>}
       {sub && <h3 className="text-lg font-bold text-glass-primary -mt-2">{sub.label}</h3>}
       {view === 'more' && (
         <div className="grid sm:grid-cols-2 gap-2">
@@ -911,9 +914,10 @@ export default function Ads({ access }) {
             </button>))}
         </div>
       )}
-      {tab === 'home' && <AdsToday ctx={ctx} access={access} go={go} parts={{ Kpi, Bars, fillDays, Delivery }} />}
+      {tab === 'home' && <AdsGoogleHome go={go} />}
+      {view === 'today' && <AdsToday ctx={ctx} access={access} go={go} parts={{ Kpi, Bars, fillDays, Delivery }} />}
       {view === 'report' && <Home ctx={ctx} access={access} go={go} />}
-      {tab === 'campaigns' && <Campaigns ctx={ctx} access={access} platform="google" />}
+      {view === 'campaigns' && <Campaigns ctx={ctx} access={access} platform="google" />}
       {tab === 'adsleads' && <AdsLeads access={access} platform="google" />}
       {view === 'leads' && <LeadsRevenue ctx={ctx} access={access} clients={clients} />}
       {view === 'approvals' && <Approvals access={access} onChange={reloadPending} />}

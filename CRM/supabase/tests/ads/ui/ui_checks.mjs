@@ -23,7 +23,7 @@ page.on('pageerror', (e) => errors.push(String(e)));
 const body = async () => { await page.waitForTimeout(600); return page.locator('body').innerText(); };
 const tab = async (name) => { await page.getByRole('tab', { name: new RegExp(`^${name}`) }).first().click(); await page.waitForTimeout(500); };
 const dlg = () => page.getByRole('alertdialog');
-const sub = async (name) => { await tab('More'); await page.getByRole('button', { name: new RegExp(`^${name}`) }).first().click(); await page.waitForTimeout(500); };
+const sub = async (name) => { await tab('Advanced'); await page.getByRole('button', { name: new RegExp(`^${name}`) }).first().click(); await page.waitForTimeout(500); };
 
 await as(ADMIN);
 await page.goto(`${APP}#/ads/report?client=${CLIENT}&period=14d`);
@@ -41,7 +41,7 @@ await page.getByRole('button', { name: /Sync now/ }).click();
 t = await body();
 ok((await calls()).some((c) => c.fn === 'ads-sync' && c.args.jobs?.includes('sync')), 'UI07 Sync now calls ads-sync');
 
-await tab('Campaigns');
+await sub('Campaigns');
 await page.getByText('Test Search').waitFor();
 t = await body();
 ok(/Test Search/.test(t) && /6 · 3/.test(t), 'UI08 campaign row shows CRM leads · qualified (6 · 3)');
@@ -78,7 +78,7 @@ const q = await rpc('api_ads_queue', {});
 ok(q[0]?.status === 'approved' && q[0]?.second_confirmed === true, 'UI14 queue row approved with second confirm recorded');
 await page.screenshot({ path: `${SHOTS}/ads_approvals.png`, fullPage: true });
 
-await tab('More');                                    // Leads & Revenue lives under More since the Ads Leads tab
+await tab('Advanced');                                    // Leads & Revenue lives under More since the Ads Leads tab
 await page.getByRole('button', { name: /^Leads & Revenue/ }).click();
 await page.getByText('Leads from ads').waitFor();
 t = await body();
@@ -88,7 +88,7 @@ await page.getByRole('button', { name: 'Add' }).click();
 t = await body();
 ok(/Recorded/.test(t) && /₹1,25,000/.test(t), 'UI16 confirmed revenue recorded');
 
-await tab('More');
+await tab('Advanced');
 await page.getByRole('button', { name: /^Research/ }).click();
 await page.getByRole('button', { name: /Add finding/ }).click();
 await page.getByLabel('Topic').fill('Fees');
@@ -800,7 +800,7 @@ await rpc('api_ads_autopilot_stop', { p_stop: false });
 
 // ---- Today page (everything in one place) and production-grade behaviour
 await page.setViewportSize({ width: 1280, height: 900 });
-await page.goto(`${APP}#/ads/home?client=${CLIENT}`);
+await page.goto(`${APP}#/ads/today?client=${CLIENT}`);
 await page.getByTestId('today').waitFor({ timeout: 20000 });
 t = await page.getByTestId('today').innerText();
 ok(/Autopilot is flying|asks before acting|Emergency stop/.test(t) && /Spent this month/.test(t) && /Needs you/.test(t) && /Results/.test(t)
@@ -839,7 +839,7 @@ ok(!/You are offline/.test(await page.locator('body').innerText()), 'UI99 the no
 
 // phone width: no horizontal page scroll on Today
 await page.setViewportSize({ width: 390, height: 844 });
-await page.goto(`${APP}#/ads/home?client=${CLIENT}`);
+await page.goto(`${APP}#/ads/today?client=${CLIENT}`);
 await page.getByTestId('today').waitFor();
 const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 ok(overflow <= 1, `UI35 phone width has no horizontal page scroll (${overflow}px)`);

@@ -344,3 +344,20 @@ Run: `supabase/tests/ads/premium/run.sh` (ST01-ST08 and PR3, after the 144 check
 
 Live, 25 Nov 2026: Google's validate-only check accepted both schedules (14 parts each) before they were sent; both read back verified.
 
+
+## 14. Google Ads Overview: balance from Google and one daily amount (migration 146)
+
+SQL `home/run.sh`: HM01–HM10 balance (limit − served, first read is not a top-up, a payment shows as a top-up after GST, failed or
+odd answers never invent a balance, ended or waiting budgets ignored, impossible dates safe, browser cannot write it);
+HM11–HM16 "I added money" (access, one request per 10 seconds, two-hour watch ends when money shows, no pg_net = no crash);
+HM17–HM24 budget_set checks (range, whole rupees, parts add up and cover every running campaign once, owner and client limits,
+unsynced or shared budgets, agents wait); HM25–HM47 the owner's amount (access, refusals change nothing, 300 → 210/90 and
+9,120 a month, one change at a time, run by ads-google-ops only, verified → budgets updated, refused → limits restored,
+unconfirmed → lower limit kept, limit lowered later → stale, odd amounts add up, one or no running campaign);
+HM48–HM63 the home read (every status, money for 30 days with GST, who/where/when/searches from what Google confirmed, broken
+snapshots or labels, results with CRM enquiries and 15-minute calls, waiting changes labelled by who made them, facts for the
+AI team once). HR1–HR2 rollback refused while budget changes exist, then back to 145 and re-applied.
+Deno: budget_set builder, refusals, executor verified only when both amounts read back.
+Screen `home_ui.mjs`: GH01–GH46 (tabs, status wording, balance read with nothing to type, "I added money" results, slider and typed
+amount with month, GST and split, confirm and save states, who sees the ads, results, labelled approvals, every status, view-only,
+Advanced, phone width, no console errors).

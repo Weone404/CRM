@@ -24,7 +24,7 @@ page.on('pageerror', (e) => errors.push(String(e)));
 const body = async () => { await page.waitForTimeout(600); return page.locator('body').innerText(); };
 const tab = async (name) => { await page.getByRole('tab', { name: new RegExp(`^${name}`) }).first().click(); await page.waitForTimeout(500); };
 const dlg = () => page.getByRole('alertdialog');
-const sub = async (name) => { await tab('More'); await page.getByRole('button', { name: new RegExp(`^${name}`) }).first().click(); await page.waitForTimeout(500); };
+const sub = async (name) => { await tab('Advanced'); await page.getByRole('button', { name: new RegExp(`^${name}`) }).first().click(); await page.waitForTimeout(500); };
 
 
 await as(ADMIN);
@@ -36,7 +36,7 @@ await as(ADMIN);
       'Spend from 13 Nov to 15 Nov is INR 847.37. With 18% tax that is 999.90, almost exactly one payment of INR 1,000.', 'The CRM changed nothing in the account on 15 Nov or the day after. <img src=x onerror=alert(1)>'] };
   let answer = stopped;
   await page.route('**/rpc/api_ads_delivery', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(answer) }));
-  await page.goto(`${APP}#/ads`); await page.reload(); await page.getByTestId('today').waitFor(); await page.waitForTimeout(1500);
+  await page.goto(`${APP}#/ads/today`); await page.reload(); await page.getByTestId('today').waitFor(); await page.waitForTimeout(1500);
   const box = page.getByTestId('ads-stopped');
   let t = (await box.innerText()).replace(/\s+/g, ' ');
   ok(/Google Ads stopped showing on 16 Nov \(9 days ago\)\./.test(t) && /Most likely the prepaid balance is used up\. Add money in Google Ads; about ₹7,100 covers 30 days at this budget, tax included\. The ads start again by themselves\./.test(t),

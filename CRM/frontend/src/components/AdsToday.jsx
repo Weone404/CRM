@@ -115,7 +115,7 @@ export default function AdsToday({ ctx, access, go, parts }) {
     st.agents.last_seen ? `Last seen ${ago(st.agents.last_seen)}. They work from the cloud once an hour (GitHub > Actions) and from the Mac whenever it is on.`
       : 'Add the two secrets for the cloud runner in GitHub, or set up the helper on the Mac (tools/ads-agents/install.sh).', null));
   (ap.suggestions || []).filter((s) => s.status === 'open').forEach((s) => needs.push(<Suggestion key={`s${s.id}`} s={s} reload={reloadAll} />));
-  pendingOps.forEach((op) => needs.push(row(`op${op.id}`, '#FF9500', op.summary || op.kind, 'An agent change waiting for approval (Autopilot is on "Ask me").',
+  pendingOps.forEach((op) => needs.push(row(`op${op.id}`, '#FF9500', op.summary || op.kind, op.by === 'agent' ? 'AI suggestion: waiting for your approval.' : 'Your change: waiting for approval.',
     ap.can_approve && <div className="flex gap-2">
       <Btn tone="#248A3D" scope={`op-${op.id}`} busyText="Approving…" onClick={() => decideOp(op, true)}>Approve</Btn>
       <Btn ghost scope={`op-${op.id}`} onClick={() => decideOp(op, false)}>Decline</Btn></div>)));
@@ -151,8 +151,8 @@ export default function AdsToday({ ctx, access, go, parts }) {
           <Bar label="Spent this month" value={ap.spend.month} max={ap.caps.monthly} cur={cur} />
           <div className="text-xs text-glass-secondary self-end">
             {ap.funds?.estimate != null ? <>Balance about <b className="text-glass-primary">{money(Math.max(0, ap.funds.estimate), cur, 0)}</b>{ap.funds.days_left != null && ` · ${ap.funds.days_left} days`}</>
-              : <>Balance unknown · <button type="button" className="font-semibold" style={{ color: '#007AFF' }} onClick={() => go('autopilot')}>record a top-up</button></>}
-            <Explain text="An estimate: money you recorded as added, minus what Google reports as spent since then. Google does not share the real prepaid balance." />
+              : <>Balance: <button type="button" className="font-semibold" style={{ color: '#007AFF' }} onClick={() => go('home')}>see Overview</button></>}
+            <Explain text="An estimate from the money recorded in the CRM. The Overview shows the balance read from Google itself." />
           </div>
         </div>
       </section>

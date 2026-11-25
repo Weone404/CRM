@@ -388,6 +388,29 @@ Owner decision: counselling enquiries from people searching for pilot training, 
 - **AI team.** The research is in `ads_config.google_brand_facts` under "Verified research (25 Nov 2026 ...)": tiers, phrases, why old conversion numbers are not enquiries, price, time of day, competitors, and the loss after the click (48 hours to the first call, 30% bot forms).
 - **Gate layers.** `ads_google_gate` (145: ad_schedule) -> `ads_google_gate_v144` (144: campaign_create, income_filter) -> `ads_google_gate_v143` (099: everything else). Add a layer the same way.
 
+## Google Ads Overview: balance from Google, one daily amount (migration 146)
+
+The Google Ads section opens on **Overview** (tabs: Overview · Ads Leads · Advanced). Everything that was under the old tabs is one tap
+away under Advanced at the same address (`#/ads/today` is the detailed Today page, `#/ads/campaigns` the campaign list).
+
+- **Balance** is read from Google, not typed. For a prepaid account Google's account budget is the running total of every payment
+  (after GST) and of everything served: balance = adjusted spending limit − amount served (APPROVED, not ended rows). ads-google-ops
+  `{"read":"billing"}` → `svc_ads_google_billing_save` → `ads_google_balance`; a rise of the limit is logged in `ads_google_topups`.
+  Schedule `crm-ads-google-billing`: every 30 minutes, every 5 minutes for two hours after "I added money"
+  (`api_ads_google_balance_refresh`, which also asks at once). A failed read keeps the last figure and records the error.
+- **Daily budget**: `api_ads_google_budget_set(p_daily)` (approvers only, whole rupees 100–5000, rule `g_daily_total`) sets
+  `google_cap_daily` and `google_cap_monthly` (= 30.4 days) and creates one approved owner operation `budget_set` that changes every
+  switched-on campaign's budget in one Google request, shared as now (largest campaign takes the rounding). Gate layer
+  `ads_google_gate` → `ads_google_gate_v145`. Verified → `ads_campaigns.daily_budget` updated; refused before anything was sent →
+  limits go back; sent but not confirmed → the lower limit stays. Agents cannot create an approved `budget_set`.
+- **Home read** `api_ads_google_home(p_days 7|30|90)`: status (running, starting, low_money, no_money, not_showing, paused, off,
+  not_connected), money, budget and the last change, campaigns with who (income groups shut out), where (snapshot locations),
+  when (verified schedule), searches; results from `ads_metrics_daily` and CRM enquiries (`ads_ad_leads`) with calls within 15
+  minutes; waiting operations labelled ai / you / team. Labels and the areas not opened yet: `ads_config.google_campaign_labels`,
+  `google_areas_waiting`.
+- Tests: `supabase/tests/ads/home/run.sh` (HM01–HM63, HR1–HR2), `UI_SCRIPT=home_ui.mjs ui/run_ui.sh` (GH01–GH46). Rollback:
+  `146_ads_google_home_down.sql`, then re-run 145.
+
 ## Not built yet
 
 Ad groups / keywords / audiences / creatives management, offline-conversion upload (needs GCLID/FBCLID captured on website
