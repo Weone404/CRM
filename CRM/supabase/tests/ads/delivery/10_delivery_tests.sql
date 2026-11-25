@@ -54,7 +54,7 @@ SELECT pg_temp.ok((SELECT j->'run' @> '{"spend": 847.37, "with_tax": 999.90, "pa
 SELECT pg_temp.ok((SELECT (j->>'usual_impressions')::int = 468 AND (j->>'recent_impressions')::int = 3 AND (j->>'topup_30d')::int = 7100 FROM r), 'DW05 usual vs recent impressions, and what 30 days at this budget cost with tax');
 SELECT pg_temp.ok((SELECT jsonb_array_length(j->'evidence') = 4 AND j->'evidence'->>0 = 'It was shown about 468 times a day before; since then about 3.'
   AND j->'evidence'->>1 = 'A campaign is switched on with INR 200 a day, and Google gives no reason for the stop.'
-  AND j->'evidence'->>2 LIKE 'Spend from % to % is INR 847.37. With 18% tax that is 999.90, almost exactly one payment of INR 1,000.'
+  AND j->'evidence'->>2 = format('Spend from %s to %s is INR 847.37. With 18%% tax that is 999.90, almost exactly one payment of INR 1,000.', to_char(t - 11, 'FMDD Mon'), to_char(t - 9, 'FMDD Mon'))
   AND j->'evidence'->>3 LIKE 'The CRM changed nothing in the account on %' FROM r), 'DW06 the evidence is given in plain sentences');
 -- who may see it
 SET ROLE anon;
@@ -114,7 +114,13 @@ INSERT INTO public.ads_google_ops (account_id, kind, payload, summary, status, c
   ('a1420000-0000-4000-8000-000000000001', 'negative_add', '{}', 'Block searches', 'verified', 'agent', (crm_private.ads_google_today() - 9)::timestamp AT TIME ZONE 'Asia/Kolkata' + interval '10 hours'),
   ('a1420000-0000-4000-8000-000000000001', 'negative_add', '{}', 'Earlier', 'verified', 'agent', (crm_private.ads_google_today() - 12)::timestamp AT TIME ZONE 'Asia/Kolkata' + interval '10 hours'),
   ('a1420000-0000-4000-8000-000000000001', 'negative_add', '{}', 'Never sent', 'rejected', 'agent', NULL);
-SELECT pg_temp.ok(pg_temp.w() @> '{"crm_changes": 1}' AND pg_temp.w()->'evidence'->>3 LIKE 'The CRM made 1 change(s) in the account on % or the day after (ADS > Activity).', 'DW21 changes the CRM made on the stop day are pointed out, not hidden');
+SELECT pg_temp.ok(pg_temp.w() @> '{"crm_changes": 1, "crm_changes_next_day": 0}' AND pg_temp.w()->'evidence'->>3 LIKE 'The CRM made 1 change(s) in the account on %, the last day with spend (ADS > Activity).', 'DW21 changes the CRM made on the last day with spend are pointed out, not hidden');
+UPDATE public.ads_google_ops SET executed_at = executed_at + interval '1 day' WHERE summary = 'Block searches';
+SELECT pg_temp.ok(pg_temp.w() @> '{"crm_changes": 0, "crm_changes_next_day": 1}' AND pg_temp.w()->'evidence'->>3 LIKE 'The CRM changed nothing on %, the last day with spend; it made 1 change(s) the next day.', 'DW21b changes made the day after are said to be the day after');
+UPDATE public.ads_config SET value = '12.5' WHERE key = 'google_tax_pct';
+INSERT INTO public.ads_config (key, value) VALUES ('google_tax_pct', '12.5') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+SELECT pg_temp.ok(pg_temp.w() @> '{"tax_pct": 12.5, "cause": "unknown"}', 'DW21c a tax rate with a decimal is used as given');
+DELETE FROM public.ads_config WHERE key = 'google_tax_pct';
 -- absurd data
 UPDATE public.ads_metrics_daily SET impressions = NULL WHERE spend = 0;
 SELECT pg_temp.ok(pg_temp.w() @> '{"stopped": true, "recent_impressions": 0}', 'DW22 days without an impression count are zero, not an error');

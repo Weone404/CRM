@@ -12,7 +12,7 @@
 CREATE OR REPLACE FUNCTION crm_private.ads_google_delivery() RETURNS jsonb
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
 DECLARE a public.ads_accounts; d date; last_spend date; quiet int; busy numeric; recent numeric; budget numeric; run_start date; run_spend numeric;
-        tax numeric; gross numeric; pay numeric; near boolean := false; added numeric; f0 date; est numeric; changes int; cause text := NULL;
+        tax numeric; gross numeric; pay numeric; near boolean := false; added numeric; f0 date; est numeric; changes int; changes_next int; cause text := NULL;
         ev text[] := '{}'; stopped boolean; cur text; off jsonb := jsonb_build_object('stopped', false);
 BEGIN
   a := crm_private.ads_google_account();
@@ -47,9 +47,10 @@ BEGIN
   near := gross >= 100 AND pay - gross <= 1;
   SELECT min(added_on), sum(amount) INTO f0, added FROM public.ads_funds WHERE account_id = a.id;
   IF f0 IS NOT NULL THEN est := added - crm_private.ads_google_spend(f0, d); END IF;
-  SELECT count(*) INTO changes FROM public.ads_google_ops o
-   WHERE o.account_id = a.id AND o.status IN ('verified', 'outcome_unknown') AND o.executed_at IS NOT NULL
-     AND (o.executed_at AT TIME ZONE coalesce(a.timezone, 'Asia/Kolkata'))::date BETWEEN last_spend AND last_spend + 1;
+  -- what the CRM itself changed around the stop: on the last day with spend, and on the day after
+  SELECT count(*) FILTER (WHERE x.day = last_spend), count(*) FILTER (WHERE x.day = last_spend + 1) INTO changes, changes_next FROM (
+    SELECT (o.executed_at AT TIME ZONE coalesce(a.timezone, 'Asia/Kolkata'))::date AS day FROM public.ads_google_ops o
+     WHERE o.account_id = a.id AND o.status IN ('verified', 'outcome_unknown') AND o.executed_at IS NOT NULL) x;
 
   ev := ev || format('It was shown about %s times a day before; since then about %s.', round(busy), round(recent))::text;
   ev := ev || format('A campaign is switched on with %s %s a day, and Google gives no reason for the stop.', cur, trim(to_char(budget, 'FM999G999G990')))::text;
@@ -59,17 +60,18 @@ BEGIN
   ELSIF near THEN
     cause := 'funds';
     ev := ev || format('Spend from %s to %s is %s %s. With %s%% tax that is %s, almost exactly one payment of %s %s.', to_char(run_start, 'FMDD Mon'), to_char(last_spend, 'FMDD Mon'),
-      cur, trim(to_char(run_spend, 'FM999G999G990D00')), trim(to_char(tax, 'FM990D9')), trim(to_char(gross, 'FM999G999G990D00')), cur, trim(to_char(pay, 'FM999G999G990')))::text;
+      cur, trim(to_char(run_spend, 'FM999G999G990D00')), CASE WHEN tax = trunc(tax) THEN trunc(tax)::text ELSE tax::text END, trim(to_char(gross, 'FM999G999G990D00')), cur, trim(to_char(pay, 'FM999G999G990')))::text;
   ELSE
     cause := 'unknown';
     IF est IS NOT NULL THEN ev := ev || format('The money recorded in the CRM still shows about %s %s, so the balance may not be the reason.', cur, trim(to_char(greatest(est, 0), 'FM999G999G990')))::text; END IF;
   END IF;
-  ev := ev || CASE WHEN changes = 0 THEN format('The CRM changed nothing in the account on %s or the day after.', to_char(last_spend, 'FMDD Mon'))
-                   ELSE format('The CRM made %s change(s) in the account on %s or the day after (ADS > Activity).', changes, to_char(last_spend, 'FMDD Mon')) END;
+  ev := ev || CASE WHEN changes > 0 THEN format('The CRM made %s change(s) in the account on %s, the last day with spend (ADS > Activity).', changes, to_char(last_spend, 'FMDD Mon'))
+                   WHEN changes_next > 0 THEN format('The CRM changed nothing on %s, the last day with spend; it made %s change(s) the next day.', to_char(last_spend, 'FMDD Mon'), changes_next)
+                   ELSE format('The CRM changed nothing in the account on %s or the day after.', to_char(last_spend, 'FMDD Mon')) END;
   RETURN jsonb_build_object('stopped', true, 'cause', cause, 'since', last_spend + 1, 'last_spend_day', last_spend, 'quiet_days', quiet,
     'usual_impressions', round(busy), 'recent_impressions', round(recent), 'daily_budget', budget, 'currency', cur, 'tax_pct', tax,
     'run', jsonb_build_object('from', run_start, 'spend', run_spend, 'with_tax', gross, 'payment', pay, 'matches_payment', near),
-    'has_ledger', f0 IS NOT NULL, 'estimate', est, 'crm_changes', changes, 'evidence', to_jsonb(ev),
+    'has_ledger', f0 IS NOT NULL, 'estimate', est, 'crm_changes', changes, 'crm_changes_next_day', changes_next, 'evidence', to_jsonb(ev),
     'topup_30d', ceil(budget * 30 * (1 + tax / 100) / 100) * 100);
 END $$;
 
