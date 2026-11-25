@@ -304,3 +304,26 @@ Run: `supabase/tests/ads/delivery/run.sh` (SQL, DW01 to DW24 and DR1) and `UI_SC
 | Honesty | Changes the CRM made on the stop day are counted and shown; an unknown reason is never guessed |
 | Other platforms | A Meta campaign spending every day neither hides nor fakes a Google stop |
 | Access and safety | ADS viewers only; read-only; evidence shown as plain text; if the check fails, Today still works |
+
+## 12. Premium targeting: a whole new campaign and the income filter (migration 144)
+
+Owner decision of 25 Nov 2026: counselling enquiries from premium areas only, in two campaigns (Delhi NCR and Other cities).
+Run: `supabase/tests/ads/premium/run.sh` (database, PT01-PT38 and PR1-PR2) and `deno test tests/ads/ads_google_ops.test.ts` (builders, read-back, dry run).
+
+| Area | What is proved |
+|---|---|
+| Old kinds | Everything the old gate knew passes through the new gate unchanged; an unknown kind is still unknown (PT01). The full ADS suite passes with 144 applied (808 checks). |
+| New campaign, money | Fits the daily limit or is blocked, paused or not, to the paisa (PT02-PT03); no limit set, no campaign (PT04); monthly limit (PT05); real amounts only (PT06). |
+| New campaign, moved money | Money can be moved from a running campaign in the same request: only down, within the 30% step, and the total must still fit (PT30-PT31); a paused campaign frees nothing (PT32). |
+| New campaign, parts | At least one location, never worldwide, at most 150 (PT07); name (PT08); click limit (PT09); status (PT10); income filter, shared lists and negatives pass the same checks as on their own, so a negative cannot block a core search (PT33); ad groups 1-5, phrase or exact keywords, 1-3 ads (PT34); every ad passes the claim, website and length checks (PT35). |
+| Income filter | Campaign or ad group, Google's seven groups only, never all seven, "unknown" warned about, letting a group back in only with this account's own rows (PT12-PT17). |
+| Owner only | An agent's new campaign or income change always waits for the owner, even on Automatic; while `google_targeting_locked` is on, so does an agent's location change; the owner's approval is never undone (PT18-PT22). One new campaign a day (PT23). |
+| Who runs what | New kinds go to `ads-google-ops` only, old kinds to `ads-sync` only; nothing when Google is paused; a limit lowered after approval stops the campaign before anything is sent (PT24-PT26). |
+| After it is sent | The spend limits know the new campaign and the lowered budget at once, before any sync (PT36-PT38). |
+| AI team | The owner's decisions are added to the brand facts once; the lesson naming the old location list is retired (PT27-PT28). |
+| Builders | One all-or-nothing request with temporary ids, moved budget first; Google Search only, people physically there, the EU declaration; bad input never reaches Google (Deno). |
+| Read-back and dry run | A 159-part campaign is read back in groups, in order, and one missing row is reported; the dry run only ever sends "validate only" (Deno). |
+| Rollback | Refused while operations of the new kinds exist; otherwise the old gate is back under its own name and 144 re-applies (PR1-PR2). |
+
+Live, 25 Nov 2026: Google's own validate-only check accepted the Delhi NCR income filter (5 parts) and the whole Other cities campaign (159 parts) before the owner was asked to approve.
+

@@ -365,6 +365,20 @@ Setup, Settings). Same tables and rules underneath; each section shows only its 
 
 Go-live order: push the frontend → open Meta Ads > Setup → follow the steps top to bottom.
 
+## Google Ads > Premium targeting (migration 144, 2026-11-25)
+
+Owner decision: counselling enquiries from people searching for pilot training, CPL and ground classes, in premium areas only.
+
+- **Two campaigns.** Delhi NCR (Dwarka classroom, online as well) and Other cities (online batches and free counselling only). Google sets locations per campaign, so the offer follows the place.
+- **Where.** 125 premium PIN codes in 9 big cities (Google accepts Indian PIN codes as locations) and 13 places as whole cities (Gurugram's PIN codes are not in Google's list). The approved list is in the operations' payloads.
+- **Who.** Google's top 10% and 11-20% household income groups only (`income_filter`, set on the campaign). Google has no net-worth filter. "Unknown" income is shut out too, which can cut reach sharply; the gate warns about it.
+- **New operations, owner only.** `campaign_create` builds a whole Search campaign in one approval and one all-or-nothing request (budget inside the spend limits, optionally moved from a running campaign, click limit, Google Search only, people physically there, locations, income filter, negative lists, ad groups, keywords, ads). `income_filter` shuts income groups out or lets them back in. An agent can propose either; they always wait for the owner.
+- **Lock.** While `ads_config.google_targeting_locked` is `on`, location changes made by an agent also wait for the owner. Turn it `off` to let the Locations desk act on its own again.
+- **Dry run.** `ads-google-ops` with `{"check": "<operation id>"}` asks Google to validate a waiting operation (nothing changes) and logs the answer as `google_op_dry_run`.
+- **Where it runs.** `supabase/functions/ads-google-ops` (schedule `crm-ads-google-build`, every 5 minutes when something is approved). The large `ads-sync` function is unchanged and never sees the new kinds.
+- **Gate.** The 099 gate lives on as `crm_private.ads_google_gate_v143`; `crm_private.ads_google_gate` is now a wrapper. Do not replace the wrapper with a full body in a later migration.
+- **Budget.** The owner sets it in Google Ads > Autopilot > Spend limits (the ceiling) and Campaigns (each campaign's daily budget). The first split is 140 (Delhi NCR) + 60 (Other cities) = the 200 limit.
+
 ## Not built yet
 
 Ad groups / keywords / audiences / creatives management, offline-conversion upload (needs GCLID/FBCLID captured on website
