@@ -327,3 +327,20 @@ Run: `supabase/tests/ads/premium/run.sh` (database, PT01-PT38 and PR1-PR2) and `
 
 Live, 25 Nov 2026: Google's own validate-only check accepted the Delhi NCR income filter (5 parts) and the whole Other cities campaign (159 parts) before the owner was asked to approve.
 
+## 13. Time-of-day bids (migration 145)
+
+Run: `supabase/tests/ads/premium/run.sh` (ST01-ST08 and PR3, after the 144 checks) and `deno test tests/ads/ads_google_ops.test.ts`.
+
+| Area | What is proved |
+|---|---|
+| A good schedule | 1-6 slots that cover 0 to 24, bids from -90% to +900% (ST01). |
+| Never off by accident | A gap, an overlap or a day that stops early is blocked (ST03); whole hours, bid range, slot count, campaign (ST04). |
+| Replacing a schedule | Only this campaign's own rows can be removed (ST05). |
+| Layers | Every older kind still gets its own checks through both gate layers (ST02). |
+| Owner only, who runs it | An agent's schedule waits for the owner on Automatic (ST06); only `ads-google-ops` runs and dry-runs it (ST07). |
+| AI team | The verified research is added to the brand facts once (ST08). |
+| Builder | 7 days x slots, the bid as a multiplier (0.7 for -30%), old rows first; bad input never reaches Google (Deno). |
+| Rollback | Refused while schedules exist; then back to 144 and re-applies (PR3). |
+
+Live, 25 Nov 2026: Google's validate-only check accepted both schedules (14 parts each) before they were sent; both read back verified.
+

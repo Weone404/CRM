@@ -379,6 +379,15 @@ Owner decision: counselling enquiries from people searching for pilot training, 
 - **Gate.** The 099 gate lives on as `crm_private.ads_google_gate_v143`; `crm_private.ads_google_gate` is now a wrapper. Do not replace the wrapper with a full body in a later migration.
 - **Budget.** The owner sets it in Google Ads > Autopilot > Spend limits (the ceiling) and Campaigns (each campaign's daily budget). The first split is 140 (Delhi NCR) + 60 (Other cities) = the 200 limit.
 
+## Google Ads > Time-of-day bids and the verified research (migration 145, 2026-11-25)
+
+- **`ad_schedule` (owner only).** A campaign's day in 1-6 time slots, each with its own bid change (-90% to +900%), the same every day. The slots must cover all 24 hours, because a schedule in Google Ads shows ads only inside its slots. Old rows are removed in the same request (`remove`). Runs and dry-runs in `ads-google-ops`.
+- **Live now.** Both campaigns bid 30% lower from midnight to 6 am and unchanged otherwise. Review each slot by cost per CRM enquiry after 300 clicks; 56 clicks were too few to switch any hour off.
+- **Tier 1 only.** Delhi NCR = 20 premium PIN codes plus Gurugram, Faridabad, Ghaziabad, Greater Noida (140 a day). Other cities = Chandigarh, Mohali, Panchkula, Punjab (60 a day). Tier 2 (Jaipur, Lucknow, Udaipur, Sonipat, Panipat) and Tier 3 (7 far metros) are paused; their PIN lists are in the 25 Nov `campaign_create` operation.
+- **Phrases.** The general "aviation" and "flight" phrases are paused in both campaigns (they pulled in non-pilot searches).
+- **AI team.** The research is in `ads_config.google_brand_facts` under "Verified research (25 Nov 2026 ...)": tiers, phrases, why old conversion numbers are not enquiries, price, time of day, competitors, and the loss after the click (48 hours to the first call, 30% bot forms).
+- **Gate layers.** `ads_google_gate` (145: ad_schedule) -> `ads_google_gate_v144` (144: campaign_create, income_filter) -> `ads_google_gate_v143` (099: everything else). Add a layer the same way.
+
 ## Not built yet
 
 Ad groups / keywords / audiences / creatives management, offline-conversion upload (needs GCLID/FBCLID captured on website
