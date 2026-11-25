@@ -397,6 +397,25 @@ export const SNAPSHOT_QUERIES: Record<string, string> = {
     "FROM user_location_view WHERE segments.date DURING LAST_30_DAYS ORDER BY metrics.cost_micros DESC LIMIT 60",
 };
 
+// What Google's API will say about the account's money. Google documents no "available funds" field for accounts that pay in
+// advance; account_budget rows exist for accounts with a budget order. Read as-is so the CRM shows a real figure when there is
+// one and an estimate when there is not. Fixed queries only; nothing here can be changed by a caller.
+export const BILLING_QUERIES: Record<string, string> = {
+  account_budget: "SELECT account_budget.id, account_budget.status, account_budget.approved_spending_limit_micros, account_budget.approved_spending_limit_type, " +
+    "account_budget.adjusted_spending_limit_micros, account_budget.adjusted_spending_limit_type, account_budget.amount_served_micros, " +
+    "account_budget.total_adjustments_micros, account_budget.approved_start_date_time, account_budget.approved_end_date_time FROM account_budget",
+  billing_setup: "SELECT billing_setup.id, billing_setup.status, billing_setup.start_date_time, billing_setup.end_time_type FROM billing_setup",
+};
+export async function readBilling(google: GoogleAds, cid: string, login?: string | null) {
+  const g = google.withLogin(login);
+  const out: Record<string, unknown[] | { error: string }> = {};
+  for (const [k, q] of Object.entries(BILLING_QUERIES)) {
+    try { out[k] = (await g.search(cid, q)).map((r) => flatRow(r)); }
+    catch (e) { out[k] = { error: (e as Error).message.slice(0, 300) }; }
+  }
+  return out;
+}
+
 // Flattens a GAQL row into {resource_field: value} with short names (keeps the snapshot small and readable for the agents).
 export function flatRow(row: any, prefix = "", out: Record<string, unknown> = {}): Record<string, unknown> {
   for (const [k, v] of Object.entries(row ?? {})) {
