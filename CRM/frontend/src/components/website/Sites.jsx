@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from '../../backend/supabaseClient';
 import { showToast } from '../../utils/toast';
-import { navigate } from '../../utils/route';
+import { navigate, setParams, useRoute } from '../../utils/route';
 import { modalProps } from '../ui/overlay';
 import Icon from '../icons';
 import { Spark } from './charts';
@@ -465,6 +465,9 @@ export default function SitesHome() {
   const { d, err, load } = useSites();
   const [busy, setBusy] = useState({});
   const [sheet, setSheet] = useState(null);       // null | {} (add) | site (edit)
+  const route = useRoute();
+  // #/website?add=1 (the Google page's "Add website") opens the add steps straight away
+  useEffect(() => { if (route.params.add && d?.is_admin) { setSheet({}); setParams({ add: undefined }); } }, [route.params.add, d?.is_admin]);
   const [allBusy, setAllBusy] = useState(false);
   const sites = d?.sites || [];
   const refreshSite = useCallback(async (s, { quiet = false } = {}) => {

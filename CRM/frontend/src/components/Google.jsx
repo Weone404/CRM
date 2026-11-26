@@ -14,6 +14,7 @@ const day = (d) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString('en-IN', {
 const daysSince = (d) => (d ? Math.floor((Date.now() - new Date(`${d}T00:00:00Z`).getTime()) / 86400000) : null);
 
 let cache = null;
+let sitesCache = null;
 
 export const GOOGLE_PAGES = [['website', 'Websites', 'chart'], ['gbp', 'Google My Business', 'pin'], ['ads', 'Google Ads', 'rocket']];
 
@@ -74,6 +75,7 @@ function HubCard({ id, icon, title, tag, tagTone, stats, note, children }) {
 export default function Google({ canAds = true }) {
   const [h, setH] = useState(cache);
   const [err, setErr] = useState('');
+  const [, setSitesTick] = useState(0);
   useEffect(() => {
     let stop = false;
     supabase.rpc('api_google_hub').then(({ data, error }) => {
@@ -81,9 +83,11 @@ export default function Google({ canAds = true }) {
       if (error) { setErr(error.message); return; }
       cache = data; setH(data); setErr('');
     });
+    supabase.rpc('api_web_sites').then(({ data }) => { if (!stop && data) { sitesCache = data; setSitesTick((n) => n + 1); } });
     return () => { stop = true; };
   }, []);
   const w = h?.website, a = h?.ads, g = h?.gbp;
+  const sites = sitesCache?.sites || [];
   const gt = g?.totals, gp = g?.prev;
   const idle = daysSince(a?.last_spend_day);
   const gbpTag = !g ? null : g.last_day ? ['Connected', 'good'] : g.waiting_google ? ['Waiting for Google', 'warn'] : g.connections > 0 ? ['Setting up', 'warn'] : ['Not connected', 'muted'];
@@ -98,7 +102,20 @@ export default function Google({ canAds = true }) {
       <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))' }}>
         <HubCard id="website" icon="chart" title="Websites" tag={w ? (w.clicks != null ? 'Connected' : 'No data yet') : null} tagTone={w?.clicks != null ? 'good' : 'muted'}
           stats={[{ label: 'Clicks from Google', value: fmt(w?.clicks), cur: w?.clicks, prev: w?.clicks_prev }, { label: 'Seen on Google', value: short(w?.impressions) }, { label: 'Visitors', value: fmt(w?.visitors) }]}
-          note={w?.sites ? `${w.sites} websites · Search Console and GA4` : 'All your websites · Search Console and GA4'} />
+          note={sites.length ? `${sites.length} websites · tap to see each` : 'All your websites · Search Console and GA4'}>
+          {sites.length > 0 && (
+            <span className="flex flex-col gap-1.5" data-testid="hub-sites">
+              {sites.map((x) => (
+                <span key={x.id} className="flex items-center gap-2 text-[13px] min-w-0">
+                  <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: x.color }} />
+                  <span className="truncate text-glass-primary">{x.name}</span>
+                  <span className="ml-auto shrink-0 text-glass-secondary">{x.url ? (x.search?.days ? `${fmt(x.search.clicks)} clicks` : (x.gsc_url ? 'collecting' : 'connect Google')) : 'add address'}</span>
+                </span>))}
+              {sitesCache?.is_admin && <span role="link" tabIndex={0} className="mt-1 self-start text-[13px] font-semibold text-[var(--accent)]"
+                onClick={(e) => { e.stopPropagation(); navigate('website', '', { add: 1 }); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); e.preventDefault(); navigate('website', '', { add: 1 }); } }}>+ Add website</span>}
+            </span>)}
+        </HubCard>
         <HubCard id="gbp" icon="pin" title="Google My Business" tag={gbpTag?.[0]} tagTone={gbpTag?.[1]}
           stats={g?.last_day ? [{ label: 'Profile views', value: short(gt?.views), cur: gt?.views, prev: gp?.days ? gp?.views : null }, { label: 'Calls', value: fmt(gt?.calls), cur: gt?.calls, prev: gp?.days ? gp?.calls : null },
             { label: 'Rating', value: g.rating != null ? `${Number(g.rating).toFixed(1)} ★` : '—' }] : null}

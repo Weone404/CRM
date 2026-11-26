@@ -468,7 +468,7 @@ const TABS = [['overview', 'Overview'], ['searches', 'Google searches'], ['ai', 
 // #/website = all websites; #/website/<tab>?site=<id> = one website (an old link without a site opens the main website).
 export default function Website() {
   const route = useRoute();
-  const one = Boolean(route.params.site) || TABS.some(([k]) => k === route.section);
+  const one = Boolean(route.params.site) || TABS.some(([k]) => k === route.section && k !== 'overview');
   return one ? <SiteDetail key={route.params.site || 'main'} siteId={route.params.site || null} route={route} /> : <SitesHome />;
 }
 
