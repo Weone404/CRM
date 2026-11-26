@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRoute, setParams } from '../utils/route';
+import { FINANCE, STREAMS, TEMP, isPastIso, label, temperature, whenIso } from '../utils/leadPlan';
 import { displayPhone } from '../utils/formatters';
 import { CLOSURE, charterRef, closureLabel, isPositiveClosure, tripSummary } from '../utils/charter';
 
@@ -38,8 +39,12 @@ export default function LeadList({ leads, onSelectLead, segment = 'aviation' }) 
   const count = (b) => (buckets[b] || []).length;
   const closedWith = (outcome) => (buckets.closed || []).filter(l => l.closure_outcome === outcome);
 
+  const demoBooked = leads.filter((l) => l.demo?.status === 'scheduled');
+  const hot = leads.filter((l) => temperature(l) === 'hot');
   let filteredLeads;
   if (filter === 'all') filteredLeads = leads;
+  else if (filter === 'demo') filteredLeads = demoBooked;
+  else if (filter === 'hot') filteredLeads = hot;
   else if (filter === 'closed') filteredLeads = closedWith(closure[closedSub].value);
   else filteredLeads = buckets[filter] || [];
 
@@ -65,6 +70,8 @@ export default function LeadList({ leads, onSelectLead, segment = 'aviation' }) 
       <div className="flex gap-2 mb-4 -mx-1 px-1 overflow-x-auto no-scrollbar md:flex-wrap md:overflow-visible" data-testid="lead-filter-chips">
         {tab('all', `All (${leads.length})`, 'bg-indigo-600 text-white')}
         {tab('pending', `Pending (${count('pending')})`, 'bg-orange-600 text-white')}
+        {!isCharter && tab('hot', `🔥 Hot (${hot.length})`, 'bg-red-600 text-white')}
+        {!isCharter && tab('demo', `Demo booked (${demoBooked.length})`, 'bg-emerald-600 text-white')}
         {tab('in-progress', `In Progress (${count('in-progress')})`, 'bg-sky-600 text-white')}
         {tab('interested', `Interested (${count('interested')})`, 'bg-green-600 text-white')}
         {tab('ppl', `PPL (${count('ppl')})`, 'bg-teal-600 text-white')}
@@ -92,7 +99,8 @@ export default function LeadList({ leads, onSelectLead, segment = 'aviation' }) 
 
       <div className="space-y-3">
         {filteredLeads.map(lead => (
-          <div key={lead.id} onClick={() => onSelectLead(lead)} className="glass-card p-4 cursor-pointer animate-glass-in">
+          <div key={lead.id} onClick={() => onSelectLead(lead, filteredLeads)} className="glass-card p-4 cursor-pointer animate-glass-in tile-link"
+            role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectLead(lead, filteredLeads); } }}>
             <div className="flex justify-between items-start mb-2 gap-3">
               <div className="flex-1 min-w-0">
                 <div className="font-semibold text-lg text-glass-primary">{lead.name}</div>
@@ -108,11 +116,32 @@ export default function LeadList({ leads, onSelectLead, segment = 'aviation' }) 
                 {isCharter && <div className="mt-1 text-xs font-mono text-glass-muted">{charterRef(lead.id)}</div>}
               </div>
             </div>
+            <LeadSignals lead={lead} />
             {lead.last_note && <div className="mt-2 p-2 glass-subtle text-sm text-glass-primary text-center">💬 {lead.last_note}</div>}
             <div className="mt-2 text-xs text-glass-muted">📅 Created: {formatDate(lead.created_at)}{isCharter && lead.utm_source ? ` · ${lead.utm_source}` : ''}</div>
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// What the team has recorded, at a glance: Hot/Warm/Cold, demo, next call, Class 12, fees.
+function LeadSignals({ lead }) {
+  const t = temperature(lead);
+  const p = lead.profile || {};
+  const chips = [
+    t && [TEMP[t].label, TEMP[t].fg, TEMP[t].bg],
+    lead.demo?.status === 'scheduled' && [`Demo ${whenIso(lead.demo.at, lead.demo.has_time)}`, '#1E7B34', 'rgba(52,199,89,0.12)'],
+    lead.demo?.status === 'attended' && ['Demo attended', '#1E7B34', 'rgba(52,199,89,0.12)'],
+    lead.next_followup_at && [`Call ${whenIso(lead.next_followup_at, lead.next_followup_has_time)}`, isPastIso(lead.next_followup_at) ? '#C4261D' : '#A35A00', isPastIso(lead.next_followup_at) ? 'rgba(255,59,48,0.1)' : 'rgba(255,149,0,0.14)'],
+    p.class12 && [`12th ${p.class12 === 'not_done' ? 'not done' : p.class12}${p.class12_stream ? ` · ${label(STREAMS, p.class12_stream)}` : ''}`, '#5856D6', 'rgba(88,86,214,0.1)'],
+    p.financial_issue && [`Fees${(p.finance_help || []).length ? `: ${p.finance_help.map((k) => label(FINANCE, k)).join(', ')}` : ' concern'}`, '#A35A00', 'rgba(255,149,0,0.12)'],
+  ].filter(Boolean);
+  if (!chips.length) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5 mt-1">
+      {chips.map(([txt, fg, bg]) => <span key={txt} className="px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ color: fg, background: bg }}>{txt}</span>)}
     </div>
   );
 }

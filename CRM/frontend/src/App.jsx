@@ -13,7 +13,8 @@ import { signOutSupabase } from './backend/router';
 import { USE_SUPABASE } from './backend/mode';
 import { modalProps } from './components/ui/overlay';
 import { showToast } from './utils/toast';
-import { useRoute, navigate } from './utils/route';
+import { useRoute, navigate, setParams } from './utils/route';
+import TodayCard from './components/leads/TodayCard';
 import LinkTile from './components/ui/LinkTile';
 import Sidebar, { groupTabs } from './components/ui/Sidebar';
 import SignalPill from './components/ui/SignalPill';
@@ -90,6 +91,9 @@ export default function App() {
   const syncingRef = useRef(null);
   const [followups, setFollowups] = useState([]);
   const [selectedLead, setSelectedLead] = useState(null);
+  const [leadQueue, setLeadQueue] = useState([]);           // the list the lead was opened from, for "Save & next"
+  const [todayCount, setTodayCount] = useState(0);
+  const openLead = (l, list) => { setSelectedLead(l); if (list) setLeadQueue(list); };
   const [showOutbox, setShowOutbox] = useState(false);
   const [showAddQuery, setShowAddQuery] = useState(false);
   const [config, setConfig] = useState({});
@@ -451,8 +455,6 @@ export default function App() {
           const seg = segment === 'meta' && !canAccessAds ? 'aviation' : segment;
           const SHORT = { aviation: 'Aviation', charter: 'Charter', meta: 'Meta' };
           const segmentLeads = leads.filter(l => segmentOf(l) === seg);
-          const segmentIds = new Set(segmentLeads.map(l => l.id));
-          const segmentFollowups = followups.filter(f => segmentIds.has(f.lead_id));
           const untouched = (list) => list.filter(l => !l.first_contacted_at).length;
           return (
           <>
@@ -482,24 +484,13 @@ export default function App() {
             <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-4" data-testid="lead-counters">
               <LinkTile to={['leads', '', { filter: 'all' }]} className="glass-stat p-3 sm:p-4" title="Show every lead"><div className="text-xs sm:text-sm text-glass-secondary truncate">{seg === 'charter' ? 'Enquiries' : 'Total'}<span className="hidden sm:inline">{seg === 'charter' ? '' : ' Leads'}</span></div><div className="text-xl sm:text-2xl font-bold text-glass-primary">{segmentLeads.length}</div></LinkTile>
               <LinkTile to={['leads', '', { filter: 'pending' }]} className="glass-stat p-3 sm:p-4" title="Show leads nobody has contacted yet"><div className="text-xs sm:text-sm text-glass-secondary truncate">Untouched</div><div className="text-xl sm:text-2xl font-bold text-orange-600">{untouched(segmentLeads)}</div></LinkTile>
-              <button type="button" className="tile-link glass-stat p-3 sm:p-4 text-left min-w-0" title="Show the follow-ups due"
+              <button type="button" className="tile-link glass-stat p-3 sm:p-4 text-left min-w-0" title="Show today's calls and demos"
                 onClick={() => document.getElementById('lead-followups')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>
-                <div className="text-xs sm:text-sm text-glass-secondary truncate"><span className="hidden sm:inline">Pending </span>Follow-ups</div><div className="text-xl sm:text-2xl font-bold text-blue-600">{segmentFollowups.length}</div>
+                <div className="text-xs sm:text-sm text-glass-secondary truncate">Today<span className="hidden sm:inline">'s calls & demos</span></div><div className="text-xl sm:text-2xl font-bold text-blue-600">{todayCount}</div>
               </button>
             </div>
-            {segmentFollowups.length > 0 && (
-              <div id="lead-followups" className="glass-card p-4 mb-4" style={{ background: 'rgba(255,149,0,0.10)', borderColor: 'rgba(255,204,0,0.45)' }}>
-                <h3 className="font-semibold mb-2 text-glass-primary inline-flex items-center gap-2"><Icon name="clock" size={16} />Follow-ups due</h3>
-                <div className="space-y-2">
-                  {segmentFollowups.slice(0, 3).map(f => (
-                    <div key={f.id} className="flex justify-between items-center text-sm">
-                      <span className="text-glass-primary"><span className="font-semibold">{f.lead_name}</span> - {f.reason}</span>
-                      <button onClick={() => { const lead = leads.find(l => l.id === f.lead_id); if (lead) setSelectedLead(lead); }} className="text-indigo-600 hover:underline font-medium">Contact</button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            <TodayCard leads={leads} segment={seg} refreshKey={leads} onCount={setTodayCount}
+              onOpenLead={(l) => openLead(l, segmentLeads)} onOpenAds={(id) => { setSegment('meta'); setParams({ adlead: id }); }} />
             <div className="glass-card p-4">
               <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
                 <h2 className="text-lg font-semibold text-glass-primary">{seg === 'charter' ? 'Book My Charter Leads' : 'We One Aviation Leads'}</h2>
@@ -508,7 +499,7 @@ export default function App() {
                   <button onClick={syncNow} className="glass-btn px-4 py-2 inline-flex items-center justify-center gap-1.5 min-h-[40px] flex-1 sm:flex-none"><Icon name="refresh" size={16} />Sync</button>
                 </div>
               </div>
-              <LeadList leads={segmentLeads} segment={seg} onSelectLead={setSelectedLead} />
+              <LeadList leads={segmentLeads} segment={seg} onSelectLead={openLead} />
             </div>
             </>}
           </>
@@ -545,7 +536,12 @@ export default function App() {
       </div>
 
       <Suspense fallback={null}>
-        {selectedLead && <LeadDetail lead={selectedLead} onClose={() => setSelectedLead(null)} onContact={handleContact} />}
+        {selectedLead && (() => {
+          const i = leadQueue.findIndex((l) => l.id === selectedLead.id);
+          const fresh = leads.find((l) => l.id === selectedLead.id) || selectedLead;
+          return <LeadDetail key={selectedLead.id} lead={fresh} onClose={() => setSelectedLead(null)} onContact={handleContact} onRefresh={syncNow}
+            nextLead={i >= 0 ? leadQueue[i + 1] || null : null} onOpenLead={(l) => setSelectedLead(l)} />;
+        })()}
         {showOutbox && <Outbox onClose={() => setShowOutbox(false)} />}
         {showAddQuery && <AddQuery segment={segment} requiredQualification={config.eligibility_required_qualification || '12th with Physics & Maths'} onClose={() => setShowAddQuery(false)} onCreated={() => { setShowAddQuery(false); syncNow(); }} onOpenExisting={(leadId) => { setShowAddQuery(false); const existing = leads.find(l => l.id === leadId); if (existing) setSelectedLead(existing); }} />}
       </Suspense>

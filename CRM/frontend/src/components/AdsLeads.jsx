@@ -8,6 +8,8 @@ import { promptDialog } from './ui/dialogs';
 import Icon from './icons';
 import QuickActions, { CloseButton } from './ui/QuickActions';
 import { displayPhone, formatPhone } from '../utils/formatters';
+import { useRoute, setParams } from '../utils/route';
+import { LeadPlannerPanel, historyOf } from './leads/LeadPlanner';
 
 const PIPES = [['pilot_training', 'Pilot Training'], ['charter', 'Charter']];
 const STAGE_TONE = {
@@ -62,6 +64,9 @@ export default function AdsLeads({ access, platform, inLeads }) {
   const [err, setErr] = useState('');
   const [staff, setStaff] = useState([]);
   const [open, setOpen] = useState(null);
+  // the Today card on the Leads page opens a Meta / Google lead here (#/leads?adlead=<id>)
+  const route = useRoute();
+  useEffect(() => { if (route.params.adlead) { setOpen(route.params.adlead); setParams({ adlead: undefined }); } }, [route.params.adlead]);
   const [, tick] = useState(0);
 
   const load = useCallback(async () => {
@@ -180,6 +185,7 @@ function LeadPanel({ id, pipe, stages, staff, canEdit, isAdmin, onClose, onChang
   const [err, setErr] = useState('');
   const [qualify, setQualify] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [ws, setWs] = useState(null);                     // student details, next call, demos, notes (migration 147)
   const load = useCallback(async () => {
     try { setL(await rpc('api_ads_lead', { p_lead: id })); setErr(''); } catch (e) { setErr(e.message); }
   }, [id]);
@@ -228,9 +234,10 @@ function LeadPanel({ id, pipe, stages, staff, canEdit, isAdmin, onClose, onChang
     }
     for (const a of l.assignments || []) t.push({ at: a.at, k: 'assign', text: `Assigned to ${a.to_employee ? name(a.to_employee) : 'nobody'}`, sub: [name(a.by_employee), a.reason].filter(Boolean).join(' · ') });
     for (const c of l.contacts || []) t.push({ at: c.at, k: 'call', text: `${c.channel === 'phone' ? 'Call' : c.channel}: ${(CONTACT.find(([k]) => k === c.outcome) || [, c.outcome])[1]}`, sub: [name(c.employee_id), c.note].filter(Boolean).join(' · ') });
+    for (const e of historyOf(ws)) t.push(e);
     return t.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [l, stages, staff]);
+  }, [l, stages, staff, ws]);
 
   const ft = l?.first_touch || {};
   return (
@@ -310,6 +317,8 @@ function LeadPanel({ id, pipe, stages, staff, canEdit, isAdmin, onClose, onChang
             <Btn ghost disabled={busy} onClick={() => quarantine(!l.quarantined)}>{l.quarantined ? 'Release from quarantine' : 'Quarantine'}</Btn>
           </div>}
           {l.quarantined && <div className="text-xs" style={{ color: '#8A5A00' }}>Reasons: {(l.quarantine_reasons || []).join(', ')}</div>}
+
+          {pipe !== 'charter' && <LeadPlannerPanel kind="ads" id={id} canEdit={canEdit && !l.quarantined} onLoaded={setWs} />}
 
           <div>
             <div className="text-sm font-semibold text-glass-primary mb-1">History</div>
