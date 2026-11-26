@@ -1,0 +1,82 @@
+/* Google > Website: website cards, comparison, add/edit sheet. Builds on leads.css (chips, buttons, sheet, steps). */
+.ws-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 310px), 1fr)); }
+.ws-card { position: relative; padding: 18px; display: flex; flex-direction: column; min-width: 0; cursor: pointer;
+  border-top: 3px solid var(--site, #0A63CE); transition: transform .25s cubic-bezier(.28,1.3,.5,1), box-shadow .2s; }
+.ws-card:focus-visible { outline: 2px solid var(--accent, #007AFF); outline-offset: 2px; }
+.ws-card-setup { border-style: dashed; border-top-style: solid; }
+.ws-skel { min-height: 250px; background: linear-gradient(90deg, rgba(118,118,128,0.06), rgba(118,118,128,0.12), rgba(118,118,128,0.06)); background-size: 200% 100%; animation: wsShimmer 1.2s linear infinite; }
+@keyframes wsShimmer { to { background-position: -200% 0; } }
+.ws-mark { border-radius: 12px; display: inline-grid; place-items: center; flex-shrink: 0; overflow: hidden; }
+.ws-mark img { display: block; }
+.ws-pill { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; flex-shrink: 0; }
+.ws-k { font-size: 12px; color: var(--label-2, #6e6e73); line-height: 1.2; }
+.ws-v { font-size: 21px; font-weight: 650; color: var(--text-primary, #1c1c1e); line-height: 1.25; font-variant-numeric: tabular-nums; }
+.ws-delta { display: block; font-size: 12px; font-weight: 600; min-height: 16px; }
+.ws-iconbtn { width: 34px; height: 34px; border-radius: 999px; display: grid; place-items: center; color: var(--label-2, #6e6e73); background: transparent; border: 0; cursor: pointer; }
+.ws-iconbtn:hover { background: rgba(118,118,128,0.12); color: var(--text-primary, #1c1c1e); }
+.ws-menu { position: absolute; right: 0; top: 38px; z-index: 30; min-width: 180px; padding: 6px; border-radius: 14px; background: rgba(255,255,255,0.98);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.16), inset 0 0 0 0.5px rgba(0,0,0,0.08); display: flex; flex-direction: column; }
+.ws-menu button, .ws-menu a { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 10px; border-radius: 9px; font-size: 14px; color: #1c1c1e;
+  background: none; border: 0; text-align: left; cursor: pointer; text-decoration: none; }
+.ws-menu button:hover, .ws-menu a:hover { background: rgba(118,118,128,0.1); }
+.ws-menu button:disabled { opacity: .45; cursor: default; }
+.ws-menu .ws-danger { color: #C4261D; }
+.ws-tip { margin-top: 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 44px; padding: 10px 12px;
+  border-radius: 12px; border: 0; text-align: left; font-size: 13.5px; font-weight: 500; line-height: 1.35; cursor: pointer; }
+.ws-tip:disabled { cursor: default; }
+.ws-tip-good { background: rgba(30,123,52,0.08); color: #17622A; }
+.ws-tip-warn { background: rgba(178,106,0,0.10); color: #7A4A00; }
+.ws-tip-bad { background: rgba(192,39,29,0.08); color: #A42219; }
+.ws-tip-info { background: rgba(10,99,206,0.08); color: #0A57B5; }
+.ws-tip-muted { background: rgba(118,118,128,0.08); color: #48484A; }
+.ws-tip:hover:not(:disabled) { filter: brightness(0.97); }
+.ws-src { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; background: rgba(118,118,128,0.1); color: #8e8e93; }
+.ws-src.on { background: rgba(30,123,52,0.09); color: #1E7B34; }
+.ws-dot { width: 9px; height: 9px; border-radius: 999px; display: inline-block; flex-shrink: 0; }
+.ws-add { min-height: 250px; border-radius: 20px; border: 2px dashed rgba(60,60,67,0.22); background: rgba(255,255,255,0.45); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 6px; padding: 20px; text-align: center; cursor: pointer; transition: border-color .15s, background-color .15s, transform .2s cubic-bezier(.28,1.3,.5,1); }
+.ws-add:hover { border-color: #007AFF; background: rgba(0,122,255,0.05); }
+.ws-add:active { transform: scale(0.98); }
+.ws-add-plus { width: 48px; height: 48px; border-radius: 999px; display: grid; place-items: center; background: #007AFF; color: #fff; box-shadow: 0 8px 20px rgba(0,122,255,0.3); margin-bottom: 4px; }
+.ws-totals { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); }
+.ws-total { padding: 14px 16px; border-radius: 16px; background: rgba(255,255,255,0.7); box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.07); min-width: 0; }
+.ws-share { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 10px; border-radius: 999px; font-size: 13px; border: 0; cursor: pointer;
+  background: rgba(118,118,128,0.1); color: #1c1c1e; }
+.ws-share b { font-weight: 700; color: #48484A; }
+.ws-share:hover { background: rgba(0,122,255,0.1); }
+
+/* sheet */
+@media (min-width: 640px) { .ws-sheet { max-width: 640px; } }
+.ws-sheet-foot { display: flex; justify-content: space-between; gap: 10px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 0.5px solid rgba(60,60,67,0.18); background: rgba(242,242,247,0.9); }
+@media (min-width: 640px) { .ws-sheet-foot { padding: 14px 24px 18px; border-radius: 0 0 28px 28px; } }
+.ws-sheet-foot .lp-btn { min-width: 120px; }
+.ws-url { display: flex; align-items: center; gap: 2px; min-height: 46px; padding: 0 12px; border-radius: 12px; background: #fff; box-shadow: inset 0 0 0 1px rgba(60,60,67,0.18); font-size: 15px; }
+.ws-url:focus-within { box-shadow: inset 0 0 0 2px #007AFF; }
+.ws-url input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font-size: 16px; padding: 10px 0; }
+.ws-swatch { width: 34px; height: 34px; border-radius: 999px; border: 3px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.12); cursor: pointer; transition: transform .2s cubic-bezier(.28,1.4,.5,1); }
+.ws-swatch.on { box-shadow: 0 0 0 2px #1c1c1e; transform: scale(1.08); }
+.ws-choice { width: 100%; padding: 11px 12px; gap: 2px; border-radius: 14px; }
+.ws-choice.lp-choice-on { border-color: #007AFF; background: rgba(0,122,255,0.07); }
+.ws-radio { width: 16px; height: 16px; border-radius: 999px; box-shadow: inset 0 0 0 1.5px rgba(60,60,67,0.35); flex-shrink: 0; }
+.ws-radio.on { box-shadow: inset 0 0 0 5px #007AFF; }
+.ws-loading { display: flex; align-items: center; gap: 10px; font-size: 14px; color: #6e6e73; padding: 18px 0; }
+.ws-spin { width: 18px; height: 18px; border-radius: 999px; border: 2.5px solid rgba(0,122,255,0.2); border-top-color: #007AFF; animation: wsSpin .8s linear infinite; }
+@keyframes wsSpin { to { transform: rotate(360deg); } }
+.ws-help { padding: 14px; border-radius: 16px; background: rgba(255,149,0,0.08); box-shadow: inset 0 0 0 0.5px rgba(178,106,0,0.25); margin-top: 8px; }
+.ws-howto { margin: 0; padding: 10px 12px 10px 28px; border-radius: 12px; background: rgba(255,255,255,0.8); font-size: 13px; line-height: 1.45; color: #3c3c43; }
+.ws-howto li:first-child { list-style: none; margin-left: -16px; margin-bottom: 4px; color: #1c1c1e; }
+.ws-howto a { color: #007AFF; }
+.ws-more > summary { list-style: none; cursor: pointer; display: inline-block; }
+.ws-more > summary::-webkit-details-marker { display: none; }
+.ws-check { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border-radius: 14px; background: rgba(255,255,255,0.85); box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.07); }
+.ws-check-ico { width: 26px; height: 26px; border-radius: 999px; display: grid; place-items: center; flex-shrink: 0; color: #fff; background: #c7c7cc; }
+.ws-check-ico.ok { background: #34C759; }
+.ws-check-ico.bad { background: #FF9500; }
+
+/* website detail: switcher */
+.ws-switch { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; padding-bottom: 2px; }
+.ws-switch::-webkit-scrollbar { display: none; }
+.ws-switch button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 12px; border-radius: 999px; font-size: 13px; white-space: nowrap;
+  border: 0; cursor: pointer; background: var(--surface-sunken, rgba(118,118,128,0.1)); color: var(--label-2, #6e6e73); }
+.ws-switch button[aria-current='page'] { background: #1c1c1e; color: #fff; font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .ws-card, .ws-add, .ws-swatch, .ws-skel, .ws-spin { animation: none; transition: none; } }

@@ -15,7 +15,7 @@ const daysSince = (d) => (d ? Math.floor((Date.now() - new Date(`${d}T00:00:00Z`
 
 let cache = null;
 
-export const GOOGLE_PAGES = [['website', 'Website', 'chart'], ['gbp', 'Google My Business', 'pin'], ['ads', 'Google Ads', 'rocket']];
+export const GOOGLE_PAGES = [['website', 'Websites', 'chart'], ['gbp', 'Google My Business', 'pin'], ['ads', 'Google Ads', 'rocket']];
 
 // The strip above Website / Google My Business / Google Ads: back to Google, or straight across to a sibling.
 export function GoogleCrumb({ page, canAds = true }) {
@@ -96,9 +96,9 @@ export default function Google({ canAds = true }) {
       </div>
       {err && !h && <div role="alert" className="glass-card p-5 text-sm">{err}</div>}
       <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))' }}>
-        <HubCard id="website" icon="chart" title="Website" tag={w ? (w.clicks != null ? 'Connected' : 'No data yet') : null} tagTone={w?.clicks != null ? 'good' : 'muted'}
+        <HubCard id="website" icon="chart" title="Websites" tag={w ? (w.clicks != null ? 'Connected' : 'No data yet') : null} tagTone={w?.clicks != null ? 'good' : 'muted'}
           stats={[{ label: 'Clicks from Google', value: fmt(w?.clicks), cur: w?.clicks, prev: w?.clicks_prev }, { label: 'Seen on Google', value: short(w?.impressions) }, { label: 'Visitors', value: fmt(w?.visitors) }]}
-          note="Search Console and Google Analytics" />
+          note={w?.sites ? `${w.sites} websites · Search Console and GA4` : 'All your websites · Search Console and GA4'} />
         <HubCard id="gbp" icon="pin" title="Google My Business" tag={gbpTag?.[0]} tagTone={gbpTag?.[1]}
           stats={g?.last_day ? [{ label: 'Profile views', value: short(gt?.views), cur: gt?.views, prev: gp?.days ? gp?.views : null }, { label: 'Calls', value: fmt(gt?.calls), cur: gt?.calls, prev: gp?.days ? gp?.calls : null },
             { label: 'Rating', value: g.rating != null ? `${Number(g.rating).toFixed(1)} ★` : '—' }] : null}

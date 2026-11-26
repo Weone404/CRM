@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from '../backend/supabaseClient';
 import { showToast } from '../utils/toast';
 import { navigate, useRoute } from '../utils/route';
 import Icon from './icons';
 import { Trend, TrendLegend, Spark, Columns, Share, HBars, OpportunityMap, Vital } from './website/charts';
+import SitesHome, { rpc, edge, collect, useSites, SiteSheet, SiteMark, hostOf } from './website/Sites';
 
-// Growth > Website: weoneaviation.in in one calm screen. Numbers come from Search Console, GA4, PageSpeed Insights,
+// Google > Website: #/website shows a card per website (website/Sites.jsx); #/website/<tab>?site=<id> opens one website in
+// one calm screen (no site = the main website, so old links still work). Numbers come from Search Console, GA4, PageSpeed Insights,
 // URL Inspection and a scan of the site itself (crm-website Edge Function, nightly and on Refresh). Each number says
 // where it came from; nothing is estimated. Deep details stay folded until opened.
 
@@ -20,24 +21,8 @@ const ago = (t) => {
 const path = (u) => { try { const x = new URL(u); return `${x.pathname}${x.search}` || '/'; } catch { return u; } };
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-async function rpc(fn, args) {
-  const { data, error } = await supabase.rpc(fn, args);
-  if (error) throw new Error(error.message);
-  return data;
-}
-async function edge(jobs) {
-  const { data } = await supabase.auth.getSession();
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/crm-website`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_PUBLISHABLE_KEY, Authorization: `Bearer ${data.session?.access_token || ''}` },
-    body: JSON.stringify({ jobs }),
-  });
-  const out = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(out.detail || (res.status === 404 ? 'The website data service is not deployed yet' : `Request failed (${res.status})`));
-  return out;
-}
-
-let cache = null;   // last overview: reopening the section is instant, then it refreshes quietly
-let tcache = null;  // last chart data, same idea
+const cache = new Map();   // last overview per website: reopening is instant, then it refreshes quietly
+const tcache = new Map();  // last chart data per website, same idea
 
 // ---------------------------------------------------------------- small pieces
 function Card({ title, value, note, tone, hint, onClick, dashed, spark, selected }) {
@@ -158,7 +143,7 @@ function Overview({ o, t, live, go }) {
         <Card title="Average position" value={s.cur?.position ?? '—'} {...pos} hint="Weighted by how often each result was seen; lower is better. Click to chart it." onClick={() => setMetric('position')} selected={metric === 'position'}
           spark={<Spark values={(g.cur || []).map((r) => r.position)} invert />} />
         <Card title="Visitors" value={gaReady ? fmt(v.cur?.users) : '—'} {...(gaReady ? users : { note: o.configured?.ga4 ? 'GA4 has no visits yet: fix' : 'Connect GA4: fix', tone: 'bad' })}
-          dashed={!gaReady} onClick={gaReady ? undefined : () => navigate('connections')} hint="GA4 active users" spark={gaReady ? <Spark values={(ga.cur || []).map((r) => r.users)} /> : null} />
+          dashed={!gaReady} onClick={gaReady ? undefined : () => go('edit')} hint="GA4 active users" spark={gaReady ? <Spark values={(ga.cur || []).map((r) => r.users)} /> : null} />
         <Card title="On the site now" value={live?.total ? fmt(live.total[0]?.users ?? 0) : '—'} note={live?.page?.[0] ? `Most on ${live.page[0].k}` : (gaReady ? 'Last 30 minutes' : 'Needs GA4')} tone="muted" />
       </div>
 
@@ -264,16 +249,16 @@ function Overview({ o, t, live, go }) {
 
 const FILTERS = [['all', 'All'], ['almost', 'Almost page 1'], ['low_ctr', 'Seen, not clicked'], ['dropping', 'Dropping'], ['new', 'New'],
   ['questions', 'Questions & costs'], ['nonbrand', 'Non-brand'], ['brand', 'Brand'], ['cannibal', 'Two pages competing']];
-function Searches({ initialFilter, initialQ }) {
+function Searches({ initialFilter, initialQ, siteId }) {
   const [filter, setFilter] = useState(initialFilter || 'all');
   const [q, setQ] = useState(initialQ || '');
   const [data, setData] = useState(null);
   const [openRow, setOpenRow] = useState('');
   useEffect(() => {
     let live = true;
-    const t = setTimeout(() => rpc('api_web_queries', { p_filter: filter, p_q: q.trim() || null, p_limit: 300 }).then((d) => { if (live) setData(d); }).catch((e) => showToast(e.message, 'error')), q ? 250 : 0);
+    const t = setTimeout(() => rpc('api_web_queries', { p_filter: filter, p_q: q.trim() || null, p_limit: 300, p_site: siteId }).then((d) => { if (live) setData(d); }).catch((e) => showToast(e.message, 'error')), q ? 250 : 0);
     return () => { live = false; clearTimeout(t); };
-  }, [filter, q]);
+  }, [filter, q, siteId]);
   return (
     <section className="glass-card p-5 flex flex-col gap-3">
       <div className="flex flex-wrap gap-2" role="group" aria-label="Filter searches">
@@ -324,7 +309,7 @@ function FragmentRow({ r, open, onToggle }) {
   </>);
 }
 
-function Ai({ o, canRun, reload }) {
+function Ai({ o, canRun, reload, siteId }) {
   const ai = o.ai || {}, bots = ai.robots?.bots || {};
   const [busy, setBusy] = useState(false);
   const upload = async (file) => {
@@ -334,7 +319,7 @@ function Ai({ o, canRun, reload }) {
       const { copilotRows } = await import('../utils/csv');
       const parsed = copilotRows(await file.text());
       if (!parsed.rows.length) throw new Error('No rows found. Use the CSV exported from Bing Webmaster Tools > AI Performance.');
-      const r = await rpc('api_web_copilot_upload', { p_kind: parsed.kind, p_rows: parsed.rows });
+      const r = await rpc('api_web_copilot_upload', { p_kind: parsed.kind, p_rows: parsed.rows, p_site: siteId });
       showToast(`${fmt(r.saved)} ${parsed.kind === 'page' ? 'pages' : 'grounding queries'} saved`, 'success'); reload();
     } catch (e) { showToast(e.message, 'error'); } finally { setBusy(false); }
   };
@@ -455,7 +440,11 @@ function Health({ o }) {
 
 function Leads({ o }) {
   const l = o.leads;
-  if (!l) return <section className="glass-card p-5 text-sm text-glass-secondary">Leads are not available here.</section>;
+  if (!l) return (
+    <section className="glass-card p-5 text-sm text-glass-secondary">
+      <h2 className="m-0 mb-1 text-base font-semibold text-glass-primary">No enquiry form linked yet</h2>
+      Leads show here when this website's enquiry form sends enquiries to the CRM. Then add the form's source name under Edit website › More options › Lead source names.
+    </section>);
   const c = change(l.cur, l.prev);
   return (
     <div className="flex flex-col gap-5">
@@ -473,106 +462,99 @@ function Leads({ o }) {
   );
 }
 
-function Settings({ reload }) {
-  const [st, setSt] = useState(null);
-  const [site, setSite] = useState(''); const [pages, setPages] = useState(''); const [key, setKey] = useState('');
-  useEffect(() => { rpc('api_web_settings').then((s) => { setSt(s); setSite(s.site_url || ''); setPages(s.key_pages || ''); }).catch(() => {}); }, []);
-  if (!st) return null;
-  const save = async (psi) => {
-    try { await rpc('api_web_settings_save', { p_site_url: site, p_key_pages: pages, p_psi_key: psi }); setKey(''); showToast('Saved', 'success'); reload(); setSt(await rpc('api_web_settings')); }
-    catch (e) { showToast(e.message, 'error'); }
-  };
-  return (
-    <Fold title="Website settings" hint="site, key pages, PageSpeed key" id="settings">
-      <div className="flex flex-col gap-3 max-w-xl py-2">
-        <label className="text-[13px] text-glass-secondary flex flex-col gap-1">Site address<input className="glass-input min-h-[38px] px-3 text-sm" value={site} onChange={(e) => setSite(e.target.value)} /></label>
-        <label className="text-[13px] text-glass-secondary flex flex-col gap-1">Key pages for speed and indexing checks (one path per line; empty = home + top 5 from Google)
-          <textarea className="glass-input px-3 py-2 text-sm font-mono" rows={4} value={pages} onChange={(e) => setPages(e.target.value)} placeholder={'/cpl-course\n/ppl-course'} /></label>
-        <label className="text-[13px] text-glass-secondary flex flex-col gap-1">PageSpeed Insights API key (optional, free; raises the daily limit) · {st.psi_key?.set ? `saved •••• ${st.psi_key.last4}` : 'not saved'}
-          <input type="password" autoComplete="off" className="glass-input min-h-[38px] px-3 text-sm" value={key} onChange={(e) => setKey(e.target.value)} placeholder="AIza…" /></label>
-        <div className="flex gap-2">
-          <button type="button" className="glass-btn min-h-[38px] px-4 text-sm" onClick={() => save(key.trim() ? key.trim() : null)}>Save</button>
-          {st.psi_key?.set && <button type="button" className="glass-btn-ghost min-h-[38px] px-3 text-sm" onClick={() => save('')}>Remove key</button>}
-        </div>
-        <p className="m-0 text-[12px] text-glass-secondary">Search Console site, GA4 property and the Google sign-in are in Connections &amp; keys.</p>
-      </div>
-    </Fold>
-  );
-}
-
 // ---------------------------------------------------------------- page
-const TABS = [['overview', 'Overview'], ['searches', 'Google searches'], ['ai', 'AI visibility'], ['health', 'Speed & health'], ['leads', 'Leads from website']];
+const TABS = [['overview', 'Overview'], ['searches', 'Google searches'], ['ai', 'AI visibility'], ['health', 'Speed & health'], ['leads', 'Leads']];
+
+// #/website = all websites; #/website/<tab>?site=<id> = one website (an old link without a site opens the main website).
 export default function Website() {
   const route = useRoute();
+  const one = Boolean(route.params.site) || TABS.some(([k]) => k === route.section);
+  return one ? <SiteDetail key={route.params.site || 'main'} siteId={route.params.site || null} route={route} /> : <SitesHome />;
+}
+
+function SiteDetail({ siteId, route }) {
+  const key = siteId || 'main';
   const tab = TABS.some(([k]) => k === route.section) ? route.section : 'overview';
-  const [o, setO] = useState(cache);
-  const [t, setT] = useState(tcache);
+  const { d: list, load: loadList } = useSites();
+  const [o, setO] = useState(cache.get(key) || null);
+  const [t, setT] = useState(tcache.get(key) || null);
   const [err, setErr] = useState('');
   const [access, setAccess] = useState(null);
   const [live, setLive] = useState(null);
   const [running, setRunning] = useState('');
+  const [editing, setEditing] = useState(false);
   const load = useCallback(async () => {
-    rpc('api_web_trend').then((d) => { tcache = d; setT(d); }).catch(() => {});   // charts are extra: the page works without them
-    try { const d = await rpc('api_web_overview'); cache = d; setO(d); setErr(''); } catch (e) { setErr(e.message); }
-  }, []);
+    rpc('api_web_trend', { p_site: siteId }).then((d) => { tcache.set(key, d); setT(d); }).catch(() => {});   // charts are extra: the page works without them
+    try { const d = await rpc('api_web_overview', { p_site: siteId }); cache.set(key, d); setO(d); setErr(''); } catch (e) { setErr(e.message); }
+  }, [siteId, key]);
   useEffect(() => { load(); rpc('api_web_access').then(setAccess).catch(() => {}); }, [load]);
   // On the site now: GA4 realtime, every minute while this screen is visible.
   useEffect(() => {
     if (!o?.configured?.ga4) return undefined;
     let stop = false;
-    const tick = () => { if (document.visibilityState === 'visible') edge(['live']).then((r) => { if (!stop) setLive(r.live); }).catch(() => {}); };
-    tick(); const t = setInterval(tick, 60000);
-    return () => { stop = true; clearInterval(t); };
-  }, [o?.configured?.ga4]);
-  const go = (t, q, filter) => {
-    if (t === 'connections') { navigate('connections'); return; }
-    if (t === 'speed') t = 'health';
-    navigate('website', t, { ...(q ? { q } : {}), ...(filter ? { f: filter } : {}) });
+    const tick = () => { if (document.visibilityState === 'visible') edge({ jobs: ['live'], site: o.site_id }).then((r) => { if (!stop) setLive(r.live); }).catch(() => {}); };
+    tick(); const iv = setInterval(tick, 60000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [o?.configured?.ga4, o?.site_id]);
+  const go = (to, q, filter) => {
+    if (to === 'connections' || to === 'edit') { if (access?.is_admin && me) setEditing(true); else navigate('connections'); return; }
+    if (to === 'speed') to = 'health';
+    navigate('website', to, { site: siteId || undefined, ...(q ? { q } : {}), ...(filter ? { f: filter } : {}) });
   };
   const refresh = async () => {
-    const steps = [[['search', 'visitors'], 'Google Search and visitors'], [['scan'], 'Site check'], [['speed', 'index'], 'Speed and indexing']];
-    const problems = [];
-    for (const [jobs, label] of steps) {
-      setRunning(label);
-      try {
-        const r = await edge(jobs);
-        Object.values(r.results || {}).forEach((x) => { if (x.status !== 'ok') problems.push(x.detail); });
-        await load();
-      } catch (e) { problems.push(`${label}: ${e.message}`); }
-    }
+    const problems = await collect(o?.site_id || siteId, (label) => setRunning(label));
+    await load(); loadList();
     setRunning('');
     if (problems.length) showToast(problems[0], 'error'); else showToast('Website data is up to date', 'success');
   };
   const lastRun = o ? Object.values(o.runs || {}).map((r) => r.at).sort().pop() : null;
+  const sites = list?.sites || [];
+  const me = sites.find((x) => x.id === (o?.site_id || siteId)) || (o ? { id: o.site_id, name: o.site_name, url: o.site, color: '#0A63CE' } : null);
+  const ga = Number(o?.visitors?.cur?.days || 0);
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" data-testid="site-detail">
+      <nav className="flex items-center gap-2 min-w-0" aria-label="Websites">
+        <button type="button" onClick={() => navigate('website')} className="inline-flex items-center gap-1 min-h-[34px] pr-1 text-[13px] font-medium text-[var(--accent)] shrink-0"><Icon name="chevronLeft" size={15} />All websites</button>
+        {sites.length > 1 && <div className="ws-switch min-w-0" role="list">{sites.filter((x) => x.url).map((x) => (
+          <button key={x.id} type="button" role="listitem" aria-current={x.id === me?.id ? 'page' : undefined} onClick={() => navigate('website', tab === 'overview' ? '' : tab, { site: x.id })}>
+            <span className="ws-dot" style={{ background: x.color }} />{x.name}</button>))}</div>}
+      </nav>
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="m-0 text-[26px] font-semibold tracking-tight text-glass-primary">Website</h1>
-          <p className="m-0 text-sm text-glass-secondary">{o?.site ? new URL(o.site).host : 'weoneaviation.in'} · last 28 days vs the 28 before · updated {ago(lastRun)}</p>
+        <div className="flex items-center gap-3 min-w-0">
+          {me && <SiteMark s={me} size={44} />}
+          <div className="min-w-0">
+            <h1 className="m-0 text-[24px] sm:text-[26px] font-semibold tracking-tight text-glass-primary truncate">{o?.site_name || me?.name || 'Website'}</h1>
+            <p className="m-0 text-sm text-glass-secondary">{o?.site ? <a href={o.site} target="_blank" rel="noreferrer noopener" className="text-glass-secondary hover:underline">{hostOf(o.site)}</a> : '—'} · last 28 days vs the 28 before · updated {ago(lastRun)}</p>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-[12px]">
-          {o && <span className="px-2.5 py-1 rounded-full" style={o.configured?.gsc ? { background: 'rgba(30,123,52,0.10)', color: '#1E7B34' } : { background: 'rgba(178,106,0,0.12)', color: '#8A5300' }}>Search Console {o.configured?.gsc ? 'connected' : 'not set'}</span>}
-          {o && <span className="px-2.5 py-1 rounded-full" style={Number(o.visitors?.cur?.days || 0) ? { background: 'rgba(30,123,52,0.10)', color: '#1E7B34' } : { background: 'rgba(178,106,0,0.12)', color: '#8A5300' }}>GA4 {Number(o.visitors?.cur?.days || 0) ? 'connected' : 'no data'}</span>}
+          {o && <span className="px-2.5 py-1 rounded-full" style={o.configured?.gsc ? { background: 'rgba(30,123,52,0.10)', color: '#1E7B34' } : { background: 'rgba(178,106,0,0.12)', color: '#8A5300' }}>Search Console {o.configured?.gsc ? 'connected' : 'not connected'}</span>}
+          {o && <span className="px-2.5 py-1 rounded-full" style={ga ? { background: 'rgba(30,123,52,0.10)', color: '#1E7B34' } : { background: 'rgba(178,106,0,0.12)', color: '#8A5300' }}>GA4 {ga ? 'connected' : o.configured?.ga4 ? 'no data' : 'not connected'}</span>}
+          {access?.is_admin && me && <button type="button" onClick={() => setEditing(true)} className="glass-btn-ghost min-h-[36px] px-3 text-[13px] inline-flex items-center gap-1.5"><Icon name="settings" size={14} />Edit website</button>}
           {access?.can_run && <button type="button" disabled={!!running} onClick={refresh} className="glass-btn min-h-[36px] px-3.5 text-[13px] inline-flex items-center gap-1.5"><Icon name="refresh" size={14} />{running ? `${running}…` : 'Refresh'}</button>}
         </div>
       </div>
-      <div role="tablist" aria-label="Website sections" className="flex flex-wrap gap-1 border-b border-[var(--hairline)]">
+      <div role="tablist" aria-label="Website sections" className="flex gap-1 border-b border-[var(--hairline)] overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
         {TABS.map(([k, l]) => (
-          <button key={k} role="tab" aria-selected={tab === k} type="button" onClick={() => navigate('website', k === 'overview' ? '' : k)}
-            className={`min-h-[42px] px-3.5 -mb-px border-b-2 text-sm ${tab === k ? 'border-[var(--accent)] text-[var(--accent)] font-semibold' : 'border-transparent text-glass-secondary'}`}>{l}</button>
+          <button key={k} role="tab" aria-selected={tab === k} type="button" onClick={() => navigate('website', k === 'overview' ? '' : k, { site: siteId || undefined })}
+            className={`min-h-[42px] px-3.5 -mb-px border-b-2 text-sm whitespace-nowrap ${tab === k ? 'border-[var(--accent)] text-[var(--accent)] font-semibold' : 'border-transparent text-glass-secondary'}`}>{l}</button>
         ))}
       </div>
       {err && !o && <div role="alert" className="glass-card p-5 text-sm">{err} <button type="button" className="text-[var(--accent)] font-medium ml-2" onClick={load}>Try again</button></div>}
       {!o && !err && <div className="glass-card p-5 text-sm text-glass-secondary">Loading…</div>}
+      {o && !o.configured?.gsc && !o.configured?.ga4 && tab === 'overview' && (
+        <div className="glass-card p-4 text-sm flex flex-wrap items-center justify-between gap-3" style={{ background: 'rgba(255,149,0,0.08)' }}>
+          <span className="min-w-0">Search Console and GA4 are not connected for this website yet, so only the site check and speed are shown.</span>
+          {access?.is_admin && <button type="button" className="lp-btn lp-btn-sm lp-btn-primary" onClick={() => setEditing(true)}>Connect Google</button>}
+        </div>)}
       {o && tab === 'overview' && <Overview o={o} t={t} live={live} go={go} />}
-      {o && tab === 'searches' && <Searches key={`${route.params.f || ''}|${route.params.q || ''}`} initialFilter={route.params.f} initialQ={route.params.q} />}
-      {o && tab === 'ai' && <Ai o={o} canRun={access?.can_run} reload={load} />}
+      {o && tab === 'searches' && <Searches key={`${route.params.f || ''}|${route.params.q || ''}`} siteId={siteId} initialFilter={route.params.f} initialQ={route.params.q} />}
+      {o && tab === 'ai' && <Ai o={o} canRun={access?.can_run} reload={load} siteId={siteId} />}
       {o && tab === 'health' && <Health o={o} />}
       {o && tab === 'leads' && <Leads o={o} />}
-      {o && access?.is_admin && <Settings reload={load} />}
       <p className="m-0 text-xs text-glass-secondary">Sources: Google Search Console, Google Analytics 4, PageSpeed Insights (Chrome UX Report + Lighthouse), Search Console URL Inspection, Bing Webmaster Tools export, and a direct check of the site.</p>
+      {editing && me && <SiteSheet site={me} info={list} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); showToast('Saved', 'success'); load(); loadList(); }} />}
     </div>
   );
 }
