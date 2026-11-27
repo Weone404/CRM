@@ -1,0 +1,18 @@
+# Cloudflare Worker in front of the CRM's WhatsApp webhook. Free plan: 100,000 requests and 100,000 D1 row writes a day.
+# Deploy steps: docs/WHATSAPP_MODULE.md ("Cloudflare gateway").
+name = "weone-wa-gateway"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+
+[triggers]
+crons = ["* * * * *"]            # re-send anything the CRM did not accept, every minute
+
+[[d1_databases]]
+binding = "DB"
+database_name = "weone-wa-gateway"
+database_id = "PASTE_THE_ID_FROM_wrangler_d1_create"
+
+[vars]
+# Add the ADS webhook after a comma if Click-to-WhatsApp ads point to this same number:
+#   ...,https://syytqcadmtgowckdnbqh.supabase.co/functions/v1/ads-meta-webhook
+TARGETS = "https://syytqcadmtgowckdnbqh.supabase.co/functions/v1/wa-webhook"
