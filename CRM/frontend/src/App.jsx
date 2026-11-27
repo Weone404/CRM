@@ -15,6 +15,7 @@ import { modalProps } from './components/ui/overlay';
 import { showToast } from './utils/toast';
 import { useRoute, navigate, setParams } from './utils/route';
 import TodayCard from './components/leads/TodayCard';
+import JustDialCard from './components/leads/JustDialCard';
 import LinkTile from './components/ui/LinkTile';
 import Sidebar, { groupTabs } from './components/ui/Sidebar';
 import SignalPill from './components/ui/SignalPill';
@@ -491,6 +492,7 @@ export default function App() {
             </div>
             <TodayCard leads={leads} segment={seg} refreshKey={leads} onCount={setTodayCount}
               onOpenLead={(l) => openLead(l, segmentLeads)} onOpenAds={(id) => { setSegment('meta'); setParams({ adlead: id }); }} />
+            {USE_SUPABASE && <JustDialCard segment={seg} leads={leads} refreshKey={leads.length} onOpenLead={(l) => openLead(l, segmentLeads)} />}
             <div className="glass-card p-4">
               <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
                 <h2 className="text-lg font-semibold text-glass-primary">{seg === 'charter' ? 'Book My Charter Leads' : 'We One Aviation Leads'}</h2>

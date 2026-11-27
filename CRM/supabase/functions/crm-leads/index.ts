@@ -5,7 +5,11 @@
 //                           { status: "created" | "duplicate", lead_id }
 // POST /crm-leads/charter   bookmycharter.in server only. Header: Authorization: Bearer <charter token>.
 //                           { status, lead_id, reference } or 422 { detail: { errors: {...} } }
-// verify_jwt is off: website visitors have no CRM account; /charter checks its own token (Supabase Vault).
+// GET|POST /crm-leads/justdial/<secret>   JustDial lead push (migration 149). One secret link per JustDial listing, given to
+//                           the JustDial account manager. Fields come as a query string, form or JSON (leadid, name, mobile,
+//                           phone, email, category, city, area, ...). Always answers "RECEIVED" for a known link, so
+//                           JustDial does not keep retrying; duplicates are handled in the database.
+// verify_jwt is off: website visitors and JustDial have no CRM account; /charter and /justdial check their own secrets.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
@@ -61,12 +65,42 @@ async function charter(req: Request): Promise<Response> {
   return json(req, 200, d);
 }
 
+async function justdial(req: Request, token: string): Promise<Response> {
+  const text = (body: string, status = 200) => new Response(body, { status, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+  if (!/^[0-9a-f]{64}$/.test(token)) return text("Unknown link", 404);
+  const data: Record<string, unknown> = {};
+  new URL(req.url).searchParams.forEach((v, k) => { data[k] = v; });
+  if (req.method === "POST") {
+    const raw = await req.text();
+    if (raw.length > 20000) return text("Too large", 413);
+    const type = (req.headers.get("Content-Type") ?? "").toLowerCase();
+    try {
+      if (type.includes("json") || /^\s*[{[]/.test(raw)) {
+        const j = JSON.parse(raw);
+        const o = Array.isArray(j) ? j[0] : j;
+        if (o && typeof o === "object") Object.assign(data, o);
+      } else if (type.includes("multipart/form-data")) {
+        const f = await new Response(raw, { headers: { "Content-Type": req.headers.get("Content-Type")! } }).formData();
+        f.forEach((v, k) => { data[k] = String(v); });
+      } else if (raw.trim()) {
+        new URLSearchParams(raw).forEach((v, k) => { data[k] = v; });
+      }
+    } catch { /* keep what came in the query string */ }
+  }
+  const { data: res, error } = await db.rpc("svc_jd_ingest", { p_token: token, p_data: data });
+  if (error) throw error;
+  if ((res as Record<string, unknown>)?.error === "unknown") return text("Unknown link", 404);
+  return text("RECEIVED");
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors(req) });
   const path = new URL(req.url).pathname.replace(/^.*\/crm-leads/, "").replace(/\/+$/, "");
   try {
     if (req.method === "POST" && path === "/ingest") return await ingest(req);
     if (req.method === "POST" && path === "/charter") return await charter(req);
+    const jd = /^\/justdial\/([^/]+)$/.exec(path);
+    if (jd && (req.method === "GET" || req.method === "POST")) return await justdial(req, jd[1]);
     return json(req, 404, { detail: "Not found" });
   } catch (e) {
     console.error("crm-leads error", String(e));

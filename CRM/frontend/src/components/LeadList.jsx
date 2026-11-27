@@ -41,10 +41,13 @@ export default function LeadList({ leads, onSelectLead, segment = 'aviation' }) 
 
   const demoBooked = leads.filter((l) => l.demo?.status === 'scheduled');
   const hot = leads.filter((l) => temperature(l) === 'hot');
+  const isJd = (l) => /just\s*dial/i.test(l.utm_source || '');
+  const jd = leads.filter(isJd);
   let filteredLeads;
   if (filter === 'all') filteredLeads = leads;
   else if (filter === 'demo') filteredLeads = demoBooked;
   else if (filter === 'hot') filteredLeads = hot;
+  else if (filter === 'justdial') filteredLeads = jd;
   else if (filter === 'closed') filteredLeads = closedWith(closure[closedSub].value);
   else filteredLeads = buckets[filter] || [];
 
@@ -72,6 +75,7 @@ export default function LeadList({ leads, onSelectLead, segment = 'aviation' }) 
         {tab('pending', `Pending (${count('pending')})`, 'bg-orange-600 text-white')}
         {!isCharter && tab('hot', `🔥 Hot (${hot.length})`, 'bg-red-600 text-white')}
         {!isCharter && tab('demo', `Demo booked (${demoBooked.length})`, 'bg-emerald-600 text-white')}
+        {(jd.length > 0 || filter === 'justdial') && tab('justdial', `JustDial (${jd.length})`, 'bg-orange-500 text-white')}
         {tab('in-progress', `In Progress (${count('in-progress')})`, 'bg-sky-600 text-white')}
         {tab('interested', `Interested (${count('interested')})`, 'bg-green-600 text-white')}
         {tab('ppl', `PPL (${count('ppl')})`, 'bg-teal-600 text-white')}
@@ -118,7 +122,10 @@ export default function LeadList({ leads, onSelectLead, segment = 'aviation' }) 
             </div>
             <LeadSignals lead={lead} />
             {lead.last_note && <div className="mt-2 p-2 glass-subtle text-sm text-glass-primary text-center">💬 {lead.last_note}</div>}
-            <div className="mt-2 text-xs text-glass-muted">📅 Created: {formatDate(lead.created_at)}{isCharter && lead.utm_source ? ` · ${lead.utm_source}` : ''}</div>
+            <div className="mt-2 text-xs text-glass-muted flex flex-wrap items-center gap-x-1.5 gap-y-1">
+              <span>📅 Created: {formatDate(lead.created_at)}{isCharter && lead.utm_source && !isJd(lead) ? ` · ${lead.utm_source}` : ''}</span>
+              {isJd(lead) && <span className="inline-flex items-center px-2 py-0.5 rounded-full font-semibold" style={{ background: 'rgba(255,111,0,0.12)', color: '#B34700' }}>JustDial{lead.utm_medium ? ` · ${lead.utm_medium}` : ''}</span>}
+            </div>
           </div>
         ))}
       </div>

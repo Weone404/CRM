@@ -83,3 +83,6 @@
 @media (prefers-reduced-motion: reduce) { .lp-reveal, .lp-sheet { animation: none; } .lp-chip, .lp-day, .lp-btn, .lp-choice, .lp-outcome { transition: none; } }
 .lp-summary { min-width: 0; max-width: 100%; }
 .lp-section { min-width: 0; overflow-wrap: anywhere; }
+
+/* JustDial card */
+.jd-n { width: 20px; height: 20px; border-radius: 999px; background: #FF6F00; color: #fff; font-size: 11px; display: inline-grid; place-items: center; flex-shrink: 0; margin-top: 1px; }
