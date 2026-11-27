@@ -50,6 +50,7 @@ const Amazon = lazy(() => import('./components/Amazon'));
 const Ads = lazy(() => import('./components/Ads'));
 const AdsMeta = lazy(() => import('./components/AdsMeta'));
 const AdsLeads = lazy(() => import('./components/AdsLeads'));
+const WhatsApp = lazy(() => import('./components/WhatsApp'));
 
 // Tabs the birthday popup is allowed to appear over: the landing tab plus the
 // two people-facing views. Anywhere else it would be an interruption.
@@ -109,6 +110,14 @@ export default function App() {
     try { const v = localStorage.getItem('lead_segment'); return v === 'charter' || v === 'meta' ? v : 'aviation'; } catch { return 'aviation'; }
   });
   const setSegment = (value) => { setSegmentState(value); try { localStorage.setItem('lead_segment', value); } catch { /* ignore */ } };
+  // #/leads?lead=<id> (e.g. "Open lead" in a WhatsApp chat) opens that lead once the list has it.
+  useEffect(() => {
+    const want = route.tab === 'leads' ? route.params?.lead : null;
+    if (!want || !leads.length) return;
+    const l = leads.find((x) => x.id === want);
+    if (l) { if (l.segment === 'charter') setSegment('charter'); else if (segment === 'meta') setSegment('aviation'); openLead(l); }
+    setParams({ lead: undefined });
+  }, [route.tab, route.params?.lead, leads]); // eslint-disable-line react-hooks/exhaustive-deps
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showMore, setShowMore] = useState(false);
   const [vw, setVw] = useState(() => (typeof window === 'undefined' ? 390 : window.innerWidth));
@@ -148,6 +157,23 @@ export default function App() {
     return loadAccess('api_ads_access', employee, setAdsAccess);
   }, [employee]);
   const canAccessAds = USE_SUPABASE && !!adsAccess?.can_view;
+  // WhatsApp section (Supabase backend only): Admin, plus people Admin grants in WhatsApp > Settings > Who can open WhatsApp.
+  const [waAccess, setWaAccess] = useState(null);
+  useEffect(() => {
+    if (!employee || !USE_SUPABASE) { setWaAccess(null); return undefined; }
+    return loadAccess('api_wa_access', employee, setWaAccess);
+  }, [employee]);
+  const canAccessWa = USE_SUPABASE && !!waAccess?.can_view;
+  // Chats waiting for a person: the WhatsApp badge in the navigation (once a minute, only while the CRM is on screen).
+  const [waNeeds, setWaNeeds] = useState(0);
+  useEffect(() => {
+    if (!canAccessWa) return undefined;
+    let live = true;
+    const pull = () => { if (document.visibilityState !== 'visible') return; import('./components/adsKit').then((m) => m.rpc('api_wa_overview'))
+      .then((o) => { if (live) setWaNeeds(o?.needs_human || 0); }, () => {}); };
+    pull(); const i = setInterval(pull, 60000);
+    return () => { live = false; clearInterval(i); };
+  }, [canAccessWa]);
   // Leads > Meta Leads: the same records as Meta Ads > Leads (people who filled the Meta lead form), counted here for the tab.
   const [metaCount, setMetaCount] = useState(null);
   useEffect(() => {
@@ -317,6 +343,7 @@ export default function App() {
     canGoogle && { id: 'google', label: 'Google', icon: 'search' },
     canGoogle && { id: 'content', label: 'Content', icon: 'image' },
     canAccessAds && { id: 'metaads', label: 'Meta Ads', icon: 'send' },
+    canAccessWa && { id: 'whatsapp', label: 'WhatsApp', icon: 'chat' },
     USE_SUPABASE && department === 'Admin' && { id: 'connections', label: 'Connections & keys', icon: 'lock' },
     USE_SUPABASE && department === 'Admin' && { id: 'settings', label: 'Settings', icon: 'settings' },
     isEmployeeSession && { id: 'profile', label: 'My Profile', icon: 'profile' },
@@ -348,9 +375,9 @@ export default function App() {
     navigate(id);
   };
   const untouchedCount = canAccessLeads ? leads.filter((l) => !l.first_contacted_at && !l.closed && !l.closure_outcome).length : 0;
-  const navBadges = { leads: untouchedCount || 0 };
+  const navBadges = { leads: untouchedCount || 0, whatsapp: waNeeds || 0 };
   // Phones: the most used sections in the bar (about 72px each); everything else in the grouped "More" sheet.
-  const PHONE_FIRST = ['home', 'leads', 'tasks', 'students', 'google', 'metaads'];
+  const PHONE_FIRST = ['home', 'leads', 'whatsapp', 'tasks', 'students', 'google', 'metaads'];
   const ordered = [...PHONE_FIRST.map((id) => tabs.find((t) => t.id === id)).filter(Boolean), ...tabs.filter((t) => !PHONE_FIRST.includes(t.id))];
   const slots = Math.min(5, Math.max(3, Math.floor(vw / 72)));
   const barItems = ordered.length <= slots ? ordered : ordered.slice(0, slots - 1);
@@ -520,6 +547,7 @@ export default function App() {
           {activeTab === 'gbp' && googlePages.gbp && <GoogleBusiness />}
           {activeTab === 'ads' && canAccessAds && <Ads access={adsAccess} />}
           {activeTab === 'metaads' && canAccessAds && <AdsMeta access={adsAccess} />}
+          {activeTab === 'whatsapp' && canAccessWa && <WhatsApp access={waAccess} />}
           {activeTab === 'settings' && USE_SUPABASE && department === 'Admin' && <div className="space-y-4">{accountCard}<PhoneApp notifications={canAccessAmazon} /><BusinessEmail />
             <button type="button" onClick={() => navigate('connections')} className="glass-card tile-link w-full p-4 flex items-center justify-between gap-3 text-left">
               <span><span className="block font-semibold text-glass-primary">API keys, tokens and connections</span><span className="block text-sm text-glass-secondary">Now all in one place: Setup &gt; Connections &amp; keys</span></span>

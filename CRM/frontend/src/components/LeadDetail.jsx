@@ -3,7 +3,7 @@
 //   Phones: a bottom sheet, actions first, a Save bar that stays at the bottom.
 //   Tablet / desktop: two columns (update on the right, profile and history on the left).
 // Saves: the call result through the existing Leads API (onContact), everything else through api_lead_ws_save.
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { displayPhone, formatRelativeTime } from '../utils/formatters';
 import QuoteGenerator from './QuoteGenerator';
@@ -17,6 +17,9 @@ import { TEMP, temperature } from '../utils/leadPlan';
 import { DemoBooking, NotesBox, Section, StudentCard, Timeline, WhenToConnect, historyOf, payloadOf, profileOf,
   saveWorkspace, setDemoStatus, useWorkspace, EMPTY_PROFILE } from './leads/LeadPlanner';
 import './leads/leads.css';
+import { USE_SUPABASE } from '../backend/mode';
+
+const LeadWhatsApp = lazy(() => import('./whatsapp/LeadWhatsApp'));
 
 const OUTCOMES = [
   ['Interested', 'Interested', '#34C759', 'checkCircle'],
@@ -135,6 +138,7 @@ export default function LeadDetail({ lead, onClose, onContact, onRefresh, nextLe
             {/* body */}
             <div className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 sm:px-6 py-3 sm:py-4">
               <QuickActions phone={lead.phone} email={lead.email} name={lead.name} waText={waText} className="mb-3" />
+              {USE_SUPABASE && <Suspense fallback={null}><LeadWhatsApp leadId={lead.id} /></Suspense>}
               <div className="grid gap-3 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.15fr)] items-start">
                 {/* right on desktop, first on phones: what to do now */}
                 <div className="space-y-3 min-w-0">
